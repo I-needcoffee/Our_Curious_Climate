@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CircleMarker, MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { CircleMarker, MapContainer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Loader2, X } from 'lucide-react';
 import type { EPWMetadata } from '../lib/epwParser';
 import { CARTO_LIGHT_ALL_WATER_HEX } from '../lib/constants';
+import { BasemapLayer, readBasemapStyle } from './BasemapLayer';
 import {
   findWindMapStation,
   loadWindStationsNearEpw,
@@ -106,6 +107,7 @@ export function WindStationPickerModal({
   const [selected, setSelected] = useState<IemWindStationSelection | null>(initialSelection);
   /** Next stays disabled until the user clicks a station (auto-suggested default does not count). */
   const [userPickedStation, setUserPickedStation] = useState(false);
+  const [basemapStyle] = useState(readBasemapStyle);
 
   useEffect(() => {
     if (!open) return;
@@ -329,10 +331,7 @@ export function WindStationPickerModal({
               scrollWheelZoom
               style={{ background: CARTO_LIGHT_ALL_WATER_HEX }}
             >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              />
+              <BasemapLayer style={basemapStyle} />
               <MapInvalidateSize ready={!loading && !fatalError} />
               <MapFitEpwAndStations
                 epwLat={epwLat}

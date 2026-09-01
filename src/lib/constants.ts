@@ -1,11 +1,11 @@
 import { DIFFERENCE_DIVERGING_COLORS, DIFFERENCE_DIVERGING_ID } from './differenceDivergingColor';
 
 /**
- * Water fill aligned with Carto light basemaps (Positron vector `water` layer uses `#d4dadc`;
- * `light_all` PNG tiles match this cool grey‑blue). Used behind the map, map shell, and
- * light‑theme dashboard canvas so empty areas match ocean on the opening screen.
+ * Water fill aligned with OpenFreeMap Positron (`water` layer `rgb(194, 200, 202)`).
+ * Used behind the map, map shell, and light‑theme dashboard canvas so empty areas match ocean
+ * on the opening screen.
  */
-export const CARTO_LIGHT_ALL_WATER_HEX = '#d4dadc';
+export const CARTO_LIGHT_ALL_WATER_HEX = '#c2c8ca';
 
 /** Outdoor comfort green — CMYK 77, 22, 89, 7 (≈ #37B91A). */
 export const OUTDOOR_COMFORT_GREEN_HEX = '#37B91A';

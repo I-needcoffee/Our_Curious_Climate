@@ -1,10 +1,11 @@
 import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet';
+import { MapContainer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Search, Upload, ExternalLink, Database, CloudLightning, Loader2 } from 'lucide-react';
 import L from 'leaflet';
 import { parseEPW, ParsedEPW, attachParsedEpwSource } from '../lib/epwParser';
 import { CARTO_LIGHT_ALL_WATER_HEX } from '../lib/constants';
+import { BasemapLayer, BasemapStyleToggle, readBasemapStyle, writeBasemapStyle, type BasemapStyle } from './BasemapLayer';
 import {
   CANADA_NRC_FUTURE_TMY_KML_URL,
   CANADA_NRC_FUTURE_KML_SOURCE_ID,
@@ -956,6 +957,7 @@ export function MapSelector({
   onShowOneBuildingPinsChange,
 }: MapSelectorProps) {
   const [search, setSearch] = useState('');
+  const [basemapStyle, setBasemapStyle] = useState<BasemapStyle>(readBasemapStyle);
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -1586,7 +1588,10 @@ export function MapSelector({
   };
 
   return (
-    <div className="h-full w-full relative" style={{ backgroundColor: CARTO_LIGHT_ALL_WATER_HEX }}>
+    <div
+      className="h-full w-full relative"
+      style={{ backgroundColor: basemapStyle === 'satellite' ? '#1c1917' : CARTO_LIGHT_ALL_WATER_HEX }}
+    >
       {loading && (
         <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-[2000] flex items-center justify-center">
           <div className="flex flex-col items-center gap-4">
@@ -1785,6 +1790,14 @@ export function MapSelector({
         </div>
       </div>
 
+      <BasemapStyleToggle
+        value={basemapStyle}
+        onChange={style => {
+          setBasemapStyle(style);
+          writeBasemapStyle(style);
+        }}
+      />
+
       {showFuture ? (
         <div className="pointer-events-auto absolute top-20 left-1/2 z-[1000] max-h-[calc(100dvh-5.5rem)] w-[min(100%,20rem)] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-3.5 shadow-hard-lg sm:top-24 sm:max-h-[calc(100dvh-6.5rem)] sm:w-full sm:max-w-md">
           <h3 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-gray-900">
@@ -1898,14 +1911,11 @@ export function MapSelector({
             className="h-full w-full"
             minZoom={2}
             zoomControl={false}
-            style={{ background: CARTO_LIGHT_ALL_WATER_HEX }}
+            style={{ background: basemapStyle === 'satellite' ? '#1c1917' : CARTO_LIGHT_ALL_WATER_HEX }}
           >
             <LocationFlyer center={mapCenter} zoom={mapZoom} />
             <FitBoundsController points={fitBoundsPoints} trigger={fitBoundsTrigger} />
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            />
+            <BasemapLayer style={basemapStyle} />
             <MapZoomTracker onZoom={onLiveMapZoom} />
             <MapBoundsListener groups={activeGroupsWithOneBuilding} setVisibleGroups={setVisibleGroups} />
             <ObKmlBoundsListener
@@ -2089,7 +2099,7 @@ export function MapSelector({
         ) : (
           <div
             className="h-full w-full flex items-center justify-center"
-            style={{ backgroundColor: CARTO_LIGHT_ALL_WATER_HEX }}
+            style={{ backgroundColor: basemapStyle === 'satellite' ? '#1c1917' : CARTO_LIGHT_ALL_WATER_HEX }}
           >
             <p className="text-gray-500">Initializing map...</p>
           </div>

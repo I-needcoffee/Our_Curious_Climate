@@ -12,6 +12,7 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
     "clsx": "^2.1.1",
     "d3": "^7.9.0",
     "html-to-image": "^1.11.13",
@@ -22,6 +23,7 @@
     "leaflet": "^1.9.4",
     "lodash": "^4.17.21",
     "lucide-react": "^0.546.0",
+    "maplibre-gl": "^5.9.0",
     "rc-slider": "^11.1.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
