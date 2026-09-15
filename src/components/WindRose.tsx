@@ -481,8 +481,11 @@ export function WindRose({
     const roseWidth = 350;
     const roseHeight = 420;
     const roseBottomReserve = 74;
-    const roseMargin = 20;
-    const roseRadius = (Math.min(roseWidth, roseHeight - roseBottomReserve) / 2 - roseMargin);
+    const compassLabelPad = 12;
+    const overflowPad = 24;
+    const plotHalf = Math.min(roseWidth, roseHeight - roseBottomReserve) / 2;
+    const roseRadius = plotHalf - compassLabelPad - overflowPad;
+    const overflowRadiusMax = roseRadius + overflowPad;
 
     const roseSvg = d3.select(roseRef.current);
     roseSvg.selectAll("*").remove();
@@ -494,11 +497,6 @@ export function WindRose({
         "transform",
         `translate(${roseWidth / 2}, ${(roseHeight - roseBottomReserve) / 2})`
       );
-
-    const hoursScaleNote =
-      scaleMaxOverride == null
-        ? `Hours · outer circle ${Math.round(annualMaxHours)} (annual max, any direction)`
-        : `Hours · outer circle ${Math.round(scaleMaxHours)} (annual max ${Math.round(annualMaxHours)})`;
 
     // Group wind by direction
     const binSize = 360 / numBins;
@@ -546,8 +544,23 @@ export function WindRose({
     const scaleMax = Math.max(1, scaleMaxHours);
     const rScaleRose = d3.scaleLinear()
       .domain([0, scaleMax])
-      .range([0, roseRadius])
-      .clamp(true);
+      .range([0, roseRadius]);
+    // Extend linearly past the outer circle. If a direction would leave the
+    // plot, compress that whole stacked bar to overflowRadiusMax and mark it.
+    const radiusOf = (hours: number, totalCount: number) => {
+      const totalR = rScaleRose(Math.max(totalCount, hours));
+      if (totalR <= overflowRadiusMax) return Math.max(0, rScaleRose(hours));
+      if (totalCount <= 0) return 0;
+      return (Math.max(0, hours) / totalCount) * overflowRadiusMax;
+    };
+    const binHitsDrawCap = (totalCount: number) => rScaleRose(totalCount) > overflowRadiusMax + 0.5;
+    const anyOverflow = bins.some(b => b.totalCount > scaleMax + 0.5);
+    const hoursScaleNote =
+      scaleMaxOverride == null
+        ? `Hours · outer circle ${Math.round(annualMaxHours)} (annual max, any direction)`
+        : anyOverflow
+          ? `Hours · outer circle ${Math.round(scaleMaxHours)} · bars past the circle exceed this scale`
+          : `Hours · outer circle ${Math.round(scaleMaxHours)} (annual max ${Math.round(annualMaxHours)})`;
 
     // Draw grid circles (always include the outer scale max)
     const ticks = roseScaleTicks(scaleMax);
@@ -605,20 +618,6 @@ export function WindRose({
       .style("stroke-width", '1px')
       .style("stroke-opacity", 0.5);
 
-    // Draw labels (16 compass points)
-    roseG.selectAll(".rose-label")
-      .data(d3.range(16))
-      .join("text")
-      .attr("class", "rose-label")
-      .attr("x", d => (roseRadius + 10) * Math.sin(d * (360/16) * Math.PI / 180))
-      .attr("y", d => -(roseRadius + 10) * Math.cos(d * (360/16) * Math.PI / 180))
-      .attr("dy", "0.35em")
-      .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
-      .style("font-size", d => d % 2 === 0 ? `10px` : `8px`)
-      .style("font-weight", d => d % 4 === 0 ? "bold" : "normal")
-      .text(d => COMPASS_POINTS[d]);
-
     // Stack the buckets
     const stack = d3.stack<any>()
       .keys(d3.range(numBuckets).map(String))
@@ -636,6 +635,7 @@ export function WindRose({
             inner: d[0],
             outer: d[1],
             count: d[1] - d[0],
+            totalCount: d.data.totalCount,
             bucketIndex: Number(s.key),
             extent: extent
           });
@@ -643,14 +643,20 @@ export function WindRose({
       });
     });
 
+    const visibleWedges = wedges.filter(d => {
+      const inner = radiusOf(d.inner, d.totalCount);
+      const outer = radiusOf(d.outer, d.totalCount);
+      return outer - inner > 0.25;
+    });
+
     const arc = d3.arc<any>()
-      .innerRadius(d => rScaleRose(d.inner))
-      .outerRadius(d => rScaleRose(d.outer))
+      .innerRadius(d => radiusOf(d.inner, d.totalCount))
+      .outerRadius(d => Math.max(radiusOf(d.inner, d.totalCount), radiusOf(d.outer, d.totalCount)))
       .startAngle(d => (d.angle - binSize / 2) * Math.PI / 180)
       .endAngle(d => (d.angle + binSize / 2) * Math.PI / 180);
 
     roseG.selectAll(".rose-wedge")
-      .data(wedges)
+      .data(visibleWedges)
       .join("path")
       .attr("class", "rose-wedge")
       .attr("d", arc)
@@ -661,7 +667,53 @@ export function WindRose({
       .style("stroke", "#ffffff")
       .style("stroke-width", "0.5px")
       .append("title")
-      .text(d => `Direction: ${Math.round(d.angle)}°\nRange: ${d.extent[0].toFixed(1)} - ${d.extent[1].toFixed(1)} ${cUnit}\nCount: ${d.count} hours`);
+      .text(d => {
+        const over = d.totalCount > scaleMax;
+        return `Direction: ${Math.round(d.angle)}°\nRange: ${d.extent[0].toFixed(1)} - ${d.extent[1].toFixed(1)} ${cUnit}\nCount: ${d.count} hours${
+          over ? `\nDirection total ${Math.round(d.totalCount)} hrs exceeds outer circle (${Math.round(scaleMax)} hrs)` : ''
+        }`;
+      });
+
+    const overflowChevrons = bins.filter(b => binHitsDrawCap(b.totalCount));
+    roseG
+      .selectAll(".rose-overflow")
+      .data(overflowChevrons)
+      .join("path")
+      .attr("class", "rose-overflow")
+      .attr("d", d => {
+        const ang = (d.angle * Math.PI) / 180;
+        const r = overflowRadiusMax;
+        const tipR = r + 8;
+        const half = 4.6;
+        const tipX = tipR * Math.sin(ang);
+        const tipY = -tipR * Math.cos(ang);
+        const bx = r * Math.sin(ang);
+        const by = -r * Math.cos(ang);
+        const p1x = bx + half * Math.cos(ang);
+        const p1y = by + half * Math.sin(ang);
+        const p2x = bx - half * Math.cos(ang);
+        const p2y = by - half * Math.sin(ang);
+        return `M${p1x},${p1y}L${tipX},${tipY}L${p2x},${p2y}Z`;
+      })
+      .style("fill", heatmapTextColor)
+      .style("stroke", roseCardFill(theme))
+      .style("stroke-width", "1.2px")
+      .style("opacity", 0.9)
+      .append("title")
+      .text(d => `${Math.round(d.totalCount)} hrs exceeds outer circle (${Math.round(scaleMax)} hrs)`);
+
+    roseG.selectAll(".rose-label")
+      .data(d3.range(16))
+      .join("text")
+      .attr("class", "rose-label")
+      .attr("x", d => (overflowRadiusMax + 10) * Math.sin(d * (360/16) * Math.PI / 180))
+      .attr("y", d => -(overflowRadiusMax + 10) * Math.cos(d * (360/16) * Math.PI / 180))
+      .attr("dy", "0.35em")
+      .attr("text-anchor", "middle")
+      .style("fill", heatmapTextColor)
+      .style("font-size", d => d % 2 === 0 ? `10px` : `8px`)
+      .style("font-weight", d => d % 4 === 0 ? "bold" : "normal")
+      .text(d => COMPASS_POINTS[d]);
 
     // --- Wind Rose Legend ---
     const legendItemWidth = 50;
@@ -1100,7 +1152,8 @@ export function WindRose({
                   </div>
                   <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     Auto uses the busiest direction over the full year ({Math.round(annualMaxHours)} hrs), so day/night and
-                    season views stay comparable.
+                    season views stay comparable. If you set a lower max, bars continue past the circle; a mark shows
+                    directions that still exceed it.
                   </p>
                   <div className="px-2">
                     <Slider
