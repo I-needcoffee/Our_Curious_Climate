@@ -147,7 +147,7 @@ export function ChartTypeMenu({
       aria-haspopup="menu"
       aria-expanded={open}
       aria-controls={menuId}
-      className={`${chartToolbarTypePillClass(theme)} shrink-0 pl-0.5 pr-0.5 group-hover/chart-type:pr-1.5 group-focus-within/chart-type:pr-1.5 @lg:pl-1.5 @lg:pr-1.5 @lg:group-hover/chart-type:pr-2.5 @lg:group-focus-within/chart-type:pr-2.5 ${
+      className={`${chartToolbarTypePillClass(theme)} shrink-0 pl-0.5 pr-0.5 group-hover/chart-type:pr-1.5 group-focus-within/chart-type:pr-1.5 @lg:pl-1 @lg:pr-1 @lg:group-hover/chart-type:pr-2 @lg:group-focus-within/chart-type:pr-2 ${
         disabled ? 'cursor-default opacity-60' : ''
       }`}
       title={`Change chart type Â· ${typeLabel}`}
@@ -156,11 +156,11 @@ export function ChartTypeMenu({
         <Icon className={CHART_TOOLBAR_ICON_GLYPH_CLASS} />
       </span>
       <span
-        className={`pointer-events-none flex max-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out motion-reduce:transition-none group-hover/chart-type:max-w-[10rem] group-hover/chart-type:pl-1 group-hover/chart-type:opacity-100 group-focus-within/chart-type:max-w-[10rem] group-focus-within/chart-type:pl-1 group-focus-within/chart-type:opacity-100 @lg:group-hover/chart-type:max-w-[16rem] @lg:group-focus-within/chart-type:max-w-[16rem] ${CHART_TOOLBAR_TITLE_TEXT_CLASS} text-gray-800`}
+        className={`pointer-events-none flex max-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out motion-reduce:transition-none group-hover/chart-type:max-w-[10rem] group-hover/chart-type:pl-1 group-hover/chart-type:opacity-100 group-focus-within/chart-type:max-w-[10rem] group-focus-within/chart-type:pl-1 group-focus-within/chart-type:opacity-100 @lg:group-hover/chart-type:max-w-[12rem] @lg:group-focus-within/chart-type:max-w-[12rem] ${CHART_TOOLBAR_TITLE_TEXT_CLASS} text-gray-800`}
         aria-hidden
       >
         <span className="truncate font-medium">{typeLabel}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-4 @lg:w-4 @2xl:h-5 @2xl:w-5" strokeWidth={2.25} />
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-3.5 @lg:w-3.5" strokeWidth={2.25} />
       </span>
     </button>
   );

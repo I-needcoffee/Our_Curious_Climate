@@ -38,7 +38,7 @@ export function VariableChartSelect({
       >
         <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
         <ChevronDown
-          className="h-3 w-3 shrink-0 opacity-70 @lg:h-4 @lg:w-4 @2xl:h-5 @2xl:w-5"
+          className="h-3 w-3 shrink-0 opacity-70 @lg:h-3.5 @lg:w-3.5"
           strokeWidth={2.25}
           aria-hidden
         />
@@ -129,8 +129,8 @@ export function VariableChartSelect({
   const visualClass = `${measureClass} ${truncateClass} min-w-0 flex-1 text-left`;
 
   const wrapOuter = fillRow
-    ? 'relative flex min-w-0 flex-1 basis-0 max-w-full min-h-5 items-center justify-start @lg:min-h-8 @2xl:min-h-10'
-    : 'relative flex min-w-0 flex-1 max-w-full min-h-5 items-center justify-start @lg:min-h-8 @2xl:min-h-10';
+    ? 'relative flex min-w-0 flex-1 basis-0 max-w-full min-h-5 items-center justify-start @lg:min-h-7'
+    : 'relative flex min-w-0 flex-1 max-w-full min-h-5 items-center justify-start @lg:min-h-7';
 
   const hitLayerClass =
     'absolute inset-0 z-[1] box-border cursor-pointer rounded-md appearance-none bg-transparent opacity-0 ' +
@@ -138,8 +138,8 @@ export function VariableChartSelect({
     `${CHART_TOOLBAR_TITLE_TEXT_CLASS}`;
 
   const layeredSurface = dark
-    ? 'pointer-events-none relative z-0 flex h-5 w-full min-w-0 max-w-full items-center gap-0 rounded-md px-px border border-transparent hover:border-white/15 hover:bg-white/5 @lg:h-8 @2xl:h-10'
-    : 'pointer-events-none relative z-0 flex h-5 w-full min-w-0 max-w-full items-center gap-0 rounded-md px-px border border-transparent hover:border-gray-200 hover:bg-gray-50/90 @lg:h-8 @2xl:h-10';
+    ? 'pointer-events-none relative z-0 flex h-5 w-full min-w-0 max-w-full items-center gap-0 rounded-md px-px border border-transparent hover:border-white/15 hover:bg-white/5 @lg:h-7'
+    : 'pointer-events-none relative z-0 flex h-5 w-full min-w-0 max-w-full items-center gap-0 rounded-md px-px border border-transparent hover:border-gray-200 hover:bg-gray-50/90 @lg:h-7';
 
   return (
     <div id={domId} ref={wrapRef} className={wrapOuter}>
@@ -158,12 +158,12 @@ export function VariableChartSelect({
         {'  '}
       </span>
       <div
-        className="relative h-5 shrink-0 @lg:h-8 @2xl:h-10"
+        className="relative h-5 shrink-0 @lg:h-7"
         style={widthPx != null ? { width: `${widthPx}px`, maxWidth: '100%' } : { maxWidth: '100%' }}
       >
         <div className={`${layeredSurface} ${dark ? 'hover:text-gray-200' : 'hover:text-gray-900'}`}>
           <span className={visualClass}>{selectedLabel}</span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-gray-500 @lg:h-4 @lg:w-4 @2xl:h-5 @2xl:w-5" strokeWidth={2.25} aria-hidden />
+          <ChevronDown className="h-3 w-3 shrink-0 text-gray-500 @lg:h-3.5 @lg:w-3.5" strokeWidth={2.25} aria-hidden />
         </div>
         <select
           id={selectId}

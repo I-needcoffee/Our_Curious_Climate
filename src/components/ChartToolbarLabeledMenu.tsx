@@ -70,7 +70,7 @@ export function ChartToolbarLabeledMenu({
         onClick={() => setOpen(v => !v)}
       >
         {label}
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-4 @lg:w-4 @2xl:h-5 @2xl:w-5" strokeWidth={2.25} aria-hidden />
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-3.5 @lg:w-3.5" strokeWidth={2.25} aria-hidden />
       </button>
 
       {open ? (

@@ -480,7 +480,7 @@ export function WindRose({
     // --- Wind Rose ---
     const roseWidth = 350;
     const roseHeight = 420;
-    const roseBottomReserve = 62;
+    const roseBottomReserve = 74;
     const roseMargin = 20;
     const roseRadius = (Math.min(roseWidth, roseHeight - roseBottomReserve) / 2 - roseMargin);
 
@@ -492,21 +492,13 @@ export function WindRose({
       .append("g")
       .attr(
         "transform",
-        `translate(${roseWidth / 2}, ${(roseHeight - roseBottomReserve) / 2 + 5})`
+        `translate(${roseWidth / 2}, ${(roseHeight - roseBottomReserve) / 2})`
       );
 
-    roseSvg.append("text")
-      .attr("x", roseWidth / 2)
-      .attr("y", 11)
-      .attr("text-anchor", "middle")
-      .style("font-size", "8px")
-      .style("fill", heatmapTextColor)
-      .style("opacity", 0.8)
-      .text(
-        scaleMaxOverride == null
-          ? `Hours · outer circle ${Math.round(annualMaxHours)} (annual max, any direction)`
-          : `Hours · outer circle ${Math.round(scaleMaxHours)} (annual max ${Math.round(annualMaxHours)})`
-      );
+    const hoursScaleNote =
+      scaleMaxOverride == null
+        ? `Hours · outer circle ${Math.round(annualMaxHours)} (annual max, any direction)`
+        : `Hours · outer circle ${Math.round(scaleMaxHours)} (annual max ${Math.round(annualMaxHours)})`;
 
     // Group wind by direction
     const binSize = 360 / numBins;
@@ -675,15 +667,24 @@ export function WindRose({
     const legendItemWidth = 50;
     const totalLegendWidth = numBuckets * legendItemWidth;
     const legendG = roseSvg.append("g")
-      .attr("transform", `translate(${(roseWidth - totalLegendWidth) / 2}, ${roseHeight - 28})`);
+      .attr("transform", `translate(${(roseWidth - totalLegendWidth) / 2}, ${roseHeight - 48})`);
 
     const legendItems = d3.range(numBuckets);
     const itemHeight = 14;
 
+    legendG.append("text")
+      .attr("x", totalLegendWidth / 2)
+      .attr("y", 0)
+      .attr("text-anchor", "middle")
+      .style("font-size", `9px`)
+      .style("font-weight", "bold")
+      .style("fill", heatmapTextColor)
+      .text(`Wind Speed (${cUnit})`);
+
     legendG.selectAll(".rose-legend-item")
       .data(legendItems)
       .join("g")
-      .attr("transform", (d, i) => `translate(${i * legendItemWidth}, 0)`)
+      .attr("transform", (d, i) => `translate(${i * legendItemWidth}, 8)`)
       .each(function(d) {
         const itemG = d3.select(this);
         const extent = bucketScale.invertExtent(d);
@@ -708,12 +709,12 @@ export function WindRose({
 
     legendG.append("text")
       .attr("x", totalLegendWidth / 2)
-      .attr("y", -10)
+      .attr("y", 36)
       .attr("text-anchor", "middle")
-      .style("font-size", `9px`)
-      .style("font-weight", "bold")
+      .style("font-size", "7.5px")
       .style("fill", heatmapTextColor)
-      .text(`Wind Speed (${cUnit})`);
+      .style("opacity", 0.8)
+      .text(hoursScaleNote);
 
   }, [filteredData, data, compareData, showDifference, variables, colorVar, gradientId, gradients, filter, dimensions.width, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours]);
 
