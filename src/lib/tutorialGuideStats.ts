@@ -16,6 +16,8 @@ import {
   computeUtciCategoryShares,
   computeUtciComfortMatrix,
   formatUtciCategoryLabel,
+  getUtciComfortPeriodById,
+  rowMatchesUtciComfortPeriod,
   type UtciCategoryShare,
   type UtciComfortMatrix,
   UTCI_COMFORT_CATEGORY,
@@ -30,6 +32,8 @@ export type TutorialUtciQuickStats = {
   comfortPercent: number;
   hoursCounted: number;
   comfortMatrix: UtciComfortMatrix;
+  /** Set when the guided comfort table has a period selected. */
+  isolationLabel: string | null;
 };
 
 export type TutorialNvQuickStats = {
@@ -326,14 +330,19 @@ export function computeTutorialUtciQuickStats(opts: {
   const { rows, filter, live } = opts;
   if (!rows?.length) return null;
 
-  const filtered = filterRows(rows, filter);
-  if (!filtered.length) return null;
+  const globallyFiltered = filterRows(rows, filter);
+  if (!globallyFiltered.length) return null;
+
+  const focusPeriod = getUtciComfortPeriodById(live.utciFocusPeriodId);
+  const shareRows = focusPeriod
+    ? globallyFiltered.filter(row => rowMatchesUtciComfortPeriod(row, focusPeriod, filter))
+    : globallyFiltered;
 
   const includeSun = live.includeSun ?? true;
   const includeWind = live.includeWind ?? true;
   const modelOpts = { includeSun, includeWind };
 
-  const { shares, comfortPercent, hoursCounted } = computeUtciCategoryShares(filtered, modelOpts);
+  const { shares, comfortPercent, hoursCounted } = computeUtciCategoryShares(shareRows, modelOpts);
   const comfortMatrix = computeUtciComfortMatrix(rows, filter);
 
   return {
@@ -341,6 +350,7 @@ export function computeTutorialUtciQuickStats(opts: {
     comfortPercent,
     hoursCounted,
     comfortMatrix,
+    isolationLabel: focusPeriod?.label ?? null,
   };
 }
 

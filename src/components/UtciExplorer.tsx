@@ -1203,7 +1203,15 @@ export function UtciExplorer({
 
   // Calculate local stats for filtered data
   const stats = (() => {
-    const filteredData = utciData.filter(d => rowPassesGlobalFilters(d, filter));
+    const focusPeriod =
+      tutorialEnabled && tutorialFocusPeriodId
+        ? getUtciComfortPeriodById(tutorialFocusPeriodId)
+        : undefined;
+    const filteredData = utciData.filter(d =>
+      focusPeriod
+        ? rowMatchesUtciComfortPeriod(d, focusPeriod, filter)
+        : rowPassesGlobalFilters(d, filter)
+    );
 
     if (showDifference && compareData) {
       const diffs = filteredData.map(d => {

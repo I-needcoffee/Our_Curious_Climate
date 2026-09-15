@@ -28,11 +28,22 @@ export const DEFAULT_GLOBAL_FILTER: GlobalFilterState = {
   temperatureHiC: 26,
 };
 
+/** Inclusive month range; wraps when start > end (e.g. winter Dec–Feb). */
+export function monthInRange(month: number, startMonth: number, endMonth: number): boolean {
+  return startMonth <= endMonth
+    ? month >= startMonth && month <= endMonth
+    : month >= startMonth || month <= endMonth;
+}
+
+/** Inclusive hour range; wraps when start > end (e.g. night 20–6). */
+export function hourInWrappedRange(hour: number, startHour: number, endHour: number): boolean {
+  return startHour <= endHour
+    ? hour >= startHour && hour <= endHour
+    : hour >= startHour || hour <= endHour;
+}
+
 export function rowsMatchSeasonHours(row: EPWDataRow, f: GlobalFilterState): boolean {
-  const isMonthMatch =
-    f.startMonth <= f.endMonth
-      ? row.month >= f.startMonth && row.month <= f.endMonth
-      : row.month >= f.startMonth || row.month <= f.endMonth;
+  const isMonthMatch = monthInRange(row.month, f.startMonth, f.endMonth);
   const isHourMatch = row.hour >= f.startHour && row.hour <= f.endHour;
   return isMonthMatch && isHourMatch;
 }

@@ -8,7 +8,7 @@ import { InteractiveLegend, GradientDef } from './InteractiveLegend';
 import type { ChartType, CompareWindRoseSharedControls } from '../App';
 import { X, Settings2 } from 'lucide-react';
 import type { GlobalFilterState } from '../lib/globalFilter';
-import { rowPassesGlobalFilters } from '../lib/globalFilter';
+import { hourInWrappedRange, monthInRange, rowPassesGlobalFilters } from '../lib/globalFilter';
 import { UnitSystem } from '../App';
 import { ChartTypeMenu } from './ChartTypeMenu';
 import {
@@ -62,6 +62,60 @@ interface WindRoseProps {
 }
 
 const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+
+type WindRoseSeason = 'annual' | 'spring' | 'summer' | 'fall' | 'winter';
+type WindRoseHours = 'all' | 'day' | 'night';
+
+const WIND_ROSE_SEASONS: { id: WindRoseSeason; label: string; months: [number, number] | null }[] = [
+  { id: 'annual', label: 'Annual', months: null },
+  { id: 'spring', label: 'Spring', months: [3, 5] },
+  { id: 'summer', label: 'Summer', months: [6, 8] },
+  { id: 'fall', label: 'Fall', months: [9, 11] },
+  { id: 'winter', label: 'Winter', months: [12, 2] },
+];
+
+const WIND_ROSE_HOURS: { id: WindRoseHours; label: string; hint: string; hours: [number, number] | null }[] = [
+  { id: 'all', label: 'All hours', hint: '00:00–23:59', hours: null },
+  { id: 'day', label: 'Day', hint: '7am–7pm', hours: [7, 19] },
+  { id: 'night', label: 'Night', hint: '7pm–7am', hours: [20, 6] },
+];
+
+function rowMatchesWindRoseWindow(
+  row: EPWDataRow,
+  season: WindRoseSeason,
+  hours: WindRoseHours
+): boolean {
+  const seasonDef = WIND_ROSE_SEASONS.find(s => s.id === season);
+  const hoursDef = WIND_ROSE_HOURS.find(h => h.id === hours);
+  if (seasonDef?.months) {
+    if (!monthInRange(row.month as number, seasonDef.months[0], seasonDef.months[1])) return false;
+  }
+  if (hoursDef?.hours) {
+    if (!hourInWrappedRange(row.hour as number, hoursDef.hours[0], hoursDef.hours[1])) return false;
+  }
+  return true;
+}
+
+/** Hours of wind (speed > 0) in each direction bin. */
+function directionHourTotals(rows: EPWDataRow[], numBins: number): number[] {
+  const binSize = 360 / numBins;
+  const totals = new Array(numBins).fill(0);
+  for (const d of rows) {
+    const dir = d.windDirection as number;
+    const speed = d.windSpeed as number;
+    if (dir === null || dir === undefined || Number.isNaN(dir) || !(speed > 0)) continue;
+    let binIndex = Math.round(dir / binSize) % numBins;
+    if (binIndex < 0) binIndex += numBins;
+    totals[binIndex]++;
+  }
+  return totals;
+}
+
+function roseScaleTicks(maxHours: number): number[] {
+  if (!(maxHours > 0)) return [1];
+  const inner = d3.ticks(0, maxHours, 4).filter(t => t > 0 && t < maxHours * 0.97);
+  return [...inner, maxHours];
+}
 
 export function WindRose({
   data: epwData,
@@ -154,6 +208,9 @@ export function WindRose({
   const [speedFilterEnabled, setSpeedFilterEnabled] = useState(false);
   const [speedThreshold, setSpeedThreshold] = useState(unitSystem === 'imperial' ? 10 : 4.5);
   const [speedFilterType, setSpeedFilterType] = useState<'above' | 'below'>('above');
+  const [roseSeason, setRoseSeason] = useState<WindRoseSeason>('annual');
+  const [roseHours, setRoseHours] = useState<WindRoseHours>('all');
+  const [scaleMaxOverride, setScaleMaxOverride] = useState<number | null>(null);
 
   const prevUnitSystem = useRef(unitSystem);
   useEffect(() => {
@@ -226,14 +283,16 @@ export function WindRose({
     [epwCompareRaw]
   );
 
-  // Filter data based on global filter and comfort filters
+  // Filter data based on global filter, local season/hours, and comfort filters
   const getFilteredData = (
     targetData: EPWDataRow[],
     dryBulbLookup: Map<number, number> | null,
-    rowMetadata?: EPWMetadata
+    rowMetadata?: EPWMetadata,
+    roseWindow: { season: WindRoseSeason; hours: WindRoseHours } = { season: roseSeason, hours: roseHours }
   ) => {
     return targetData.filter(d => {
       if (!rowPassesGlobalFilters(d, filter)) return false;
+      if (!rowMatchesWindRoseWindow(d, roseWindow.season, roseWindow.hours)) return false;
 
       let isTempMatch = true;
       if (tempFilterEnabled) {
@@ -266,6 +325,8 @@ export function WindRose({
     [
       data,
       filter,
+      roseSeason,
+      roseHours,
       tempFilterEnabled,
       tempThreshold,
       tempFilterType,
@@ -285,6 +346,8 @@ export function WindRose({
     [
       compareData,
       filter,
+      roseSeason,
+      roseHours,
       tempFilterEnabled,
       tempThreshold,
       tempFilterType,
@@ -297,6 +360,43 @@ export function WindRose({
       metadata,
     ]
   );
+
+  const annualMaxHours = useMemo(() => {
+    const annualPrimary = getFilteredData(data, epwDryBulbLookup, metadata, {
+      season: 'annual',
+      hours: 'all',
+    });
+    const annualCompare =
+      compareData && compareData.length
+        ? getFilteredData(compareData, compareEpwDryBulbLookup, compareMetadata ?? metadata, {
+            season: 'annual',
+            hours: 'all',
+          })
+        : [];
+    const maxPrimary = d3.max(directionHourTotals(annualPrimary, numBins)) || 0;
+    const maxCompare = annualCompare.length
+      ? d3.max(directionHourTotals(annualCompare, numBins)) || 0
+      : 0;
+    return Math.max(maxPrimary, maxCompare, 1);
+  }, [
+    data,
+    compareData,
+    filter,
+    tempFilterEnabled,
+    tempThreshold,
+    tempFilterType,
+    speedFilterEnabled,
+    speedThreshold,
+    speedFilterType,
+    unitSystem,
+    epwDryBulbLookup,
+    compareEpwDryBulbLookup,
+    metadata,
+    compareMetadata,
+    numBins,
+  ]);
+
+  const scaleMaxHours = scaleMaxOverride ?? annualMaxHours;
 
   const tutorialLive = useTutorialLiveOptional();
   const tutorialReport = tutorialLive?.report;
@@ -369,6 +469,19 @@ export function WindRose({
         `translate(${roseWidth / 2}, ${(roseHeight - roseBottomReserve) / 2 + 5})`
       );
 
+    roseSvg.append("text")
+      .attr("x", roseWidth / 2)
+      .attr("y", 11)
+      .attr("text-anchor", "middle")
+      .style("font-size", "8px")
+      .style("fill", heatmapTextColor)
+      .style("opacity", 0.8)
+      .text(
+        scaleMaxOverride == null
+          ? `Hours · outer circle ${Math.round(annualMaxHours)} (annual max, any direction)`
+          : `Hours · outer circle ${Math.round(scaleMaxHours)} (annual max ${Math.round(annualMaxHours)})`
+      );
+
     // Group wind by direction
     const binSize = 360 / numBins;
     
@@ -412,13 +525,14 @@ export function WindRose({
       }
     });
 
-    const maxTotalCount = d3.max(bins, d => d.totalCount) || 1;
+    const scaleMax = Math.max(1, scaleMaxHours);
     const rScaleRose = d3.scaleLinear()
-      .domain([0, maxTotalCount])
-      .range([0, roseRadius]);
+      .domain([0, scaleMax])
+      .range([0, roseRadius])
+      .clamp(true);
 
-    // Draw grid circles
-    const ticks = rScaleRose.ticks(4);
+    // Draw grid circles (always include the outer scale max)
+    const ticks = roseScaleTicks(scaleMax);
     roseG.selectAll(".rose-grid")
       .data(ticks)
       .join("circle")
@@ -426,8 +540,27 @@ export function WindRose({
       .attr("r", d => rScaleRose(d))
       .style("fill", "none")
       .style("stroke", theme === 'dark' ? '#4b5563' : '#e5e7eb')
-      .style("stroke-width", '1.5px')
+      .style("stroke-width", d => d === scaleMax ? '2px' : '1.5px')
       .style("stroke-dasharray", "none");
+
+    const ringLabelAngle = (100 * Math.PI) / 180;
+    roseG.selectAll(".rose-grid-label")
+      .data(ticks)
+      .join("text")
+      .attr("class", "rose-grid-label")
+      .attr("x", d => rScaleRose(d) * Math.sin(ringLabelAngle))
+      .attr("y", d => -rScaleRose(d) * Math.cos(ringLabelAngle))
+      .attr("dx", 4)
+      .attr("dy", "0.35em")
+      .attr("text-anchor", "start")
+      .style("fill", heatmapTextColor)
+      .style("font-size", "8px")
+      .style("font-weight", d => d === scaleMax ? "700" : "500")
+      .style("paint-order", "stroke")
+      .style("stroke", theme === 'dark' ? '#1f2937' : '#ffffff')
+      .style("stroke-width", "3px")
+      .style("stroke-linejoin", "round")
+      .text(d => (d === scaleMax ? `${Math.round(d)} hrs` : `${Math.round(d)}`));
 
     // Draw axis lines (16 compass points)
     roseG.selectAll(".rose-axis")
@@ -544,7 +677,7 @@ export function WindRose({
       .style("fill", heatmapTextColor)
       .text(`Wind Speed (${cUnit})`);
 
-  }, [filteredData, data, compareData, showDifference, variables, colorVar, gradientId, gradients, filter, dimensions.width, numBins, unitSystem, heatmapTextColor, theme]);
+  }, [filteredData, data, compareData, showDifference, variables, colorVar, gradientId, gradients, filter, dimensions.width, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours]);
 
   return (
     <div 
@@ -800,6 +933,99 @@ export function WindRose({
                       </div>
                     </div>
                   )}
+                </div>
+
+                <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                  <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Time of day
+                  </label>
+                  <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                    Isolates this rose only. Night is 7pm–7am for night ventilation.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {WIND_ROSE_HOURS.map(preset => {
+                      const selected = roseHours === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          title={preset.hint}
+                          onClick={() => setRoseHours(preset.id)}
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
+                            selected
+                              ? 'border-blue-600 bg-blue-600 text-white'
+                              : 'border-gray-300 bg-transparent text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Season
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {WIND_ROSE_SEASONS.map(preset => {
+                      const selected = roseSeason === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setRoseSeason(preset.id)}
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
+                            selected
+                              ? 'border-blue-600 bg-blue-600 text-white'
+                              : 'border-gray-300 bg-transparent text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Outer circle (hours)
+                    </label>
+                    {scaleMaxOverride != null ? (
+                      <button
+                        type="button"
+                        onClick={() => setScaleMaxOverride(null)}
+                        className="text-[10px] font-bold uppercase tracking-tight text-blue-500 hover:text-blue-600"
+                      >
+                        Reset auto
+                      </button>
+                    ) : (
+                      <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                        Auto
+                      </span>
+                    )}
+                  </div>
+                  <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                    Auto uses the busiest direction over the full year ({Math.round(annualMaxHours)} hrs), so day/night and
+                    season views stay comparable.
+                  </p>
+                  <div className="px-2">
+                    <Slider
+                      min={1}
+                      max={Math.max(Math.round(annualMaxHours * 2), 50)}
+                      value={Math.round(scaleMaxHours)}
+                      onChange={v => setScaleMaxOverride(v as number)}
+                      trackStyle={{ backgroundColor: '#3b82f6' }}
+                      handleStyle={{ borderColor: '#3b82f6', backgroundColor: '#fff' }}
+                    />
+                    <div className="mt-1 flex justify-between">
+                      <span className="text-[10px] text-gray-400">1</span>
+                      <span className="text-xs font-bold text-blue-500">{Math.round(scaleMaxHours)} hrs</span>
+                      <span className="text-[10px] text-gray-400">
+                        {Math.max(Math.round(annualMaxHours * 2), 50)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 

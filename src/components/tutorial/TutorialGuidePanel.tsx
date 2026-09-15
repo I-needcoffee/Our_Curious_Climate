@@ -158,7 +158,7 @@ export function TutorialGuidePanel({
         <h3 className={`mb-2 text-xs font-bold uppercase tracking-wider ${muted}`}>Quick numbers</h3>
         <p className={`mb-3 text-[11px] leading-snug ${muted}`}>
           {slot.type === 'utci'
-            ? 'Modeled UTCI from your file, using the same month, hour, and temperature filters as Settings. Sun and wind options match the chart card.'
+            ? 'Modeled UTCI from your file, using the same month, hour, and temperature filters as Settings. Sun, wind, and a selected period in the table also limit the percentages below.'
             : slot.type === 'naturalVentilation'
               ? 'Outdoor dry-bulb and humidity from your file, using the same month and hour filters as Settings. Criteria presets match the chart card.'
               : 'From your loaded file, using the same month and hour filters as the chart (if the chart is empty, this still reflects the file).'}
@@ -275,10 +275,11 @@ export function TutorialGuidePanel({
               >
                 <p className={`text-[10px] font-semibold uppercase tracking-wide ${muted}`}>Time in comfort</p>
                 <p className="mt-0.5 text-lg font-bold tabular-nums" style={{ color: OUTDOOR_COMFORT_GREEN_HEX }}>
-                  {utciStats.comfortPercent.toFixed(1)}%
+                  {Number.isFinite(utciStats.comfortPercent) ? `${utciStats.comfortPercent.toFixed(1)}%` : '—'}
                 </p>
                 <p className={`mt-0.5 text-[10px] leading-snug ${muted}`}>
-                  No thermal stress \u00B7 {utciStats.hoursCounted.toLocaleString()} filtered hours
+                  No thermal stress · {utciStats.hoursCounted.toLocaleString()} filtered hours
+                  {utciStats.isolationLabel ? ` · ${utciStats.isolationLabel}` : ''}
                 </p>
               </div>
 
