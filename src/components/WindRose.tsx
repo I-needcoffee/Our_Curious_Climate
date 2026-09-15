@@ -62,38 +62,64 @@ interface WindRoseProps {
 }
 
 const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** Quiet gaps between compass labels: SE–SSE and NW–NNW. */
+const RING_LABEL_BEARINGS_DEG = [146.25, 326.25];
 
 type WindRoseSeason = 'annual' | 'spring' | 'summer' | 'fall' | 'winter';
 type WindRoseHours = 'all' | 'day' | 'night';
+type HourMonthRange = [number, number];
 
-const WIND_ROSE_SEASONS: { id: WindRoseSeason; label: string; months: [number, number] | null }[] = [
-  { id: 'annual', label: 'Annual', months: null },
+const WIND_ROSE_SEASONS: { id: WindRoseSeason; label: string; months: HourMonthRange }[] = [
+  { id: 'annual', label: 'Annual', months: [1, 12] },
   { id: 'spring', label: 'Spring', months: [3, 5] },
   { id: 'summer', label: 'Summer', months: [6, 8] },
   { id: 'fall', label: 'Fall', months: [9, 11] },
   { id: 'winter', label: 'Winter', months: [12, 2] },
 ];
 
-const WIND_ROSE_HOURS: { id: WindRoseHours; label: string; hint: string; hours: [number, number] | null }[] = [
-  { id: 'all', label: 'All hours', hint: '00:00–23:59', hours: null },
+const WIND_ROSE_HOURS: { id: WindRoseHours; label: string; hint: string; hours: HourMonthRange }[] = [
+  { id: 'all', label: 'All hours', hint: '12am–11pm', hours: [0, 23] },
   { id: 'day', label: 'Day', hint: '7am–7pm', hours: [7, 19] },
-  { id: 'night', label: 'Night', hint: '7pm–7am', hours: [20, 6] },
+  { id: 'night', label: 'Night', hint: '8pm–7am', hours: [20, 6] },
 ];
+
+function rangesEqual(a: HourMonthRange, b: HourMonthRange): boolean {
+  return a[0] === b[0] && a[1] === b[1];
+}
+
+function formatHourClock(hour: number): string {
+  const suffix = hour >= 12 && hour < 24 ? 'pm' : 'am';
+  const hr = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hr}${suffix}`;
+}
+
+function formatHourRange(range: HourMonthRange): string {
+  const label = `${formatHourClock(range[0])}–${formatHourClock(range[1])}`;
+  return range[0] <= range[1] ? label : `${label} wrap`;
+}
+
+function formatMonthRange(range: HourMonthRange): string {
+  const label = `${MONTH_SHORT[range[0] - 1]}–${MONTH_SHORT[range[1] - 1]}`;
+  return range[0] <= range[1] ? label : `${label} wrap`;
+}
 
 function rowMatchesWindRoseWindow(
   row: EPWDataRow,
-  season: WindRoseSeason,
-  hours: WindRoseHours
+  months: HourMonthRange,
+  hours: HourMonthRange
 ): boolean {
-  const seasonDef = WIND_ROSE_SEASONS.find(s => s.id === season);
-  const hoursDef = WIND_ROSE_HOURS.find(h => h.id === hours);
-  if (seasonDef?.months) {
-    if (!monthInRange(row.month as number, seasonDef.months[0], seasonDef.months[1])) return false;
-  }
-  if (hoursDef?.hours) {
-    if (!hourInWrappedRange(row.hour as number, hoursDef.hours[0], hoursDef.hours[1])) return false;
-  }
+  if (!monthInRange(row.month as number, months[0], months[1])) return false;
+  if (!hourInWrappedRange(row.hour as number, hours[0], hours[1])) return false;
   return true;
+}
+
+function roseRingColor(theme: 'light' | 'dark'): string {
+  return theme === 'dark' ? '#4b5563' : '#d1d5db';
+}
+
+function roseCardFill(theme: 'light' | 'dark'): string {
+  return theme === 'dark' ? '#1f2937' : '#ffffff';
 }
 
 /** Hours of wind (speed > 0) in each direction bin. */
@@ -208,8 +234,8 @@ export function WindRose({
   const [speedFilterEnabled, setSpeedFilterEnabled] = useState(false);
   const [speedThreshold, setSpeedThreshold] = useState(unitSystem === 'imperial' ? 10 : 4.5);
   const [speedFilterType, setSpeedFilterType] = useState<'above' | 'below'>('above');
-  const [roseSeason, setRoseSeason] = useState<WindRoseSeason>('annual');
-  const [roseHours, setRoseHours] = useState<WindRoseHours>('all');
+  const [monthRange, setMonthRange] = useState<HourMonthRange>([1, 12]);
+  const [hourRange, setHourRange] = useState<HourMonthRange>([0, 23]);
   const [scaleMaxOverride, setScaleMaxOverride] = useState<number | null>(null);
 
   const prevUnitSystem = useRef(unitSystem);
@@ -288,11 +314,11 @@ export function WindRose({
     targetData: EPWDataRow[],
     dryBulbLookup: Map<number, number> | null,
     rowMetadata?: EPWMetadata,
-    roseWindow: { season: WindRoseSeason; hours: WindRoseHours } = { season: roseSeason, hours: roseHours }
+    roseWindow: { months: HourMonthRange; hours: HourMonthRange } = { months: monthRange, hours: hourRange }
   ) => {
     return targetData.filter(d => {
       if (!rowPassesGlobalFilters(d, filter)) return false;
-      if (!rowMatchesWindRoseWindow(d, roseWindow.season, roseWindow.hours)) return false;
+      if (!rowMatchesWindRoseWindow(d, roseWindow.months, roseWindow.hours)) return false;
 
       let isTempMatch = true;
       if (tempFilterEnabled) {
@@ -325,8 +351,8 @@ export function WindRose({
     [
       data,
       filter,
-      roseSeason,
-      roseHours,
+      monthRange,
+      hourRange,
       tempFilterEnabled,
       tempThreshold,
       tempFilterType,
@@ -346,8 +372,8 @@ export function WindRose({
     [
       compareData,
       filter,
-      roseSeason,
-      roseHours,
+      monthRange,
+      hourRange,
       tempFilterEnabled,
       tempThreshold,
       tempFilterType,
@@ -363,14 +389,14 @@ export function WindRose({
 
   const annualMaxHours = useMemo(() => {
     const annualPrimary = getFilteredData(data, epwDryBulbLookup, metadata, {
-      season: 'annual',
-      hours: 'all',
+      months: [1, 12],
+      hours: [0, 23],
     });
     const annualCompare =
       compareData && compareData.length
         ? getFilteredData(compareData, compareEpwDryBulbLookup, compareMetadata ?? metadata, {
-            season: 'annual',
-            hours: 'all',
+            months: [1, 12],
+            hours: [0, 23],
           })
         : [];
     const maxPrimary = d3.max(directionHourTotals(annualPrimary, numBins)) || 0;
@@ -539,28 +565,40 @@ export function WindRose({
       .attr("class", "rose-grid")
       .attr("r", d => rScaleRose(d))
       .style("fill", "none")
-      .style("stroke", theme === 'dark' ? '#4b5563' : '#e5e7eb')
+      .style("stroke", roseRingColor(theme))
       .style("stroke-width", d => d === scaleMax ? '2px' : '1.5px')
       .style("stroke-dasharray", "none");
 
-    const ringLabelAngle = (100 * Math.PI) / 180;
-    roseG.selectAll(".rose-grid-label")
-      .data(ticks)
+    const ringLabelItems = ticks.flatMap(tick =>
+      RING_LABEL_BEARINGS_DEG.map(bearing => ({ tick, bearing }))
+    );
+    const ringFill = roseRingColor(theme);
+    const ringHalo = roseCardFill(theme);
+    roseG
+      .selectAll(".rose-grid-label")
+      .data(ringLabelItems)
       .join("text")
       .attr("class", "rose-grid-label")
-      .attr("x", d => rScaleRose(d) * Math.sin(ringLabelAngle))
-      .attr("y", d => -rScaleRose(d) * Math.cos(ringLabelAngle))
-      .attr("dx", 4)
-      .attr("dy", "0.35em")
-      .attr("text-anchor", "start")
-      .style("fill", heatmapTextColor)
-      .style("font-size", "8px")
-      .style("font-weight", d => d === scaleMax ? "700" : "500")
+      .attr("transform", d => {
+        const r = rScaleRose(d.tick);
+        const rad = (d.bearing * Math.PI) / 180;
+        const x = r * Math.sin(rad);
+        const y = -r * Math.cos(rad);
+        let rot = d.bearing;
+        if (rot > 90 && rot < 270) rot += 180;
+        return `translate(${x},${y}) rotate(${rot})`;
+      })
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "central")
+      .style("fill", ringFill)
+      .style("font-size", "7.5px")
+      .style("font-weight", d => (d.tick === scaleMax ? "600" : "500"))
+      .style("letter-spacing", "0.02em")
       .style("paint-order", "stroke")
-      .style("stroke", theme === 'dark' ? '#1f2937' : '#ffffff')
-      .style("stroke-width", "3px")
+      .style("stroke", ringHalo)
+      .style("stroke-width", "2.5px")
       .style("stroke-linejoin", "round")
-      .text(d => (d === scaleMax ? `${Math.round(d)} hrs` : `${Math.round(d)}`));
+      .text(d => `${Math.round(d.tick)}`);
 
     // Draw axis lines (16 compass points)
     roseG.selectAll(".rose-axis")
@@ -571,7 +609,7 @@ export function WindRose({
       .attr("y1", 0)
       .attr("x2", d => roseRadius * Math.sin(d * (360/16) * Math.PI / 180))
       .attr("y2", d => -roseRadius * Math.cos(d * (360/16) * Math.PI / 180))
-      .style("stroke", theme === 'dark' ? '#4b5563' : '#e5e7eb')
+      .style("stroke", roseRingColor(theme))
       .style("stroke-width", '1px')
       .style("stroke-opacity", 0.5);
 
@@ -936,21 +974,26 @@ export function WindRose({
                 </div>
 
                 <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
-                  <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Time of day
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Time of day
+                    </label>
+                    <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {formatHourRange(hourRange)}
+                    </span>
+                  </div>
                   <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                    Isolates this rose only. Night is 7pm–7am for night ventilation.
+                    Isolates this rose only. Night wraps 8pm–7am for night ventilation.
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {WIND_ROSE_HOURS.map(preset => {
-                      const selected = roseHours === preset.id;
+                      const selected = rangesEqual(hourRange, preset.hours);
                       return (
                         <button
                           key={preset.id}
                           type="button"
                           title={preset.hint}
-                          onClick={() => setRoseHours(preset.id)}
+                          onClick={() => setHourRange(preset.hours)}
                           className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
                             selected
                               ? 'border-blue-600 bg-blue-600 text-white'
@@ -962,17 +1005,44 @@ export function WindRose({
                       );
                     })}
                   </div>
-                  <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Season
-                  </label>
+                  <div className="px-2">
+                    <Slider
+                      range
+                      allowCross
+                      min={0}
+                      max={23}
+                      value={hourRange}
+                      onChange={v => {
+                        if (Array.isArray(v)) setHourRange([v[0], v[1]]);
+                      }}
+                      trackStyle={{ backgroundColor: '#3b82f6' }}
+                      handleStyle={[
+                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
+                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
+                      ]}
+                    />
+                    <div className="mt-1 flex justify-between">
+                      <span className="text-[10px] text-gray-400">12am</span>
+                      <span className="text-[10px] text-gray-400">12pm</span>
+                      <span className="text-[10px] text-gray-400">11pm</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Months
+                    </label>
+                    <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {formatMonthRange(monthRange)}
+                    </span>
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
                     {WIND_ROSE_SEASONS.map(preset => {
-                      const selected = roseSeason === preset.id;
+                      const selected = rangesEqual(monthRange, preset.months);
                       return (
                         <button
                           key={preset.id}
                           type="button"
-                          onClick={() => setRoseSeason(preset.id)}
+                          onClick={() => setMonthRange(preset.months)}
                           className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
                             selected
                               ? 'border-blue-600 bg-blue-600 text-white'
@@ -983,6 +1053,28 @@ export function WindRose({
                         </button>
                       );
                     })}
+                  </div>
+                  <div className="px-2">
+                    <Slider
+                      range
+                      allowCross
+                      min={1}
+                      max={12}
+                      value={monthRange}
+                      onChange={v => {
+                        if (Array.isArray(v)) setMonthRange([v[0], v[1]]);
+                      }}
+                      trackStyle={{ backgroundColor: '#3b82f6' }}
+                      handleStyle={[
+                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
+                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
+                      ]}
+                    />
+                    <div className="mt-1 flex justify-between">
+                      <span className="text-[10px] text-gray-400">Jan</span>
+                      <span className="text-[10px] text-gray-400">Jun</span>
+                      <span className="text-[10px] text-gray-400">Dec</span>
+                    </div>
                   </div>
                 </div>
 

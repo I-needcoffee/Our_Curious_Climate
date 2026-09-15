@@ -171,10 +171,10 @@ export function SingleModeLayout({
     return (
       <div
         key={`${layoutMode}-${slot.id || `slot-${globalIndex}`}`}
-        className={`${baseClass} group/slot relative ${dragRing} ${slot.type === 'empty' ? '!overflow-visible' : ''}`}
+        className={`${baseClass} group/slot relative @container ${dragRing} ${slot.type === 'empty' ? '!overflow-visible' : ''}`}
         data-export-grid4x2-corner={exportGrid4x2UtciCorner ? 'utci' : undefined}
         data-slot-shell="true"
-        style={{ contain: 'layout style' }}
+        style={{ contain: 'layout style inline-size' }}
         onDragOver={e => onDragOver(e, globalIndex)}
         onDragLeave={e => onDragLeave(e, globalIndex)}
         onDrop={e => onDrop(e, globalIndex)}
