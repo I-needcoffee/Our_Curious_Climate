@@ -20,6 +20,7 @@ import {
 } from '../lib/chartToolbarLayout';
 import { ExportHeaderCaption, exportCaptionLinesWithUnit } from './ExportHeaderCaption';
 import { CardModal } from './CardModal';
+import { WrappingRangeSlider } from './WrappingRangeSlider';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
 import { sequentialHeatmapColorFn } from '../lib/heatmapColorAdjust';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
@@ -1036,7 +1037,7 @@ export function WindRose({
                     </span>
                   </div>
                   <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                    Isolates this rose only. Night wraps 8pm–7am for night ventilation.
+                    Isolates this rose only. Drag a handle past the other to wrap around midnight (Night is 8pm–7am).
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {WIND_ROSE_HOURS.map(preset => {
@@ -1059,20 +1060,14 @@ export function WindRose({
                     })}
                   </div>
                   <div className="px-2">
-                    <Slider
-                      range
-                      allowCross
+                    <WrappingRangeSlider
                       min={0}
                       max={23}
                       value={hourRange}
-                      onChange={v => {
-                        if (Array.isArray(v)) setHourRange([v[0], v[1]]);
-                      }}
-                      trackStyle={{ backgroundColor: '#3b82f6' }}
-                      handleStyle={[
-                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
-                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
-                      ]}
+                      onChange={setHourRange}
+                      theme={theme}
+                      startAriaLabel="Start hour"
+                      endAriaLabel="End hour"
                     />
                     <div className="mt-1 flex justify-between">
                       <span className="text-[10px] text-gray-400">12am</span>
@@ -1107,21 +1102,18 @@ export function WindRose({
                       );
                     })}
                   </div>
+                  <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                    Drag a handle past the other to wrap around the year (Winter is Dec–Feb).
+                  </p>
                   <div className="px-2">
-                    <Slider
-                      range
-                      allowCross
+                    <WrappingRangeSlider
                       min={1}
                       max={12}
                       value={monthRange}
-                      onChange={v => {
-                        if (Array.isArray(v)) setMonthRange([v[0], v[1]]);
-                      }}
-                      trackStyle={{ backgroundColor: '#3b82f6' }}
-                      handleStyle={[
-                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
-                        { borderColor: '#3b82f6', backgroundColor: '#fff' },
-                      ]}
+                      onChange={setMonthRange}
+                      theme={theme}
+                      startAriaLabel="Start month"
+                      endAriaLabel="End month"
                     />
                     <div className="mt-1 flex justify-between">
                       <span className="text-[10px] text-gray-400">Jan</span>
