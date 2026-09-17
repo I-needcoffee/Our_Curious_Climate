@@ -977,7 +977,7 @@ const filteredCompareData = (compareData || []).filter(d => {
 
       {!sunComparePairLegendInFooter && (
         <div
-          className="w-full min-w-0 flex-shrink-0 px-2 pt-1"
+          className="w-full min-w-0 flex-shrink-0 px-2 pt-1.5 pb-0.5"
           style={legendTrackPx != null ? { width: legendTrackPx } : undefined}
         >
           {interactiveLegendNode}
@@ -1188,7 +1188,7 @@ const filteredCompareData = (compareData || []).filter(d => {
 
       {sunComparePairLegendInFooter && (
         <div
-          className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1 pb-0.5 ${
+          className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
             theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
           }`}
           style={legendTrackPx != null ? { width: legendTrackPx } : undefined}

@@ -822,7 +822,7 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1 pb-0.5 ${
+              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
                 theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
               }`}
               style={
@@ -934,7 +934,7 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1 pb-0.5 ${
+              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
                 theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
               }`}
               style={
@@ -1070,7 +1070,7 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1 pb-0.5 ${
+              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
                 theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
               }`}
               style={
@@ -1188,7 +1188,7 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1 pb-0.5 ${
+              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
                 theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
               }`}
               style={

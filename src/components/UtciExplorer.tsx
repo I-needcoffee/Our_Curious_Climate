@@ -8,7 +8,7 @@ import { EPWDataRow } from '../lib/epwParser';
 // @ts-ignore
 import tc from 'jsthermalcomfort';
 import { Sun, Wind, X, Settings2 } from 'lucide-react';
-import { InteractiveLegend, GradientDef, getLegendBarHeightPx, getLegendLabelBasePx } from './InteractiveLegend';
+import { InteractiveLegend, GradientDef, getLegendBarHeightPx, getLegendLabelBasePx, DEFAULT_LEGEND_FONT_SCALE } from './InteractiveLegend';
 import { AggregationToolbar } from './AggregationToolbar';
 import type { ChartType, CompareUtciSharedControls } from '../App';
 import { UnitSystem } from '../App';
@@ -101,7 +101,7 @@ const utciCategoryScale = d3.scaleLinear<string>()
   .interpolate(d3.interpolateRgb);
 
 /** Matches `InteractiveLegend` default `fontScale` so UTCI footer legends share the same footprint */
-export const UTCI_LEGEND_FONT_SCALE = 0.72;
+export const UTCI_LEGEND_FONT_SCALE = DEFAULT_LEGEND_FONT_SCALE;
 
 /** Same as `DataExplorer` bar fill opacity on colored rects. */
 const LEGEND_FILL_OPACITY = 0.6;
@@ -109,10 +109,10 @@ const LEGEND_FILL_OPACITY = 0.6;
 const LEGEND_STRIP_SCALE = UTCI_LEGEND_FONT_SCALE;
 
 export function UtciCategoryLegendStrip({ theme }: { theme: 'light' | 'dark' }) {
-  const pad = 2.5 * LEGEND_STRIP_SCALE;
-  const gap = 1.5 * LEGEND_STRIP_SCALE;
+  const pad = 3.25 * LEGEND_STRIP_SCALE;
+  const gap = 2 * LEGEND_STRIP_SCALE;
   const titlePx = Math.round(9.5 * LEGEND_STRIP_SCALE);
-  const tickPx = 6.5 * LEGEND_STRIP_SCALE;
+  const tickPx = Math.max(8, 8.5 * LEGEND_STRIP_SCALE);
   const barH = getLegendBarHeightPx(LEGEND_STRIP_SCALE);
   const cats = Object.keys(UTCI_COLORS);
   const catColors = cats.map(k => UTCI_COLORS[k]);
@@ -139,7 +139,7 @@ export function UtciCategoryLegendStrip({ theme }: { theme: 'light' | 'dark' }) 
           }}
         />
       </div>
-      <div className="relative w-full" style={{ minHeight: `${Math.max(tickPx, 8)}px`, fontSize: `${tickPx}px` }}>
+      <div className="relative w-full" style={{ minHeight: `${Math.max(tickPx, 10)}px`, fontSize: `${tickPx}px` }}>
         <span
           className={`absolute left-0 top-0 max-w-[34%] truncate font-medium uppercase tracking-tight leading-none ${
             theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
@@ -174,8 +174,8 @@ export function UtciComfortTimeLegendStrip({
   highColor?: string;
   leftColor?: string;
 }) {
-  const pad = 2.5 * LEGEND_STRIP_SCALE;
-  const gap = 1.5 * LEGEND_STRIP_SCALE;
+  const pad = 3.25 * LEGEND_STRIP_SCALE;
+  const gap = 2 * LEGEND_STRIP_SCALE;
   const titlePx = Math.round(9.5 * LEGEND_STRIP_SCALE);
   const barH = getLegendBarHeightPx(LEGEND_STRIP_SCALE);
   const labelBasePx = getLegendLabelBasePx(barH, LEGEND_STRIP_SCALE);
@@ -212,7 +212,7 @@ export function UtciComfortTimeLegendStrip({
         {(['0%', '100%'] as const).map((label) => {
           const len = Math.max(1, label.length);
           const fitFactor = Math.min(1, 6 / len);
-          const labelPx = Math.max(5.5 * LEGEND_STRIP_SCALE, Math.floor(labelBasePx * fitFactor));
+          const labelPx = Math.max(8, Math.floor(labelBasePx * fitFactor));
           const isLeft = label === '0%';
           const fg = contrastText(isLeft ? leftBg : rightBg);
           const shadow =
@@ -1595,7 +1595,7 @@ export function UtciExplorer({
             <>
               <UtciCategoryLegendStrip theme={theme} />
               <p
-                className="m-0 mt-0.5 text-[8px] leading-snug font-normal text-gray-400 dark:text-gray-500"
+                className="m-0 mt-0.5 text-[9px] leading-snug font-normal text-gray-400 dark:text-gray-500"
               >
                 {utciLegendFootnote}
               </p>
@@ -1621,7 +1621,7 @@ export function UtciExplorer({
             <>
               <UtciComfortTimeLegendStrip theme={theme} />
               <p
-                className="m-0 mt-0.5 text-[8px] leading-snug font-normal text-gray-400 dark:text-gray-500"
+                className="m-0 mt-0.5 text-[9px] leading-snug font-normal text-gray-400 dark:text-gray-500"
               >
                 {utciLegendFootnote}
               </p>

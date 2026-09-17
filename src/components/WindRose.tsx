@@ -481,7 +481,7 @@ export function WindRose({
     // --- Wind Rose ---
     const roseWidth = 350;
     const roseHeight = 420;
-    const roseBottomReserve = 74;
+    const roseBottomReserve = 82;
     const compassLabelPad = 12;
     const overflowPad = 24;
     const plotHalf = Math.min(roseWidth, roseHeight - roseBottomReserve) / 2;
@@ -720,16 +720,16 @@ export function WindRose({
     const legendItemWidth = 50;
     const totalLegendWidth = numBuckets * legendItemWidth;
     const legendG = roseSvg.append("g")
-      .attr("transform", `translate(${(roseWidth - totalLegendWidth) / 2}, ${roseHeight - 48})`);
+      .attr("transform", `translate(${(roseWidth - totalLegendWidth) / 2}, ${roseHeight - 54})`);
 
     const legendItems = d3.range(numBuckets);
-    const itemHeight = 14;
+    const itemHeight = 16;
 
     legendG.append("text")
       .attr("x", totalLegendWidth / 2)
       .attr("y", 0)
       .attr("text-anchor", "middle")
-      .style("font-size", `9px`)
+      .style("font-size", `10px`)
       .style("font-weight", "bold")
       .style("fill", heatmapTextColor)
       .text(`Wind Speed (${cUnit})`);
@@ -737,7 +737,7 @@ export function WindRose({
     legendG.selectAll(".rose-legend-item")
       .data(legendItems)
       .join("g")
-      .attr("transform", (d, i) => `translate(${i * legendItemWidth}, 8)`)
+      .attr("transform", (d, i) => `translate(${i * legendItemWidth}, 10)`)
       .each(function(d) {
         const itemG = d3.select(this);
         const extent = bucketScale.invertExtent(d);
@@ -746,25 +746,25 @@ export function WindRose({
         const midVal = (extent[0] + extent[1]) / 2;
 
         itemG.append("rect")
-          .attr("width", 12)
+          .attr("width", 14)
           .attr("height", itemHeight)
           .attr("rx", 2)
           .style("fill", colorScale(midVal));
 
         itemG.append("text")
-          .attr("x", 16)
+          .attr("x", 18)
           .attr("y", itemHeight / 2)
           .attr("dy", "0.35em")
-          .style("font-size", `7px`)
+          .style("font-size", `8.5px`)
           .style("fill", heatmapTextColor)
           .text(`${extent[0].toFixed(1)}-${extent[1].toFixed(1)}`);
       });
 
     legendG.append("text")
       .attr("x", totalLegendWidth / 2)
-      .attr("y", 36)
+      .attr("y", 40)
       .attr("text-anchor", "middle")
-      .style("font-size", "7.5px")
+      .style("font-size", "8.5px")
       .style("fill", heatmapTextColor)
       .style("opacity", 0.8)
       .text(hoursScaleNote);

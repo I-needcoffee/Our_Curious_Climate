@@ -1161,7 +1161,7 @@ export function NaturalVentilationExplorer({
             highColor={NATURAL_VENTILATION_SUITABLE_BLUE_HEX}
           />
           {legendFootnote ? (
-            <p className="m-0 mt-0.5 text-[8px] font-normal leading-snug text-gray-400 dark:text-gray-500">
+            <p className="m-0 mt-0.5 text-[9px] font-normal leading-snug text-gray-400 dark:text-gray-500">
               {legendFootnote}
             </p>
           ) : null}

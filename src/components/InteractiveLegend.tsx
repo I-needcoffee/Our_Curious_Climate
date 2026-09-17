@@ -27,18 +27,21 @@ function blendOnto(surfaceHex: string, colorHex: string, opacity: number) {
     .formatHex();
 }
 
+/** Shared scale for `InteractiveLegend` and UTCI footer strips (tweak both together). */
+export const DEFAULT_LEGEND_FONT_SCALE = 0.78;
+
 /**
- * Shared pill height for `InteractiveLegend` and UTCI footer strips (tweak both together).
- * ~2/3 of the historical 16×scale to reduce vertical space while keeping labels readable.
+ * Shared pill height for `InteractiveLegend` and UTCI footer strips.
+ * Tall enough for in-bar numbers without stealing much chart space.
  */
 export function getLegendBarHeightPx(scale: number) {
-  return Math.max(6, Math.round(16 * scale * (2 / 3)));
+  return Math.max(11, Math.round(16 * scale));
 }
 
 /** Max label size (px) that still fits inside the rounded bar; uses most of the bar height. */
 export function getLegendLabelBasePx(barH: number, fontScale: number) {
-  const cap = Math.max(1, barH - 3);
-  return Math.max(6.5 * fontScale, Math.min(Math.floor(barH * 0.78), cap));
+  const cap = Math.max(1, barH - 2);
+  return Math.max(8, 8 * fontScale, Math.min(Math.floor(barH * 0.82), cap));
 }
 
 export interface GradientDef {
@@ -66,7 +69,7 @@ export function InteractiveLegend({
   setGradientId, 
   gradients, 
   theme = 'light',
-  fontScale = 0.72,
+  fontScale = DEFAULT_LEGEND_FONT_SCALE,
   isDifference = false,
   domId,
   footnote,
@@ -82,8 +85,8 @@ export function InteractiveLegend({
     domain = [variable.min, 0, variable.max];
   }
 
-  const pad = 2.5 * fontScale;
-  const gap = 1.5 * fontScale;
+  const pad = 3.25 * fontScale;
+  const gap = 2 * fontScale;
   const barH = getLegendBarHeightPx(fontScale);
   const barBg = legendSurface(theme);
   /** Keep end labels inside the rounded bar (avoids -50% translate on 0% / 100% clipping). */
@@ -191,7 +194,7 @@ export function InteractiveLegend({
               : '0 1px 2px rgba(255,255,255,0.35)';
           const len = Math.max(1, label.length);
           const fitFactor = Math.min(1, 6 / len);
-          const labelPx = Math.max(6.5 * fontScale, Math.floor(labelBasePx * fitFactor));
+          const labelPx = Math.max(8, Math.floor(labelBasePx * fitFactor));
 
           let pos: {
             left?: string | number;
@@ -297,7 +300,7 @@ export function InteractiveLegend({
         })}
       </div>
       {footnote ? (
-        <p className="m-0 mt-0.5 text-[8px] leading-snug font-normal text-gray-400 dark:text-gray-500">
+        <p className="m-0 mt-0.5 text-[9px] leading-snug font-normal text-gray-400 dark:text-gray-500">
           {footnote}
         </p>
       ) : null}
