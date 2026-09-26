@@ -1,7 +1,8 @@
-import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback, useSyncExternalStore } from 'react';
 import { MapContainer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, Upload, ExternalLink, Database, CloudLightning, Loader2 } from 'lucide-react';
+import { Search, Upload, ExternalLink, Database, CloudLightning, Loader2, MapPin, X } from 'lucide-react';
+import { dismissOnboarding, discoverPulseActive, ONBOARDING_KEYS, subscribeOnboarding } from '../lib/onboardingStorage';
 import L from 'leaflet';
 import { parseEPW, ParsedEPW, attachParsedEpwSource } from '../lib/epwParser';
 import { CARTO_LIGHT_ALL_WATER_HEX } from '../lib/constants';
@@ -442,7 +443,7 @@ interface MapSelectorProps {
   /** Last library the user picked (historical NREL vs future). Used when re-opening the map to add a comparison file. */
   mapLibraryMode?: 'historical' | 'future';
   onMapLibraryModeChange?: (mode: 'historical' | 'future') => void;
-  /** Controlled from App + SiteFooter map toggle. */
+  /** Full OneBuilding station catalog. Off until the user turns on More stations. */
   showOneBuildingPins?: boolean;
   onShowOneBuildingPinsChange?: (v: boolean) => void;
 }
@@ -956,6 +957,11 @@ export function MapSelector({
   showOneBuildingPins = false,
   onShowOneBuildingPinsChange,
 }: MapSelectorProps) {
+  const showMoreStationsHint = useSyncExternalStore(
+    subscribeOnboarding,
+    () => discoverPulseActive(ONBOARDING_KEYS.oneBuildingMapPins),
+    () => false
+  );
   const [search, setSearch] = useState('');
   const [basemapStyle, setBasemapStyle] = useState<BasemapStyle>(readBasemapStyle);
   const [loading, setLoading] = useState(false);
@@ -987,7 +993,7 @@ export function MapSelector({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
-  /** OneBuilding.org published TMYx location KMLs (global coverage); toggled from SiteFooter on map screen. */
+  /** OneBuilding.org published TMYx location KMLs (global coverage); toggled from More stations on the map search bar. */
   const [liveMapZoom, setLiveMapZoom] = useState(initialZoom || 7);
   const [obKmlPins, setObKmlPins] = useState<OneBuildingKmlPin[]>([]);
   const [visibleObKmlPins, setVisibleObKmlPins] = useState<OneBuildingKmlPin[]>([]);
@@ -1619,7 +1625,7 @@ export function MapSelector({
 
       {showOneBuildingPins && !showFuture && liveMapZoom < MIN_ZOOM_OB_KML && !obKmlLoading ? (
         <div className="pointer-events-none absolute top-[5.25rem] left-1/2 z-[1500] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-amber-200 bg-amber-50/95 px-4 py-2.5 text-center text-xs font-medium text-amber-950 shadow-hard-md sm:top-[6rem] sm:text-sm">
-          please zoom in to see OneBuilding map locations.
+          Zoom in to see more stations.
         </div>
       ) : null}
 
@@ -1643,7 +1649,7 @@ export function MapSelector({
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-[1500] flex -translate-x-1/2 items-center gap-2 rounded-full border border-sky-200 bg-white/95 px-4 py-2 text-xs font-medium text-sky-950 shadow-hard-md sm:text-sm">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-sky-600" aria-hidden />
           <span>
-            Loading OneBuilding TMYx KML…{' '}
+            Loading more stations…{' '}
             <span className="tabular-nums font-semibold">
               {obKmlLoadProgress}/{ONE_BUILDING_TMYX_KML_SOURCES.length}
             </span>
@@ -1694,7 +1700,8 @@ export function MapSelector({
         </div>
       ) : null}
 
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-3xl px-4 flex flex-col sm:flex-row gap-2 items-center pointer-events-none">
+      <div className="absolute top-4 left-1/2 z-[1000] flex w-full max-w-3xl -translate-x-1/2 flex-col items-center gap-2 px-4 pointer-events-none">
+        <div className="flex w-full flex-col items-center gap-2 sm:flex-row">
         <div className="relative flex-1 w-full pointer-events-auto bg-white p-2 rounded-full shadow-hard-md border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <div className="relative flex min-w-0 flex-1 flex-row items-center">
             {locating ? (
@@ -1727,6 +1734,61 @@ export function MapSelector({
           <p id="map-search-hint" className="sr-only">
             Enter a city, airport, landmark, or address, then press Enter. The map zooms to that location and frames the two closest weather stations.
           </p>
+          {!showFuture ? (
+            <div className="relative self-center">
+              <button
+                type="button"
+                id="map-more-stations"
+                aria-pressed={showOneBuildingPins}
+                aria-describedby={showMoreStationsHint ? 'more-stations-hint' : undefined}
+                aria-label={showOneBuildingPins ? 'More stations on' : 'More stations'}
+                title={
+                  showOneBuildingPins
+                    ? 'Showing the full station catalog from climate.onebuilding.org'
+                    : 'Loads the full station catalog from climate.onebuilding.org. The smaller set stays on until you turn this on.'
+                }
+                onClick={() => {
+                  dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins);
+                  onShowOneBuildingPinsChange?.(!showOneBuildingPins);
+                }}
+                className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
+                  showOneBuildingPins
+                    ? 'border-sky-700 bg-sky-600 text-white hover:bg-sky-700 focus-visible:ring-sky-400'
+                    : 'border-sky-300 bg-sky-50 text-sky-950 hover:bg-sky-100 focus-visible:ring-sky-400'
+                }`}
+              >
+                {obKmlLoading && showOneBuildingPins ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                ) : (
+                  <MapPin className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+                <span className="whitespace-nowrap">More stations</span>
+              </button>
+              {showMoreStationsHint ? (
+                <div
+                  id="more-stations-hint"
+                  role="note"
+                  className="pointer-events-auto absolute left-1/2 top-[calc(100%+0.7rem)] z-20 w-60 -translate-x-1/2 rounded-2xl border border-white/80 bg-white px-3 py-2.5 text-left text-[13px] leading-snug text-gray-700 [filter:drop-shadow(0_0_1px_rgba(15,23,42,0.45))_drop-shadow(0_0_14px_rgba(255,255,255,0.95))_drop-shadow(0_8px_18px_rgba(15,23,42,0.22))]"
+                >
+                  <span
+                    aria-hidden
+                    className="absolute -top-[7px] left-1/2 h-3.5 w-3.5 -translate-x-1/2 rotate-45 border-l border-t border-gray-200 bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins)}
+                    className="absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                    aria-label="Dismiss more stations note"
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                  <p className="pr-4">
+                    TMY3 files are loaded to start. Select “More stations” to load additional file types.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             aria-pressed={showFuture}
@@ -1787,6 +1849,7 @@ export function MapSelector({
           >
             <Upload className="w-5 h-5" />
           </button>
+        </div>
         </div>
       </div>
 

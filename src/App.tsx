@@ -974,10 +974,6 @@ export default function App() {
               exportMode={false}
               windFooter={null}
               iemWindDatasetActive={false}
-              oneBuildingMapPins={{
-                visible: showOneBuildingMapPins,
-                onVisibleChange: setShowOneBuildingMapPins,
-              }}
             />
         </div>
       </div>

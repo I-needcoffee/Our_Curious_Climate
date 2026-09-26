@@ -11,14 +11,8 @@ import { DiscoverPulseShell } from './onboarding/DiscoverPulseShell';
 import { dismissOnboarding, ONBOARDING_KEYS } from '../lib/onboardingStorage';
 
 const CLIMATE_CANVAS = 'https://climatecanvas.app';
-const ONE_BUILDING_HOME = 'https://climate.onebuilding.org/';
 const PAYPAL_URL = 'https://www.paypal.com/paypalme/coffee4tim';
 const VENMO_URL = 'https://account.venmo.com/u/Tim_Meyers';
-
-export type SiteFooterOneBuildingMapPinsProps = {
-  visible: boolean;
-  onVisibleChange: (v: boolean) => void;
-};
 
 const DONATE_MODAL_LINE_1 =
   'Created with the intent of spreading knowledge and climate resources.';
@@ -46,7 +40,6 @@ export function SiteFooter({
   exportNotesDst = false,
   iemWindDatasetActive = false,
   windFooter,
-  oneBuildingMapPins = null,
 }: {
   theme: 'light' | 'dark';
   exportMode: boolean;
@@ -66,8 +59,6 @@ export function SiteFooter({
   iemWindDatasetActive?: boolean;
   /** Wind TMY vs ASOS + years (only when wind/wind-rose cards are on screen). */
   windFooter?: SiteFooterWindControlsProps | null;
-  /** Map screen only: OneBuilding TMYx pin layer (matches DST pill control). */
-  oneBuildingMapPins?: SiteFooterOneBuildingMapPinsProps | null;
 }) {
   const [donateModalOpen, setDonateModalOpen] = useState(false);
   const [iemDisclaimerOpen, setIemDisclaimerOpen] = useState(false);
@@ -297,8 +288,6 @@ export function SiteFooter({
     onUnitSystemChange && unitSystem !== undefined && onDstDisplayEnabledChange && dstDisplayEnabled !== undefined
   );
 
-  const showMapOneBuildingPins = Boolean(oneBuildingMapPins);
-
   const pillH = 'h-6';
   /** Slightly below inner row height (h-5) so the chip sits with equal top/bottom inset. */
   const donateChipH = 'h-4.5';
@@ -322,66 +311,12 @@ export function SiteFooter({
       <div className="flex w-full flex-col gap-0.5">
       <footer
         className={`flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 ${
-          showCaptions || showLeftControls || windFooter?.visible || showMapOneBuildingPins ? 'justify-between' : 'justify-end'
+          showCaptions || showLeftControls || windFooter?.visible ? 'justify-between' : 'justify-end'
         }`}
         aria-label="Site attribution and display options"
       >
-        {(showLeftControls || showMapOneBuildingPins) ? (
+        {showLeftControls ? (
           <div className="pointer-events-auto flex min-w-0 max-w-full flex-wrap items-center gap-2 overflow-visible">
-            {showMapOneBuildingPins && oneBuildingMapPins ? (
-              <div
-                id="footer-one-building-map-pins"
-                role="switch"
-                tabIndex={0}
-                aria-checked={oneBuildingMapPins.visible}
-                aria-label="Show OneBuilding map locations"
-                title="Adds TMYx station pins from climate.onebuilding.org KML catalogs (zoom in to load). Open the OneBuilding site from the link without changing this switch."
-                className={`inline-flex ${pillH} max-w-[min(100vw-6rem,20rem)] min-w-0 cursor-pointer items-center overflow-visible rounded-full border p-0 outline-none transition-[color] focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-950 ${pillShell}`}
-                onClick={e => {
-                  if ((e.target as HTMLElement).closest('a')) return;
-                  dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins);
-                  oneBuildingMapPins.onVisibleChange(!oneBuildingMapPins.visible);
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins);
-                    oneBuildingMapPins.onVisibleChange(!oneBuildingMapPins.visible);
-                  }
-                }}
-              >
-                <span className="flex shrink-0 items-center justify-center self-center pl-2 pr-0.5 sm:pl-2" aria-hidden>
-                  <DiscoverPulseShell storageKey={ONBOARDING_KEYS.oneBuildingMapPins}>
-                    <span
-                      className={`box-border h-3 w-3 shrink-0 rounded-full border sm:h-3.5 sm:w-3.5 ${
-                        oneBuildingMapPins.visible
-                          ? 'border-gray-600 bg-gray-600 dark:border-gray-500 dark:bg-gray-500'
-                          : theme === 'dark'
-                            ? 'border-gray-500 bg-white'
-                            : 'border-gray-400 bg-white'
-                      }`}
-                    />
-                  </DiscoverPulseShell>
-                </span>
-                <span
-                  className={`flex min-h-0 min-w-0 flex-1 items-center self-center truncate whitespace-nowrap pl-1 pr-2 text-left sm:pr-2 ${footnoteText} font-normal leading-none ${
-                    theme === 'dark' ? 'text-gray-200' : 'text-gray-800'
-                  }`}
-                >
-                  Show{' '}
-                  <a
-                    href={ONE_BUILDING_HOME}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={footerLinkClass}
-                    onClick={e => e.stopPropagation()}
-                  >
-                    OneBuilding
-                  </a>{' '}
-                  map locations
-                </span>
-              </div>
-            ) : null}
             {showLeftControls ? (
               <>
             <DiscoverPulseShell storageKey={ONBOARDING_KEYS.dstToggle} rounded="pill">
