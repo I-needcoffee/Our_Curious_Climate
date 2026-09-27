@@ -1700,10 +1700,10 @@ export function MapSelector({
         </div>
       ) : null}
 
-      <div className="absolute top-4 left-1/2 z-[1000] flex w-full max-w-3xl -translate-x-1/2 flex-col items-center gap-2 px-4 pointer-events-none">
-        <div className="flex w-full flex-col items-center gap-2 sm:flex-row">
-        <div className="relative flex-1 w-full pointer-events-auto bg-white p-2 rounded-full shadow-hard-md border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <div className="relative flex min-w-0 flex-1 flex-row items-center">
+      <div className="pointer-events-none absolute top-4 left-1/2 z-[1000] flex w-full max-w-3xl -translate-x-1/2 flex-col items-center gap-2 px-4">
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-row">
+        <div className="pointer-events-auto flex h-9 min-w-0 items-center rounded-full border border-gray-200 bg-white px-1 shadow-hard-md sm:h-10 sm:flex-1">
+          <div className="relative flex h-full min-w-0 flex-1 flex-row items-center">
             {locating ? (
               <Loader2
                 className="pointer-events-none absolute left-3 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 animate-spin text-gray-500"
@@ -1728,12 +1728,15 @@ export function MapSelector({
               }}
               aria-describedby="map-search-hint"
               disabled={locating || loadingDb}
-              className="min-w-0 flex-1 border-none bg-transparent py-2 pl-9 pr-4 text-sm text-gray-700 outline-none transition-all focus:ring-0 disabled:opacity-60"
+              className="h-full min-w-0 flex-1 border-none bg-transparent py-0 pl-9 pr-3 text-sm text-gray-700 outline-none transition-all focus:ring-0 disabled:opacity-60"
             />
           </div>
           <p id="map-search-hint" className="sr-only">
             Enter a city, airport, landmark, or address, then press Enter. The map zooms to that location and frames the two closest weather stations.
           </p>
+        </div>
+
+        <div className="pointer-events-auto col-span-2 flex items-center justify-center gap-2 sm:order-2 sm:col-auto">
           {!showFuture ? (
             <div className="relative self-center">
               <button
@@ -1751,7 +1754,7 @@ export function MapSelector({
                   dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins);
                   onShowOneBuildingPinsChange?.(!showOneBuildingPins);
                 }}
-                className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
+                className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
                   showOneBuildingPins
                     ? 'border-sky-700 bg-sky-600 text-white hover:bg-sky-700 focus-visible:ring-sky-400'
                     : 'border-sky-300 bg-sky-50 text-sky-950 hover:bg-sky-100 focus-visible:ring-sky-400'
@@ -1809,10 +1812,10 @@ export function MapSelector({
                 onMapLibraryModeChange?.('future');
               }
             }}
-            className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
+            className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
               showFuture
                 ? 'border-orange-200 bg-white text-orange-800 ring-1 ring-orange-200/80 focus-visible:ring-orange-400'
-                : 'border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 focus-visible:ring-gray-400'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900 focus-visible:ring-gray-400'
             }`}
           >
             {showFuture ? (
@@ -1830,8 +1833,8 @@ export function MapSelector({
             )}
           </button>
         </div>
-        
-        <div className="flex items-center gap-2 pointer-events-auto">
+
+        <div className="pointer-events-auto col-start-2 row-start-1 flex items-center gap-2 sm:order-3">
 
           <input 
             type="file" 
@@ -1844,10 +1847,10 @@ export function MapSelector({
             id="map-upload-epw"
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center w-12 h-12 bg-white text-gray-700 rounded-full shadow-hard-md hover:bg-gray-50 transition-colors border border-gray-200"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-hard-md transition-colors hover:bg-gray-50 sm:h-10 sm:w-10"
             title="Upload .epw — load more weather files"
           >
-            <Upload className="w-5 h-5" />
+            <Upload className="h-4 w-4" />
           </button>
         </div>
         </div>
@@ -1862,7 +1865,7 @@ export function MapSelector({
       />
 
       {showFuture ? (
-        <div className="pointer-events-auto absolute top-20 left-1/2 z-[1000] max-h-[calc(100dvh-5.5rem)] w-[min(100%,20rem)] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-3.5 shadow-hard-lg sm:top-24 sm:max-h-[calc(100dvh-6.5rem)] sm:w-full sm:max-w-md">
+        <div className="pointer-events-auto absolute top-[8.75rem] left-1/2 z-[1000] max-h-[calc(100dvh-10rem)] w-[min(100%,20rem)] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-3.5 shadow-hard-lg sm:top-24 sm:max-h-[calc(100dvh-6.5rem)] sm:w-full sm:max-w-md">
           <h3 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-gray-900">
             <CloudLightning className="h-4 w-4 shrink-0 text-orange-600" aria-hidden />
             Future weather
