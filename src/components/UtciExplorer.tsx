@@ -356,19 +356,16 @@ export function UtciExplorer({
   const tutorialExposureSun = tutorialLive?.snapshot.includeSun;
   const tutorialExposureWind = tutorialLive?.snapshot.includeWind;
   const tutorialFocusPeriodId = tutorialLive?.snapshot.utciFocusPeriodId;
-  const lastSyncedFocusRef = useRef<string | null | undefined>(undefined);
+  // Keep chart UTCI (12×24 + bars) in sync with guided matrix exposure picks — not only when the
+  // period row changes (same period + different sun/wind was previously ignored).
   useEffect(() => {
     if (!tutorialEnabled || utciShared) return;
-    const focusId = tutorialFocusPeriodId ?? null;
-    if (lastSyncedFocusRef.current === focusId) return;
-    lastSyncedFocusRef.current = focusId;
-    if (!focusId) return;
-    setIncludeSun(tutorialExposureSun ?? true);
-    setIncludeWind(tutorialExposureWind ?? true);
+    if (tutorialExposureSun === undefined && tutorialExposureWind === undefined) return;
+    if (tutorialExposureSun !== undefined) setIncludeSun(tutorialExposureSun);
+    if (tutorialExposureWind !== undefined) setIncludeWind(tutorialExposureWind);
   }, [
     tutorialEnabled,
     utciShared,
-    tutorialFocusPeriodId,
     tutorialExposureSun,
     tutorialExposureWind,
     setIncludeSun,
