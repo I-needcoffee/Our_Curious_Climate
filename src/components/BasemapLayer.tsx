@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { TileLayer, useMap } from 'react-leaflet';
 import { maplibreGL } from '@maplibre/maplibre-gl-leaflet';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -80,43 +80,6 @@ export function BasemapStyleToggle({
   value: BasemapStyle;
   onChange: (style: BasemapStyle) => void;
 }) {
-  const toggleRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const toggle = toggleRef.current;
-    const host = toggle?.parentElement;
-    if (!toggle || !host) return;
-
-    const apply = () => {
-      const attr = host.querySelector<HTMLElement>('.leaflet-control-attribution');
-      if (!attr) return;
-      const mobile = window.matchMedia('(max-width: 639px)').matches;
-      if (!mobile) {
-        attr.style.maxWidth = '';
-        attr.style.whiteSpace = '';
-        return;
-      }
-      const reserve = toggle.offsetWidth + 28;
-      attr.style.whiteSpace = 'normal';
-      attr.style.maxWidth = `${Math.max(140, host.clientWidth - reserve)}px`;
-    };
-
-    apply();
-    const bottom = host.querySelector('.leaflet-bottom');
-    const observer = new MutationObserver(apply);
-    if (bottom) observer.observe(bottom, { childList: true, subtree: true, characterData: true });
-    window.addEventListener('resize', apply);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', apply);
-      const attr = host.querySelector<HTMLElement>('.leaflet-control-attribution');
-      if (attr) {
-        attr.style.maxWidth = '';
-        attr.style.whiteSpace = '';
-      }
-    };
-  }, [value]);
-
   const btn = (style: BasemapStyle, label: string) => {
     const selected = value === style;
     return (
@@ -124,9 +87,9 @@ export function BasemapStyleToggle({
         type="button"
         aria-pressed={selected}
         onClick={() => onChange(style)}
-        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors sm:px-3 sm:text-xs ${
+        className={`inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold leading-none transition-colors ${
           selected
-            ? 'bg-gray-900 text-white shadow-sm'
+            ? 'bg-gray-900 text-white'
             : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
         }`}
       >
@@ -137,8 +100,7 @@ export function BasemapStyleToggle({
 
   return (
     <div
-      ref={toggleRef}
-      className="pointer-events-auto absolute bottom-3 left-3 z-[1100] flex rounded-full border border-gray-200 bg-white/95 p-0.5 shadow-hard-md"
+      className="inline-flex h-6 shrink-0 items-stretch rounded-full border border-gray-200 bg-white p-0.5"
       role="group"
       aria-label="Map style"
     >

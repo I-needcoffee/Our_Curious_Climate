@@ -5,6 +5,7 @@
 
 import { useState, useRef, useCallback, useMemo, useEffect, useSyncExternalStore } from 'react';
 import { MapSelector } from './components/MapSelector';
+import { BasemapStyleToggle, readBasemapStyle, writeBasemapStyle, type BasemapStyle } from './components/BasemapLayer';
 import { SunPath } from './components/SunPath';
 import { DataExplorer } from './components/DataExplorer';
 import { WindExplorer } from './components/WindExplorer';
@@ -387,7 +388,7 @@ export default function App() {
   const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
   const [dstDisplayEnabled, setDstDisplayEnabled] = useState(false);
   const [mapLibraryMode, setMapLibraryMode] = useState<'historical' | 'future'>('historical');
-  const [showOneBuildingMapPins, setShowOneBuildingMapPins] = useState(false);
+  const [mapBasemapStyle, setMapBasemapStyle] = useState<BasemapStyle>(readBasemapStyle);
 
   /** When the EPW header says the site observes DST, default the display toggle on for this file set. */
   useEffect(() => {
@@ -964,17 +965,25 @@ export default function App() {
             initialZoom={selectedFiles.length > 0 ? 10 : undefined}
             mapLibraryMode={mapLibraryMode}
             onMapLibraryModeChange={setMapLibraryMode}
-            showOneBuildingPins={showOneBuildingMapPins}
-            onShowOneBuildingPinsChange={setShowOneBuildingMapPins}
+            basemapStyle={mapBasemapStyle}
           />
         </div>
-        <div className="relative z-[5000] w-full shrink-0 border-t border-gray-200/80 bg-[#fcfbf8] px-2 py-2 sm:px-3">
-          <SiteFooter
+        <div className="relative z-[5000] flex w-full shrink-0 items-center gap-2 border-t border-gray-200/80 bg-[#fcfbf8] px-2 py-1.5 sm:px-3">
+          <BasemapStyleToggle
+            value={mapBasemapStyle}
+            onChange={style => {
+              setMapBasemapStyle(style);
+              writeBasemapStyle(style);
+            }}
+          />
+          <div className="min-w-0 flex-1">
+            <SiteFooter
               theme={theme}
               exportMode={false}
               windFooter={null}
               iemWindDatasetActive={false}
             />
+          </div>
         </div>
       </div>
     );

@@ -1,12 +1,11 @@
-import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback, useSyncExternalStore } from 'react';
+import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback, startTransition, type CSSProperties } from 'react';
 import { MapContainer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, Upload, ExternalLink, Database, CloudLightning, Loader2, MapPin, X } from 'lucide-react';
-import { dismissOnboarding, discoverPulseActive, ONBOARDING_KEYS, subscribeOnboarding } from '../lib/onboardingStorage';
+import { Search, Upload, ExternalLink, CloudLightning, Loader2 } from 'lucide-react';
 import L from 'leaflet';
 import { parseEPW, ParsedEPW, attachParsedEpwSource } from '../lib/epwParser';
 import { CARTO_LIGHT_ALL_WATER_HEX } from '../lib/constants';
-import { BasemapLayer, BasemapStyleToggle, readBasemapStyle, writeBasemapStyle, type BasemapStyle } from './BasemapLayer';
+import { BasemapLayer, type BasemapStyle } from './BasemapLayer';
 import {
   CANADA_NRC_FUTURE_TMY_KML_URL,
   CANADA_NRC_FUTURE_KML_SOURCE_ID,
@@ -443,9 +442,9 @@ interface MapSelectorProps {
   /** Last library the user picked (historical NREL vs future). Used when re-opening the map to add a comparison file. */
   mapLibraryMode?: 'historical' | 'future';
   onMapLibraryModeChange?: (mode: 'historical' | 'future') => void;
-  /** Full OneBuilding station catalog. Off until the user turns on More stations. */
+  /** Full OneBuilding station catalog. Loads in the background after the map opens. */
   showOneBuildingPins?: boolean;
-  onShowOneBuildingPinsChange?: (v: boolean) => void;
+  basemapStyle: BasemapStyle;
 }
 
 // Component to handle bounding box filtering
@@ -947,6 +946,13 @@ function FutureUsCountyPopupContent({
   );
 }
 
+/** Circle that slides open on desktop hover. Width is capped and eased; it does not snap to auto. */
+const mapIconPillBase =
+  'group inline-flex h-9 min-w-9 max-w-9 shrink-0 items-center overflow-hidden rounded-full border text-xs font-semibold shadow-hard-md transition-[max-width,background-color,color,border-color] duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 motion-reduce:transition-none sm:h-10 sm:min-w-10 sm:max-w-10 sm:text-sm';
+
+const mapIconPillOpen =
+  '[@media(hover:hover)]:hover:max-w-[var(--pill-open)] [@media(hover:hover)]:focus-visible:max-w-[var(--pill-open)] sm:[@media(hover:hover)]:hover:max-w-[var(--pill-open)] sm:[@media(hover:hover)]:focus-visible:max-w-[var(--pill-open)]';
+
 export function MapSelector({
   onSelect,
   isSelectingCompare,
@@ -954,16 +960,10 @@ export function MapSelector({
   initialZoom,
   mapLibraryMode = 'historical',
   onMapLibraryModeChange,
-  showOneBuildingPins = false,
-  onShowOneBuildingPinsChange,
+  showOneBuildingPins = true,
+  basemapStyle,
 }: MapSelectorProps) {
-  const showMoreStationsHint = useSyncExternalStore(
-    subscribeOnboarding,
-    () => discoverPulseActive(ONBOARDING_KEYS.oneBuildingMapPins),
-    () => false
-  );
   const [search, setSearch] = useState('');
-  const [basemapStyle, setBasemapStyle] = useState<BasemapStyle>(readBasemapStyle);
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -993,7 +993,7 @@ export function MapSelector({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
-  /** OneBuilding.org published TMYx location KMLs (global coverage); toggled from More stations on the map search bar. */
+  /** OneBuilding.org published TMYx location KMLs (global coverage). Loaded in the background after the map opens. */
   const [liveMapZoom, setLiveMapZoom] = useState(initialZoom || 7);
   const [obKmlPins, setObKmlPins] = useState<OneBuildingKmlPin[]>([]);
   const [visibleObKmlPins, setVisibleObKmlPins] = useState<OneBuildingKmlPin[]>([]);
@@ -1211,11 +1211,6 @@ export function MapSelector({
     setLiveMapZoom(z);
   }, []);
 
-  useEffect(() => {
-    if (!showFuture) return;
-    onShowOneBuildingPinsChange?.(false);
-  }, [showFuture, onShowOneBuildingPinsChange]);
-
   // Canada NRC future TMY catalog (Climate One Building KML).
   useEffect(() => {
     if (!showFuture) return;
@@ -1295,68 +1290,106 @@ export function MapSelector({
     setVisibleObKmlPins([]);
   }, [showOneBuildingPins]);
 
+  const liveMapZoomRef = useRef(liveMapZoom);
+  liveMapZoomRef.current = liveMapZoom;
+  const obKmlInFlightRef = useRef(false);
+  const startObKmlLoadRef = useRef<() => void>(() => {});
+
   useEffect(() => {
-    if (!showOneBuildingPins || showFuture) return;
-    if (liveMapZoom < MIN_ZOOM_OB_KML) return;
-    if (obKmlSessionFetchedRef.current) return;
+    if (!showOneBuildingPins) return;
 
     const startGen = obKmlFetchGenRef.current;
     let cancelled = false;
 
-    void (async () => {
-      if (!obKmlLoadedRef.current) {
-        const cached = await loadCachedOneBuildingKmlPins();
-        if (cancelled || obKmlFetchGenRef.current !== startGen) return;
-        if (cached?.length) {
-          obKmlLoadedRef.current = true;
-          setObKmlPins(cached);
-        }
-      }
+    const start = () => {
+      if (cancelled || obKmlSessionFetchedRef.current || obKmlInFlightRef.current) return;
+      if (liveMapZoomRef.current < MIN_ZOOM_OB_KML) return;
 
-      setObKmlLoading(true);
-      setObKmlError(null);
-      setObKmlLoadProgress(0);
-      let completed = 0;
+      obKmlInFlightRef.current = true;
 
-      try {
-        const chunks = await Promise.all(
-          ONE_BUILDING_TMYX_KML_SOURCES.map(async src => {
-            const res = await fetch(`/api/proxy-epw?url=${encodeURIComponent(src.url)}`);
-            if (!res.ok) throw new Error(`${src.label}: HTTP ${res.status}`);
-            const xml = await res.text();
-            const rows = parseOneBuildingKmlDocument(xml, src.id);
-            if (!cancelled && obKmlFetchGenRef.current === startGen) {
-              completed += 1;
-              setObKmlLoadProgress(completed);
-            }
-            return rows;
-          })
-        );
-        if (cancelled || obKmlFetchGenRef.current !== startGen) return;
-        const deduped = dedupeOneBuildingKmlPins(chunks.flat());
-        obKmlLoadedRef.current = true;
-        obKmlSessionFetchedRef.current = true;
-        setObKmlPins(deduped);
-        void saveCachedOneBuildingKmlPins(deduped);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled && obKmlFetchGenRef.current === startGen) {
-          setObKmlError(e instanceof Error ? e.message : 'Failed to load OneBuilding KML catalogs.');
+      void (async () => {
+        const accumulated: OneBuildingKmlPin[] = [];
+        const failures: string[] = [];
+        try {
           if (!obKmlLoadedRef.current) {
+            const cached = await loadCachedOneBuildingKmlPins();
+            if (cancelled || obKmlFetchGenRef.current !== startGen) return;
+            if (cached?.length) {
+              accumulated.push(...cached);
+              obKmlLoadedRef.current = true;
+              startTransition(() => setObKmlPins(cached));
+            }
+          }
+
+          if (cancelled || obKmlFetchGenRef.current !== startGen) return;
+
+          setObKmlLoading(true);
+          setObKmlError(null);
+          setObKmlLoadProgress(0);
+          let completed = 0;
+
+          await Promise.all(
+            ONE_BUILDING_TMYX_KML_SOURCES.map(async src => {
+              try {
+                const res = await fetch(`/api/proxy-epw?url=${encodeURIComponent(src.url)}`);
+                if (!res.ok) throw new Error(`${src.label}: HTTP ${res.status}`);
+                const xml = await res.text();
+                const rows = parseOneBuildingKmlDocument(xml, src.id);
+                if (cancelled || obKmlFetchGenRef.current !== startGen) return;
+                accumulated.push(...rows);
+                completed += 1;
+                setObKmlLoadProgress(completed);
+                const deduped = dedupeOneBuildingKmlPins(accumulated);
+                obKmlLoadedRef.current = true;
+                startTransition(() => setObKmlPins(deduped));
+              } catch (e) {
+                console.error(e);
+                if (cancelled || obKmlFetchGenRef.current !== startGen) return;
+                completed += 1;
+                setObKmlLoadProgress(completed);
+                failures.push(e instanceof Error ? e.message : `${src.label}: failed`);
+              }
+            })
+          );
+
+          if (cancelled || obKmlFetchGenRef.current !== startGen) return;
+
+          if (accumulated.length) {
+            const deduped = dedupeOneBuildingKmlPins(accumulated);
+            obKmlLoadedRef.current = true;
+            obKmlSessionFetchedRef.current = true;
+            startTransition(() => setObKmlPins(deduped));
+            void saveCachedOneBuildingKmlPins(deduped);
+          } else if (!obKmlLoadedRef.current) {
             setObKmlPins([]);
           }
+
+          if (failures.length) {
+            setObKmlError(failures[0]!);
+          }
+        } finally {
+          if (!cancelled && obKmlFetchGenRef.current === startGen) {
+            setObKmlLoading(false);
+            obKmlInFlightRef.current = false;
+          }
         }
-      } finally {
-        if (!cancelled && obKmlFetchGenRef.current === startGen) {
-          setObKmlLoading(false);
-        }
-      }
-    })();
+      })();
+    };
+
+    startObKmlLoadRef.current = start;
+    start();
 
     return () => {
       cancelled = true;
+      obKmlInFlightRef.current = false;
+      startObKmlLoadRef.current = () => {};
     };
-  }, [showOneBuildingPins, showFuture, liveMapZoom]);
+  }, [showOneBuildingPins]);
+
+  useEffect(() => {
+    if (!showOneBuildingPins || liveMapZoom < MIN_ZOOM_OB_KML) return;
+    startObKmlLoadRef.current();
+  }, [showOneBuildingPins, liveMapZoom]);
 
   useEffect(() => {
     if (showFuture) return;
@@ -1645,18 +1678,6 @@ export function MapSelector({
         </div>
       ) : null}
 
-      {obKmlLoading ? (
-        <div className="pointer-events-none absolute bottom-6 left-1/2 z-[1500] flex -translate-x-1/2 items-center gap-2 rounded-full border border-sky-200 bg-white/95 px-4 py-2 text-xs font-medium text-sky-950 shadow-hard-md sm:text-sm">
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-sky-600" aria-hidden />
-          <span>
-            Loading more stations…{' '}
-            <span className="tabular-nums font-semibold">
-              {obKmlLoadProgress}/{ONE_BUILDING_TMYX_KML_SOURCES.length}
-            </span>
-          </span>
-        </div>
-      ) : null}
-
       {showFuture && futureNrcLoading ? (
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-[1500] flex -translate-x-1/2 items-center gap-2 rounded-full border border-orange-200 bg-white/95 px-4 py-2 text-xs font-medium text-orange-950 shadow-hard-md sm:text-sm">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-orange-600" aria-hidden />
@@ -1736,73 +1757,11 @@ export function MapSelector({
           </p>
         </div>
 
-        <div className="pointer-events-auto col-span-2 flex items-center justify-center gap-2 sm:order-2 sm:col-auto">
-          {!showFuture ? (
-            <div className="relative self-center">
-              <button
-                type="button"
-                id="map-more-stations"
-                aria-pressed={showOneBuildingPins}
-                aria-describedby={showMoreStationsHint ? 'more-stations-hint' : undefined}
-                aria-label={showOneBuildingPins ? 'More stations on' : 'More stations'}
-                title={
-                  showOneBuildingPins
-                    ? 'Showing the full station catalog from climate.onebuilding.org'
-                    : 'Loads the full station catalog from climate.onebuilding.org. The smaller set stays on until you turn this on.'
-                }
-                onClick={() => {
-                  dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins);
-                  onShowOneBuildingPinsChange?.(!showOneBuildingPins);
-                }}
-                className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
-                  showOneBuildingPins
-                    ? 'border-sky-700 bg-sky-600 text-white hover:bg-sky-700 focus-visible:ring-sky-400'
-                    : 'border-sky-300 bg-sky-50 text-sky-950 hover:bg-sky-100 focus-visible:ring-sky-400'
-                }`}
-              >
-                {obKmlLoading && showOneBuildingPins ? (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                ) : (
-                  <MapPin className="h-4 w-4 shrink-0" aria-hidden />
-                )}
-                <span className="whitespace-nowrap">More stations</span>
-              </button>
-              {showMoreStationsHint ? (
-                <div
-                  id="more-stations-hint"
-                  role="note"
-                  className="pointer-events-auto absolute left-1/2 top-[calc(100%+0.7rem)] z-20 w-60 -translate-x-1/2 rounded-2xl border border-white/80 bg-white px-3 py-2.5 text-left text-[13px] leading-snug text-gray-700 [filter:drop-shadow(0_0_1px_rgba(15,23,42,0.45))_drop-shadow(0_0_14px_rgba(255,255,255,0.95))_drop-shadow(0_8px_18px_rgba(15,23,42,0.22))]"
-                >
-                  <span
-                    aria-hidden
-                    className="absolute -top-[7px] left-1/2 h-3.5 w-3.5 -translate-x-1/2 rotate-45 border-l border-t border-gray-200 bg-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => dismissOnboarding(ONBOARDING_KEYS.oneBuildingMapPins)}
-                    className="absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                    aria-label="Dismiss more stations note"
-                  >
-                    <X className="h-3 w-3" aria-hidden />
-                  </button>
-                  <p className="pr-4">
-                    TMY3 files are loaded to start. Select “More stations” to load additional file types.
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+        <div className="pointer-events-auto col-start-2 row-start-1 flex items-center gap-2 sm:order-2">
           <button
             type="button"
             aria-pressed={showFuture}
-            aria-label={
-              showFuture ? 'Return to the historic typical-year station map' : 'Open future weather data options'
-            }
-            title={
-              showFuture
-                ? 'Return to the historic typical-year (TMY) station map'
-                : 'Future weather: samples, country links, or ZIP'
-            }
+            aria-label={showFuture ? 'Historic map' : 'Future weather'}
             onClick={() => {
               if (showFuture) {
                 setShowFuture(false);
@@ -1812,60 +1771,67 @@ export function MapSelector({
                 onMapLibraryModeChange?.('future');
               }
             }}
-            className={`inline-flex h-9 shrink-0 items-center justify-center gap-1.5 self-center rounded-full border px-3 text-xs font-semibold shadow-hard-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:h-10 sm:px-4 sm:text-sm ${
+            style={{ '--pill-open': '9.75rem' } as CSSProperties}
+            className={`${mapIconPillBase} ${mapIconPillOpen} ${
               showFuture
-                ? 'border-orange-200 bg-white text-orange-800 ring-1 ring-orange-200/80 focus-visible:ring-orange-400'
-                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900 focus-visible:ring-gray-400'
+                ? 'border-orange-200 bg-orange-50 text-orange-800 ring-1 ring-orange-200/80 focus-visible:ring-orange-400'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 focus-visible:ring-gray-400'
             }`}
           >
-            {showFuture ? (
-              <>
-                <Database className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
-                <span className="min-w-0 text-center text-[10px] font-semibold leading-tight sm:text-sm">
-                  Return to Historic Map
-                </span>
-              </>
-            ) : (
-              <>
-                <CloudLightning className="h-4 w-4 shrink-0 text-orange-600" aria-hidden />
-                <span className="max-w-[10rem] truncate sm:max-w-none">Future weather</span>
-              </>
-            )}
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center sm:h-10 sm:w-10">
+              <CloudLightning className="h-4 w-4 text-orange-600" aria-hidden />
+            </span>
+            <span className="whitespace-nowrap pr-3">{showFuture ? 'Historic map' : 'Future weather'}</span>
           </button>
-        </div>
 
-        <div className="pointer-events-auto col-start-2 row-start-1 flex items-center gap-2 sm:order-3">
-
-          <input 
-            type="file" 
-            accept=".epw" 
-            className="hidden" 
+          <input
+            type="file"
+            accept=".epw"
+            className="hidden"
             ref={fileInputRef}
             onChange={handleFileUpload}
           />
           <button
             id="map-upload-epw"
             type="button"
+            aria-label="Upload file"
             onClick={() => fileInputRef.current?.click()}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-hard-md transition-colors hover:bg-gray-50 sm:h-10 sm:w-10"
-            title="Upload .epw — load more weather files"
+            style={{ '--pill-open': '8rem' } as CSSProperties}
+            className={`${mapIconPillBase} ${mapIconPillOpen} border-gray-200 bg-white text-gray-700 hover:bg-gray-50 focus-visible:ring-gray-400`}
           >
-            <Upload className="h-4 w-4" />
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center sm:h-10 sm:w-10">
+              <Upload className="h-4 w-4" aria-hidden />
+            </span>
+            <span className="whitespace-nowrap pr-3">Upload file</span>
           </button>
         </div>
         </div>
+        {obKmlLoading && !showFuture ? (
+          <div
+            className="pointer-events-none w-full max-w-xs rounded-2xl border border-sky-200 bg-white/95 px-3 py-2 shadow-hard-md"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-3 text-xs font-medium text-sky-950">
+              <span>More stations loading</span>
+              <span className="tabular-nums">
+                {obKmlLoadProgress}/{ONE_BUILDING_TMYX_KML_SOURCES.length}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-sky-100">
+              <div
+                className="h-full rounded-full bg-sky-600 transition-[width] duration-300"
+                style={{
+                  width: `${Math.round((obKmlLoadProgress / ONE_BUILDING_TMYX_KML_SOURCES.length) * 100)}%`,
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <BasemapStyleToggle
-        value={basemapStyle}
-        onChange={style => {
-          setBasemapStyle(style);
-          writeBasemapStyle(style);
-        }}
-      />
-
       {showFuture ? (
-        <div className="pointer-events-auto absolute top-[8.75rem] left-1/2 z-[1000] max-h-[calc(100dvh-10rem)] w-[min(100%,20rem)] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-3.5 shadow-hard-lg sm:top-24 sm:max-h-[calc(100dvh-6.5rem)] sm:w-full sm:max-w-md">
+        <div className="pointer-events-auto absolute top-[4.75rem] left-1/2 z-[1000] max-h-[calc(100dvh-6.5rem)] w-[min(100%,20rem)] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-3.5 shadow-hard-lg sm:top-20 sm:max-h-[calc(100dvh-6.5rem)] sm:w-full sm:max-w-md">
           <h3 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-gray-900">
             <CloudLightning className="h-4 w-4 shrink-0 text-orange-600" aria-hidden />
             Future weather
