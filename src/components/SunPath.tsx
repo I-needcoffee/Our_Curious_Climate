@@ -26,6 +26,7 @@ import { ExportHeaderCaption, exportCaptionLinesWithUnit, exportCaptionShort } f
 import { CardModal } from './CardModal';
 import { VariableChartSelect } from './VariableChartSelect';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
+import { formatEpwStationDateTime } from '../lib/formatEpwStationClock';
 import { sequentialHeatmapColorFn } from '../lib/heatmapColorAdjust';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
 import { symmetricDiffBound } from '../lib/symmetricDiffDomain';
@@ -552,7 +553,10 @@ const filteredCompareData = (compareData || []).filter(d => {
               _count: byDate.length,
               _period: period,
               _hour: hour,
-              month: rep.month
+              year: rep.year,
+              month: rep.month,
+              day: rep.day,
+              hour: hour as number,
             });
           }
         });
@@ -797,7 +801,7 @@ const filteredCompareData = (compareData || []).filter(d => {
       .text(d => {
         const prefix = aggregation === 'hour' ? '' : `Avg (${d._count} samples)\n`;
         const val = d._val;
-        return `${prefix}${d.date.toLocaleString()}\nAlt: ${d.altitude.toFixed(1)}°\nAz: ${d.azimuth.toFixed(1)}°\n${colorVarDef.name}${showDifference ? ' Diff' : ''}: ${val.toFixed(1)} ${cUnit}`;
+        return `${prefix}${formatEpwStationDateTime(d)}\nAlt: ${d.altitude.toFixed(1)}°\nAz: ${d.azimuth.toFixed(1)}°\n${colorVarDef.name}${showDifference ? ' Diff' : ''}: ${val.toFixed(1)} ${cUnit}`;
       });
 
 

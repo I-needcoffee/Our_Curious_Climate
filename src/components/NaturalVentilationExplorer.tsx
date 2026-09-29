@@ -10,6 +10,7 @@ import { AggregationToolbar } from './AggregationToolbar';
 import type { ChartType } from '../App';
 import { UnitSystem } from '../App';
 import { UNIT_C, UNIT_F } from '../lib/unitConversion';
+import { formatEpwStationDate, formatEpwStationDateTime, formatEpwStationHour } from '../lib/formatEpwStationClock';
 import type { BarChartFillMode, GlobalFilterState, HeatmapCellStatistic } from '../lib/globalFilter';
 import {
   aggregateCellStatistic,
@@ -339,10 +340,10 @@ export function NaturalVentilationExplorer({
             suitable: suitableRatio,
             label: monthNames[month - 1]!,
             tooltip: !Number.isFinite(suitableRatio) && !Number.isFinite(avgTemp)
-              ? `${monthNames[month - 1]}\nNo hours in filter`
+              ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nNo hours in filter`
               : colorMode === 'suitableHours'
-                ? `${monthNames[month - 1]} Avg\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
-                : `${monthNames[month - 1]} Avg\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
+                ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
+                : `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
           });
         });
       });
@@ -377,10 +378,10 @@ export function NaturalVentilationExplorer({
             suitable: suitableRatio,
             label: `W${week + 1}`,
             tooltip: !Number.isFinite(suitableRatio) && !Number.isFinite(avgTemp)
-              ? `Week ${week + 1}\nNo hours in filter`
+              ? `Week ${week + 1} ${formatEpwStationHour(hour)}\nNo hours in filter`
               : colorMode === 'suitableHours'
-                ? `Week ${week + 1} Avg\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
-                : `Week ${week + 1} Avg\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
+                ? `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
+                : `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
           });
         });
       });
@@ -394,12 +395,12 @@ export function NaturalVentilationExplorer({
           month: d.month,
           tempC: pass ? d.tempC : NaN,
           suitable: pass ? d.suitable : NaN,
-          label: d.date.toLocaleDateString(),
+          label: formatEpwStationDate(d),
           tooltip: !pass
-            ? `${d.date.toLocaleString()}\nOutside filter`
+            ? `${formatEpwStationDateTime(d)}\nOutside filter`
             : colorMode === 'suitableHours'
-              ? `${d.date.toLocaleString()}\nSuitable: ${d.suitable ? 'Yes' : 'No'}`
-              : `${d.date.toLocaleString()}\nTemp: ${convertTemp(d.tempC).toFixed(1)}${tempUnit}`,
+              ? `${formatEpwStationDateTime(d)}\nSuitable: ${d.suitable ? 'Yes' : 'No'}`
+              : `${formatEpwStationDateTime(d)}\nTemp: ${convertTemp(d.tempC).toFixed(1)}${tempUnit}`,
         };
       });
     }
@@ -491,12 +492,7 @@ export function NaturalVentilationExplorer({
         .style('pointer-events', 'none');
     }
 
-    const formatHourRow = (h: number) => {
-      if (h === 0) return '12 AM';
-      if (h === 12) return '12 PM';
-      if (h < 12) return `${h} AM`;
-      return `${h - 12} PM`;
-    };
+    const formatHourRow = (h: number) => formatEpwStationHour(h);
 
     heatmapCellsG
       .append('g')

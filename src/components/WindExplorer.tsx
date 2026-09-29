@@ -43,6 +43,7 @@ import {
 } from '../lib/chartToolbarLayout';
 import { CardModal } from './CardModal';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
+import { formatEpwStationDate, formatEpwStationDateTime, formatEpwStationHour } from '../lib/formatEpwStationClock';
 import { gradientsForVariable } from '../lib/availableGradientsForVariable';
 import { useWindIemGlobalPrefs } from '../lib/iem/globalWindIemPrefsStore';
 import { useResolvedIemWindRows } from '../hooks/useResolvedIemWindRows';
@@ -558,7 +559,7 @@ export function WindExplorer({
             value: val,
             direction: direction,
             label: `${monthNames[month - 1]}`,
-            tooltip: `${monthNames[month - 1]} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}\nDir: ${getCompassDirection(direction)} (${Math.round(direction)}°)`,
+            tooltip: `${monthNames[month - 1]} ${formatEpwStationHour(hour)} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}\nDir: ${getCompassDirection(direction)} (${Math.round(direction)}°)`,
             sunYear: values[0].year,
             sunMonth: month,
             sunDay: 15,
@@ -598,7 +599,7 @@ export function WindExplorer({
             value: val,
             direction: direction,
             label: `W${week + 1}`,
-            tooltip: `Week ${week + 1} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}\nDir: ${getCompassDirection(direction)} (${Math.round(direction)}°)`,
+            tooltip: `Week ${week + 1} ${formatEpwStationHour(hour)} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}\nDir: ${getCompassDirection(direction)} (${Math.round(direction)}°)`,
             sunYear: mid.year,
             sunMonth: mid.month,
             sunDay: mid.day,
@@ -632,8 +633,8 @@ export function WindExplorer({
           month: d.month,
           value: val,
           direction: d.windDirection as number,
-          label: d.date.toLocaleDateString(),
-          tooltip: `${d.date.toLocaleString()}\n${comp}\nDir: ${getCompassDirection(d.windDirection as number)} (${d.windDirection}°)`,
+          label: formatEpwStationDate(d),
+          tooltip: `${formatEpwStationDateTime(d)}\n${comp}\nDir: ${getCompassDirection(d.windDirection as number)} (${d.windDirection}°)`,
           sunYear: d.year,
           sunMonth: d.month,
           sunDay: d.day,
@@ -749,12 +750,7 @@ export function WindExplorer({
       }
     }
 
-    const formatHourRow = (h: number) => {
-      if (h === 0) return "12 AM";
-      if (h === 12) return "12 PM";
-      if (h < 12) return `${h} AM`;
-      return `${h - 12} PM`;
-    };
+    const formatHourRow = (h: number) => formatEpwStationHour(h);
     heatmapCellsG.append("g")
       .attr("class", "heatmap-hour-labels")
       .attr("pointer-events", "none")

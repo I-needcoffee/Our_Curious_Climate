@@ -52,6 +52,7 @@ import {
 import { CardModal } from './CardModal';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
 import { explorerUsesDailyAvgBarExtents, meanDailyLowHighForRows } from '../lib/explorerBarExtents';
+import { formatEpwStationDate, formatEpwStationDateTime, formatEpwStationHour } from '../lib/formatEpwStationClock';
 import {
   EXPLORER_SVG_BASE_WIDTH,
   EXPLORER_SVG_MARGIN,
@@ -387,8 +388,8 @@ export function DataExplorer({
             value: val,
             label: `${monthNames[month - 1]}`,
             tooltip: Number.isFinite(val)
-              ? `${monthNames[month - 1]} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${valLine} ${cUnit}`
-              : `${monthNames[month - 1]}\nNo hours in dry-bulb band for this month/hour`,
+              ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${valLine} ${cUnit}`
+              : `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band for this month/hour`,
 
             sunYear: values[0].year,
             sunMonth: month,
@@ -431,8 +432,8 @@ export function DataExplorer({
             value: val,
             label: `W${week + 1}`,
             tooltip: Number.isFinite(val)
-              ? `Week ${week + 1} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}`
-              : `Week ${week + 1}\nNo hours in dry-bulb band for this week/hour`,
+              ? `Week ${week + 1} ${formatEpwStationHour(hour)} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}`
+              : `Week ${week + 1} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band for this week/hour`,
             sunYear: mid.year,
             sunMonth: mid.month,
             sunDay: mid.day,
@@ -469,10 +470,10 @@ export function DataExplorer({
           y: d.hour,
           month: d.month,
           value: val,
-          label: d.date.toLocaleDateString(),
+          label: formatEpwStationDate(d),
           tooltip: Number.isFinite(val)
-            ? `${d.date.toLocaleString()}\n${colorVarDef.name} ${showDifference ? 'Diff' : ''}: ${valLine} ${cUnit}`
-            : `${d.date.toLocaleString()}\nOutside dry-bulb band`,
+            ? `${formatEpwStationDateTime(d)}\n${colorVarDef.name} ${showDifference ? 'Diff' : ''}: ${valLine} ${cUnit}`
+            : `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`,
           sunYear: d.year,
           sunMonth: d.month,
           sunDay: d.day,
@@ -595,12 +596,7 @@ export function DataExplorer({
       }
     }
 
-    const formatHourRow = (h: number) => {
-      if (h === 0) return "12 AM";
-      if (h === 12) return "12 PM";
-      if (h < 12) return `${h} AM`;
-      return `${h - 12} PM`;
-    };
+    const formatHourRow = (h: number) => formatEpwStationHour(h);
     heatmapCellsG.append("g")
       .attr("class", "heatmap-hour-labels")
       .attr("pointer-events", "none")

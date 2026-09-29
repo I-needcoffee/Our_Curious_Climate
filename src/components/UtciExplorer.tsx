@@ -13,6 +13,7 @@ import { AggregationToolbar } from './AggregationToolbar';
 import type { ChartType, CompareUtciSharedControls } from '../App';
 import { UnitSystem } from '../App';
 import { UNIT_C, UNIT_F, utciGradientExtentC } from '../lib/unitConversion';
+import { formatEpwStationDate, formatEpwStationDateTime, formatEpwStationHour } from '../lib/formatEpwStationClock';
 
 import type { BarChartFillMode, GlobalFilterState, HeatmapCellStatistic } from '../lib/globalFilter';
 import {
@@ -61,9 +62,14 @@ import {
   getUtciComfortPeriodById,
   heatmapSlotInUtciComfortPeriod,
   rowMatchesUtciComfortPeriod,
+  summarizeUtciCellScenarios,
   UTCI_COLORS,
   utciPeriodHeatmapBounds,
 } from '../lib/utciModel';
+import {
+  UtciCellScenarioModal,
+  type UtciCellInspectPayload,
+} from './UtciCellScenarioModal';
 
 interface UtciExplorerProps {
   data: EPWDataRow[];
@@ -94,6 +100,38 @@ interface UtciExplorerProps {
 // Create a continuous color scale for UTCI categories
 const UTCI_THRESHOLDS = [-40, -27, -13, 0, 9, 26, 32, 38, 46, 50];
 const UTCI_COLOR_VALUES = Object.values(UTCI_COLORS);
+
+function heatmapStatisticLabel(stat: HeatmapCellStatistic): string {
+  if (stat === 'low') return 'Low';
+  if (stat === 'high') return 'High';
+  return 'Ave';
+}
+
+function openUtciCellInspect(args: {
+  rows: EPWDataRow[];
+  title: string;
+  aggregation: 'hour' | 'day' | 'week' | 'month';
+  statistic: HeatmapCellStatistic;
+  setInspect: (p: UtciCellInspectPayload | null) => void;
+}) {
+  const { rows, title, aggregation, statistic, setInspect } = args;
+  if (!rows.length) return;
+  const scenarios = summarizeUtciCellScenarios(rows, statistic);
+  const hourCount = scenarios[0]?.hourCount ?? rows.length;
+  const aggWord =
+    aggregation === 'month'
+      ? 'Monthly'
+      : aggregation === 'week'
+        ? 'Weekly'
+        : aggregation === 'day'
+          ? 'Daily'
+          : 'Hourly';
+  const subtitle =
+    aggregation === 'hour' || hourCount <= 1
+      ? `${aggWord} cell · ${heatmapStatisticLabel(statistic)} feels-like for this hour`
+      : `${aggWord} cell · ${heatmapStatisticLabel(statistic)} feels-like across ${hourCount} hours in this box`;
+  setInspect({ title, subtitle, scenarios });
+}
 
 const utciCategoryScale = d3.scaleLinear<string>()
   .domain(UTCI_THRESHOLDS)
@@ -309,6 +347,10 @@ export function UtciExplorer({
   const [iShowStats, setIShowStats] = useState(false);
   const showStats = utciShared?.showStats ?? iShowStats;
   const setShowStats = utciShared?.setShowStats ?? setIShowStats;
+
+  const [cellInspect, setCellInspect] = useState<UtciCellInspectPayload | null>(null);
+  const setCellInspectRef = useRef(setCellInspect);
+  setCellInspectRef.current = setCellInspect;
 
   const showStatsModal = showStats && (!pairSuppressHeader || pairModalHost);
   const showSettingsModal = showSettings && (!pairSuppressHeader || pairModalHost);
@@ -710,12 +752,14 @@ export function UtciExplorer({
             utciCategory: Number.isFinite(avgUtciVal) ? getUtciCategoryForValue(avgUtciVal) : 'no thermal stress',
             isComfortable: comfortRatio,
             label: `${monthNames[month - 1]}`,
+            cellRows: selectedRows,
+            cellTitle: `${monthNames[month - 1]} · ${formatEpwStationHour(hour)}`,
             tooltip:
               !Number.isFinite(avgUtciVal)
-                ? `${monthNames[month - 1]}\nNo hours in dry-bulb band`
+                ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band`
                 : colorMode === 'comfortTime'
-                  ? `${monthNames[month - 1]} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}`
-                  : `${monthNames[month - 1]} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}`
+                  ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}`
+                  : `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}`
           });
         });
       });
@@ -744,11 +788,13 @@ export function UtciExplorer({
             utciCategory: Number.isFinite(avgUtci) ? getUtciCategoryForValue(avgUtci) : 'no thermal stress',
             isComfortable: comfortRatio,
             label: `W${week + 1}`,
+            cellRows: selectedRows,
+            cellTitle: `Week ${week + 1} · ${formatEpwStationHour(hour)}`,
             tooltip: !Number.isFinite(avgUtci)
-              ? `Week ${week + 1}\nNo hours in dry-bulb band`
+              ? `Week ${week + 1} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band`
               : colorMode === 'comfortTime'
-                ? `Week ${week + 1} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtci).toFixed(1)}${utciUnit}`
-                : `Week ${week + 1} Avg\nUTCI: ${convertUtci(avgUtci).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtci)}`
+                ? `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtci).toFixed(1)}${utciUnit}`
+                : `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nUTCI: ${convertUtci(avgUtci).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtci)}`
           });
         });
       });
@@ -765,12 +811,14 @@ export function UtciExplorer({
           utci: utciVal,
           utciCategory: pass ? d.utciCategory : 'no thermal stress',
           isComfortable: pass ? d.isComfortable : 0,
-          label: d.date.toLocaleDateString(),
+          label: formatEpwStationDate(d),
+          cellRows: pass ? [d] : [],
+          cellTitle: formatEpwStationDateTime(d),
           tooltip: !pass
-            ? `${d.date.toLocaleString()}\nOutside dry-bulb band`
+            ? `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`
             : colorMode === 'comfortTime'
-              ? `${d.date.toLocaleString()}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}`
-              : `${d.date.toLocaleString()}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}`
+              ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}`
+              : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}`
         };
       });
     }
@@ -813,8 +861,27 @@ export function UtciExplorer({
       .style("stroke", aggregation === 'month' || aggregation === 'week' ? 'rgba(0,0,0,0.1)' : 'none')
       .style("stroke-width", "1px")
       .style("opacity", d => heatmapCellOpacity(d.month, d.y))
+      .style("cursor", d =>
+        !showDifference && Array.isArray(d.cellRows) && d.cellRows.length > 0 ? 'pointer' : 'default'
+      )
+      .on("click", (_event, d) => {
+        if (showDifference && compareData) return;
+        const rows = d.cellRows as EPWDataRow[] | undefined;
+        if (!rows?.length) return;
+        openUtciCellInspect({
+          rows,
+          title: d.cellTitle || d.label || 'Selected cell',
+          aggregation,
+          statistic: heatmapCellStatistic,
+          setInspect: setCellInspectRef.current,
+        });
+      })
       .append("title")
-      .text(d => d.tooltip);
+      .text(d =>
+        !showDifference && Array.isArray(d.cellRows) && d.cellRows.length > 0
+          ? `${d.tooltip}\nClick to compare protection scenarios`
+          : d.tooltip
+      );
 
     // Overlay text for month and week aggregations if cells are large enough
     if (aggregation === 'month' || aggregation === 'week') {
@@ -883,12 +950,7 @@ export function UtciExplorer({
       }
     }
 
-    const formatHourRow = (h: number) => {
-      if (h === 0) return "12 AM";
-      if (h === 12) return "12 PM";
-      if (h < 12) return `${h} AM`;
-      return `${h - 12} PM`;
-    };
+    const formatHourRow = (h: number) => formatEpwStationHour(h);
     heatmapCellsG.append("g")
       .attr("class", "heatmap-hour-labels")
       .attr("pointer-events", "none")
@@ -1564,6 +1626,17 @@ export function UtciExplorer({
         </div>
 
       </CardModal>
+
+      <UtciCellScenarioModal
+        open={!!cellInspect}
+        onClose={() => setCellInspect(null)}
+        theme={theme}
+        unitSystem={unitSystem}
+        payload={cellInspect}
+        activeIncludeSun={includeSun}
+        activeIncludeWind={includeWind}
+        anchorRef={outerRef}
+      />
 
       {!pairSuppressFooterLegend && (
         <div

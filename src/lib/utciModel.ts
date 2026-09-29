@@ -2,8 +2,8 @@
 import tc from 'jsthermalcomfort';
 import type { EPWDataRow } from './epwParser';
 import { utciGradientExtentC } from './unitConversion';
-import type { GlobalFilterState } from './globalFilter';
-import { rowPassesDryBulbTemperature } from './globalFilter';
+import type { GlobalFilterState, HeatmapCellStatistic } from './globalFilter';
+import { aggregateCellStatistic, rowPassesDryBulbTemperature } from './globalFilter';
 import { OUTDOOR_COMFORT_GREEN_HEX, OUTDOOR_COMFORT_GREEN_RGB } from './constants';
 
 export const UTCI_COLORS: Record<string, string> = {
@@ -337,3 +337,57 @@ export function utciGradientExtentFromRows(
   }
   return utciGradientExtentC(values);
 }
+
+export type UtciCellScenarioSummary = {
+  scenario: UtciExposureScenario;
+  /** Aggregated UTCI in °C for the cell hours under this exposure. */
+  utciC: number;
+  category: string;
+  /** Share of hours in “no thermal stress” (0–1). */
+  comfortShare: number;
+  hourCount: number;
+};
+
+/**
+ * Recompute UTCI for every hour in a heatmap cell under each exposure scenario
+ * (sun/wind on/off), using the same cell statistic as the footer Low/Ave/High toggle.
+ */
+export function summarizeUtciCellScenarios(
+  rows: EPWDataRow[],
+  statistic: HeatmapCellStatistic = 'mean'
+): UtciCellScenarioSummary[] {
+  return UTCI_EXPOSURE_SCENARIOS.map(scenario => {
+    const computed = rows
+      .map(row => computeUtciForEpwRow(row, {
+        includeSun: scenario.includeSun,
+        includeWind: scenario.includeWind,
+      }))
+      .filter((r): r is NonNullable<typeof r> => r != null);
+
+    if (!computed.length) {
+      return {
+        scenario,
+        utciC: NaN,
+        category: UTCI_COMFORT_CATEGORY,
+        comfortShare: 0,
+        hourCount: 0,
+      };
+    }
+
+    const utciC = aggregateCellStatistic(
+      computed.map(c => c.utci),
+      statistic
+    );
+    const comfortShare =
+      computed.filter(c => c.isComfortable).length / computed.length;
+
+    return {
+      scenario,
+      utciC,
+      category: getUtciCategoryForValue(utciC),
+      comfortShare,
+      hourCount: computed.length,
+    };
+  });
+}
+
