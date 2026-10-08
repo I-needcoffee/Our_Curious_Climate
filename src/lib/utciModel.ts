@@ -5,6 +5,15 @@ import { utciGradientExtentC } from './unitConversion';
 import type { GlobalFilterState, HeatmapCellStatistic } from './globalFilter';
 import { aggregateCellStatistic, rowPassesDryBulbTemperature } from './globalFilter';
 import { OUTDOOR_COMFORT_GREEN_HEX, OUTDOOR_COMFORT_GREEN_RGB } from './constants';
+import {
+  ASTRONOMICAL_SEASON_LABELS,
+  astronomicalSeasonDaySegments,
+  dateInAstronomicalSeason,
+  hemisphereFromLatitude,
+  monthOverlapsAstronomicalSeason,
+  type AstronomicalSeason,
+  type Hemisphere,
+} from './seasons';
 
 export const UTCI_COLORS: Record<string, string> = {
   'extreme cold stress': '#000033',
@@ -105,8 +114,11 @@ function hourInIntersectedRange(
 export type UtciComfortPeriodDef = {
   id: string;
   label: string;
-  /** Calendar months for this row, or all months allowed by the global filter. */
-  months: number[] | 'all';
+  /**
+   * Astronomical season (equinox/solstice bounds), or all days in the global filter.
+   * See `src/lib/seasons.ts` — not meteorological Mar–May style month blocks.
+   */
+  season: AstronomicalSeason | 'all';
   startHour: number;
   endHour: number;
 };
@@ -159,15 +171,39 @@ export function utciExposureScenarioIndex(includeSun: boolean, includeWind: bool
 }
 
 export const UTCI_COMFORT_PERIOD_ROWS: UtciComfortPeriodDef[] = [
-  { id: 'annual-24h', label: 'Annual (24 hour)', months: 'all', startHour: 0, endHour: 23 },
-  { id: 'annual-7-18', label: 'Annual 7am–6pm', months: 'all', startHour: 7, endHour: 18 },
-  { id: 'spring-7-18', label: 'Spring 7am–6pm', months: [3, 4, 5], startHour: 7, endHour: 18 },
-  { id: 'summer-7-18', label: 'Summer 7am–6pm', months: [6, 7, 8], startHour: 7, endHour: 18 },
-  { id: 'fall-7-18', label: 'Fall 7am–6pm', months: [9, 10, 11], startHour: 7, endHour: 18 },
-  { id: 'winter-7-18', label: 'Winter 7am–6pm', months: [12, 1, 2], startHour: 7, endHour: 18 },
-  { id: 'annual-7-10', label: 'Annual 7am–10am', months: 'all', startHour: 7, endHour: 10 },
-  { id: 'annual-11-14', label: 'Annual 11am–2pm', months: 'all', startHour: 11, endHour: 14 },
-  { id: 'annual-15-18', label: 'Annual 3pm–6pm', months: 'all', startHour: 15, endHour: 18 },
+  { id: 'annual-24h', label: 'Annual (24 hour)', season: 'all', startHour: 0, endHour: 23 },
+  { id: 'annual-7-18', label: 'Annual 7am–6pm', season: 'all', startHour: 7, endHour: 18 },
+  {
+    id: 'spring-7-18',
+    label: `${ASTRONOMICAL_SEASON_LABELS.spring} 7am–6pm`,
+    season: 'spring',
+    startHour: 7,
+    endHour: 18,
+  },
+  {
+    id: 'summer-7-18',
+    label: `${ASTRONOMICAL_SEASON_LABELS.summer} 7am–6pm`,
+    season: 'summer',
+    startHour: 7,
+    endHour: 18,
+  },
+  {
+    id: 'fall-7-18',
+    label: `${ASTRONOMICAL_SEASON_LABELS.fall} 7am–6pm`,
+    season: 'fall',
+    startHour: 7,
+    endHour: 18,
+  },
+  {
+    id: 'winter-7-18',
+    label: `${ASTRONOMICAL_SEASON_LABELS.winter} 7am–6pm`,
+    season: 'winter',
+    startHour: 7,
+    endHour: 18,
+  },
+  { id: 'annual-7-10', label: 'Annual 7am–10am', season: 'all', startHour: 7, endHour: 10 },
+  { id: 'annual-11-14', label: 'Annual 11am–2pm', season: 'all', startHour: 11, endHour: 14 },
+  { id: 'annual-15-18', label: 'Annual 3pm–6pm', season: 'all', startHour: 15, endHour: 18 },
 ];
 
 export function getUtciComfortPeriodById(id: string | null | undefined): UtciComfortPeriodDef | undefined {
@@ -175,57 +211,111 @@ export function getUtciComfortPeriodById(id: string | null | undefined): UtciCom
   return UTCI_COMFORT_PERIOD_ROWS.find(p => p.id === id);
 }
 
-/** Heatmap month/hour slot (no dry-bulb check). */
+function resolveHemisphere(siteLatitude?: number | null): Hemisphere {
+  return hemisphereFromLatitude(siteLatitude);
+}
+
+function rowInPeriodSeason(
+  row: EPWDataRow,
+  period: UtciComfortPeriodDef,
+  hemisphere: Hemisphere
+): boolean {
+  if (period.season === 'all') return true;
+  return dateInAstronomicalSeason(
+    row.month as number,
+    row.day as number,
+    period.season,
+    hemisphere
+  );
+}
+
+/** Heatmap month/hour slot (no dry-bulb check). Month dims if it overlaps the season. */
 export function heatmapSlotInUtciComfortPeriod(
   month: number,
   hour: number,
   period: UtciComfortPeriodDef,
-  filter: GlobalFilterState
+  filter: GlobalFilterState,
+  siteLatitude?: number | null
 ): boolean {
   if (!monthInGlobalRange(month, filter)) return false;
-  if (period.months !== 'all' && !period.months.includes(month)) return false;
+  if (
+    period.season !== 'all' &&
+    !monthOverlapsAstronomicalSeason(month, period.season, resolveHemisphere(siteLatitude))
+  ) {
+    return false;
+  }
   return hourInIntersectedRange(hour, period.startHour, period.endHour, filter);
 }
 
-/** Day/hour bounds for a black focus outline on the 12×24 heatmap. */
+export type UtciPeriodHeatmapBounds = {
+  /** One or two day spans (end exclusive). Winter wraps the year. */
+  segments: { startDay: number; endDay: number }[];
+  startHour: number;
+  endHour: number;
+};
+
+/** Day/hour bounds for a black focus outline on the heatmap (supports wrap-around seasons). */
 export function utciPeriodHeatmapBounds(
   rows: EPWDataRow[],
   period: UtciComfortPeriodDef,
-  filter: GlobalFilterState
-): { startDay: number; endDay: number; startHour: number; endHour: number } | null {
+  filter: GlobalFilterState,
+  siteLatitude?: number | null
+): UtciPeriodHeatmapBounds | null {
   const startHour = Math.max(period.startHour, filter.startHour);
   const endHour = Math.min(period.endHour, filter.endHour);
   if (startHour > endHour) return null;
 
-  const allowedMonths = new Set<number>();
-  for (let m = 1; m <= 12; m++) {
-    if (!monthInGlobalRange(m, filter)) continue;
-    if (period.months !== 'all' && !period.months.includes(m)) continue;
-    allowedMonths.add(m);
-  }
-  if (!allowedMonths.size) return null;
+  const hemisphere = resolveHemisphere(siteLatitude);
 
-  let startDay = 366;
-  let endDay = 0;
-  for (const row of rows) {
-    const m = row.month as number;
-    const d = row.dayOfYear as number;
-    if (!allowedMonths.has(m) || d == null || Number.isNaN(d)) continue;
-    if (d < startDay) startDay = d;
-    if (d + 1 > endDay) endDay = d + 1;
+  if (period.season === 'all') {
+    let startDay = 366;
+    let endDay = 0;
+    for (const row of rows) {
+      const m = row.month as number;
+      const d = row.dayOfYear as number;
+      if (!monthInGlobalRange(m, filter) || d == null || Number.isNaN(d)) continue;
+      if (d < startDay) startDay = d;
+      if (d + 1 > endDay) endDay = d + 1;
+    }
+    if (startDay > endDay) return null;
+    return { segments: [{ startDay, endDay }], startHour, endHour };
   }
-  if (startDay > endDay) return null;
-  return { startDay, endDay, startHour, endHour };
+
+  const nominal = astronomicalSeasonDaySegments(period.season, hemisphere);
+  const segments: { startDay: number; endDay: number }[] = [];
+
+  for (const seg of nominal) {
+    let startDay = 366;
+    let endDay = 0;
+    let any = false;
+    for (const row of rows) {
+      const m = row.month as number;
+      const d = row.dayOfYear as number;
+      if (!monthInGlobalRange(m, filter) || d == null || Number.isNaN(d)) continue;
+      if (d < seg.startDay || d >= seg.endDayExclusive) continue;
+      if (!dateInAstronomicalSeason(m, row.day as number, period.season, hemisphere)) continue;
+      any = true;
+      if (d < startDay) startDay = d;
+      if (d + 1 > endDay) endDay = d + 1;
+    }
+    if (any && startDay < endDay) {
+      segments.push({ startDay, endDay });
+    }
+  }
+
+  if (!segments.length) return null;
+  return { segments, startHour, endHour };
 }
 
 export function rowMatchesUtciComfortPeriod(
   row: EPWDataRow,
   period: UtciComfortPeriodDef,
-  filter: GlobalFilterState
+  filter: GlobalFilterState,
+  siteLatitude?: number | null
 ): boolean {
   if (!rowPassesDryBulbTemperature(row, filter)) return false;
   if (!monthInGlobalRange(row.month as number, filter)) return false;
-  if (period.months !== 'all' && !period.months.includes(row.month as number)) return false;
+  if (!rowInPeriodSeason(row, period, resolveHemisphere(siteLatitude))) return false;
   return hourInIntersectedRange(row.hour as number, period.startHour, period.endHour, filter);
 }
 
@@ -307,7 +397,11 @@ export function comfortPercentHeatStyle(
   return { backgroundColor, color };
 }
 
-export function computeUtciComfortMatrix(rows: EPWDataRow[], filter: GlobalFilterState): UtciComfortMatrix {
+export function computeUtciComfortMatrix(
+  rows: EPWDataRow[],
+  filter: GlobalFilterState,
+  siteLatitude?: number | null
+): UtciComfortMatrix {
   const periods = UTCI_COMFORT_PERIOD_ROWS.map(p => ({ id: p.id, label: p.label }));
 
   const cells = UTCI_COMFORT_PERIOD_ROWS.map(period =>
@@ -315,7 +409,7 @@ export function computeUtciComfortMatrix(rows: EPWDataRow[], filter: GlobalFilte
       let comfortN = 0;
       let total = 0;
       for (const row of rows) {
-        if (!rowMatchesUtciComfortPeriod(row, period, filter)) continue;
+        if (!rowMatchesUtciComfortPeriod(row, period, filter, siteLatitude)) continue;
         const utci = computeUtciForEpwRow(row, {
           includeSun: scenario.includeSun,
           includeWind: scenario.includeWind,

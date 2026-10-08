@@ -881,6 +881,7 @@ export default function App() {
             tutorialLegendDomId={tutorialLegendDomId}
             tutorialChromeAnchors={tutorialChromeAnchors}
             pairSuppressFooterLegend={pairSuppressFooterLegend}
+            siteLatitude={fileData.metadata.lat}
           />
         );
       case 'naturalVentilation':
@@ -998,6 +999,7 @@ export default function App() {
       tutorialEpwRows={displayFiles[activeFileIndex]?.data}
       tutorialFilter={globalFilter}
       tutorialUnitSystem={unitSystem}
+      tutorialSiteLatitude={displayFiles[activeFileIndex]?.metadata.lat}
       renderChart={config => {
         const tutSlot =
           viewMode === 'single' &&
@@ -1540,6 +1542,7 @@ export default function App() {
                       rows={displayFiles[activeFileIndex]?.data}
                       unitSystem={unitSystem}
                       exportMode={exportMode}
+                      siteLatitude={displayFiles[activeFileIndex]?.metadata.lat}
                     />
                   </div>
                 ) : (

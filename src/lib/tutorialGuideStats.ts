@@ -326,8 +326,9 @@ export function computeTutorialUtciQuickStats(opts: {
   rows: EPWDataRow[] | undefined;
   filter: GlobalFilterState;
   live: TutorialLiveSnapshot;
+  siteLatitude?: number | null;
 }): TutorialUtciQuickStats | null {
-  const { rows, filter, live } = opts;
+  const { rows, filter, live, siteLatitude = null } = opts;
   if (!rows?.length) return null;
 
   const globallyFiltered = filterRows(rows, filter);
@@ -335,7 +336,9 @@ export function computeTutorialUtciQuickStats(opts: {
 
   const focusPeriod = getUtciComfortPeriodById(live.utciFocusPeriodId);
   const shareRows = focusPeriod
-    ? globallyFiltered.filter(row => rowMatchesUtciComfortPeriod(row, focusPeriod, filter))
+    ? globallyFiltered.filter(row =>
+        rowMatchesUtciComfortPeriod(row, focusPeriod, filter, siteLatitude)
+      )
     : globallyFiltered;
 
   const includeSun = live.includeSun ?? true;
@@ -343,7 +346,7 @@ export function computeTutorialUtciQuickStats(opts: {
   const modelOpts = { includeSun, includeWind };
 
   const { shares, comfortPercent, hoursCounted } = computeUtciCategoryShares(shareRows, modelOpts);
-  const comfortMatrix = computeUtciComfortMatrix(rows, filter);
+  const comfortMatrix = computeUtciComfortMatrix(rows, filter, siteLatitude);
 
   return {
     categoryShares: shares,

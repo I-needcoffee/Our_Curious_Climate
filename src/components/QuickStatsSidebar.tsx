@@ -4,6 +4,11 @@ import tc from 'jsthermalcomfort';
 import type { EPWDataRow } from '../lib/epwParser';
 import type { UnitSystem } from '../App';
 import { UNIT_C, UNIT_F } from '../lib/unitConversion';
+import {
+  ASTRONOMICAL_SEASON_LABELS,
+  hemisphereFromLatitude,
+  seasonForDate,
+} from '../lib/seasons';
 
 function cToF(v: number) {
   return v * (9 / 5) + 32;
@@ -38,12 +43,6 @@ function inHourRange(hour: number, startInclusive: number, endExclusive: number)
   return hour >= startInclusive && hour < endExclusive;
 }
 
-function seasonForMonth(month1to12: number): 'spring' | 'summer' | 'fall' | 'winter' {
-  if (month1to12 >= 3 && month1to12 <= 5) return 'spring';
-  if (month1to12 >= 6 && month1to12 <= 8) return 'summer';
-  if (month1to12 >= 9 && month1to12 <= 11) return 'fall';
-  return 'winter';
-}
 
 function utciComfortableC(utciC: number) {
   return utciC >= 9 && utciC <= 26;
@@ -73,8 +72,13 @@ function pct(n: number, d: number, digits = 1) {
   return Number.isFinite(r) ? `${formatNumber(r * 100, digits)} %` : '—';
 }
 
-function computeQuickStatsFromRows(rows: EPWDataRow[] | undefined, unitSystem: UnitSystem) {
+function computeQuickStatsFromRows(
+  rows: EPWDataRow[] | undefined,
+  unitSystem: UnitSystem,
+  siteLatitude?: number | null
+) {
   const data = (rows ?? []).filter(r => r && r.date);
+  const hemisphere = hemisphereFromLatitude(siteLatitude);
 
   const tempsC = data.map(r => r.dryBulbTemperature as number).filter(v => v != null && Number.isFinite(v));
   const rad = data
@@ -124,12 +128,13 @@ function computeQuickStatsFromRows(rows: EPWDataRow[] | undefined, unitSystem: U
 
     const h = r.hour as number;
     const m = r.month as number;
+    const day = r.day as number;
 
     if (inHourRange(h, 7, 19)) {
       comfortDayD += 1;
       if (ok) comfortDayN += 1;
 
-      const s = seasonForMonth(m);
+      const s = seasonForDate(m, day, hemisphere);
       comfortSeasonD[s] += 1;
       if (ok) comfortSeasonN[s] += 1;
     }
@@ -180,14 +185,19 @@ export function Grid4x2StatsColumn({
   rows,
   unitSystem,
   exportMode,
+  siteLatitude = null,
 }: {
   theme: 'light' | 'dark';
   rows?: EPWDataRow[];
   unitSystem: UnitSystem;
   /** Omit comfort-panel chrome so the combined export frame is a single border. */
   exportMode?: boolean;
+  siteLatitude?: number | null;
 }) {
-  const stats = useMemo(() => computeQuickStatsFromRows(rows, unitSystem), [rows, unitSystem]);
+  const stats = useMemo(
+    () => computeQuickStatsFromRows(rows, unitSystem, siteLatitude),
+    [rows, unitSystem, siteLatitude]
+  );
 
   const cardShell =
     theme === 'dark'
@@ -247,10 +257,22 @@ export function Grid4x2StatsColumn({
             <p className={`truncate pb-0.5 text-[10px] font-bold ${label}`}>7am–7pm</p>
             <div className="space-y-1">
               <ComfortRow left="Annual" right={stats.comfort7am7pmAnnual} />
-              <ComfortRow left="Spring" right={stats.comfort7to19BySeason.spring} />
-              <ComfortRow left="Summer" right={stats.comfort7to19BySeason.summer} />
-              <ComfortRow left="Fall" right={stats.comfort7to19BySeason.fall} />
-              <ComfortRow left="Winter" right={stats.comfort7to19BySeason.winter} />
+              <ComfortRow
+                left={ASTRONOMICAL_SEASON_LABELS.spring}
+                right={stats.comfort7to19BySeason.spring}
+              />
+              <ComfortRow
+                left={ASTRONOMICAL_SEASON_LABELS.summer}
+                right={stats.comfort7to19BySeason.summer}
+              />
+              <ComfortRow
+                left={ASTRONOMICAL_SEASON_LABELS.fall}
+                right={stats.comfort7to19BySeason.fall}
+              />
+              <ComfortRow
+                left={ASTRONOMICAL_SEASON_LABELS.winter}
+                right={stats.comfort7to19BySeason.winter}
+              />
             </div>
           </div>
 

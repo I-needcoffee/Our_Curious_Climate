@@ -21,12 +21,14 @@ export function TutorialGuidePanel({
   epwRows,
   filter,
   unitSystem,
+  siteLatitude = null,
 }: {
   theme: 'light' | 'dark';
   slot: ChartConfig;
   epwRows?: EPWDataRow[];
   filter: GlobalFilterState;
   unitSystem: UnitSystem;
+  siteLatitude?: number | null;
 }) {
   const { snapshot, requestUtciSelection, clearUtciFocus } = useTutorialLive();
   const [selectedCell, setSelectedCell] = useState<{ periodIndex: number; scenarioIndex: number } | null>(
@@ -115,9 +117,14 @@ export function TutorialGuidePanel({
   const utciStats = useMemo(
     () =>
       slot.type === 'utci'
-        ? computeTutorialUtciQuickStats({ rows: epwRows, filter, live: snapshot })
+        ? computeTutorialUtciQuickStats({
+            rows: epwRows,
+            filter,
+            live: snapshot,
+            siteLatitude,
+          })
         : null,
-    [slot.type, epwRows, filter, snapshot]
+    [slot.type, epwRows, filter, snapshot, siteLatitude]
   );
 
   const nvStats = useMemo(
@@ -330,6 +337,7 @@ export function TutorialGuidePanel({
                 <p className={`mb-2 text-[10px] leading-snug ${muted}`}>
                   Click a cell to apply that exposure and highlight the matching time window on the chart. Greener = more
                   comfort time. Click the cell again, use Clear, or click outside the table to remove the highlight.
+                  Seasonal rows use astronomical boundaries (equinoxes/solstices), not whole calendar months.
                 </p>
                 {(selectedCell || snapshot.utciFocusPeriodId) && (
                   <button
@@ -385,9 +393,10 @@ export function TutorialGuidePanel({
                           <tr key={period.id}>
                             <th
                               scope="row"
-                              className={`sticky left-0 z-10 max-w-[6.5rem] py-1 pr-1.5 text-left font-medium leading-snug ${
+                              className={`sticky left-0 z-10 max-w-[9rem] py-1 pr-1.5 text-left text-[10px] font-medium leading-snug ${
                                 theme === 'dark' ? 'bg-gray-800/95' : 'bg-white/95'
                               } ${rowSelected ? (theme === 'dark' ? 'text-orange-300' : 'text-orange-800') : ink}`}
+                              title={period.label}
                             >
                               {period.label}
                             </th>

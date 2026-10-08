@@ -95,6 +95,8 @@ interface UtciExplorerProps {
   tutorialLegendDomId?: string;
   tutorialChromeAnchors?: boolean;
   pairSuppressFooterLegend?: boolean;
+  /** EPW site latitude — flips astronomical seasons for the Southern Hemisphere. */
+  siteLatitude?: number | null;
 }
 
 // Create a continuous color scale for UTCI categories
@@ -308,6 +310,7 @@ export function UtciExplorer({
   tutorialLegendDomId,
   tutorialChromeAnchors,
   pairSuppressFooterLegend,
+  siteLatitude = null,
 }: UtciExplorerProps) {
   const barGradientSvgId = explorerChartValueGradientId(useId());
   const svgRef = useRef<SVGSVGElement>(null);
@@ -647,7 +650,9 @@ export function UtciExplorer({
     const heatmapCellOpacity = (month: number, hour: number) => {
       if (!heatmapCellInGlobal(month, hour)) return 0.2;
       if (!focusPeriod) return 1;
-      return heatmapSlotInUtciComfortPeriod(month, hour, focusPeriod, filter) ? 1 : 0.28;
+      return heatmapSlotInUtciComfortPeriod(month, hour, focusPeriod, filter, siteLatitude)
+        ? 1
+        : 0.28;
     };
 
     const width = EXPLORER_SVG_BASE_WIDTH;
@@ -934,21 +939,23 @@ export function UtciExplorer({
     }
 
     if (focusPeriod) {
-      const focusBounds = utciPeriodHeatmapBounds(data, focusPeriod, filter);
+      const focusBounds = utciPeriodHeatmapBounds(data, focusPeriod, filter, siteLatitude);
       if (focusBounds) {
-        const span = explorerHeatmapSpanXPx(innerWidth, focusBounds.startDay, focusBounds.endDay);
-        heatmapCellsG
-          .append("rect")
-          .attr("x", span.x)
-          .attr("y", hourRowTop(focusBounds.startHour))
-          .attr("width", span.width)
-          .attr("height", hourRowTop(focusBounds.endHour + 1) - hourRowTop(focusBounds.startHour))
-          .attr("fill", "none")
-          .attr("stroke", "#1f2937")
-          .attr("stroke-width", 3)
-          .attr("rx", 2)
-          .attr("ry", 2)
-          .style("pointer-events", "none");
+        for (const seg of focusBounds.segments) {
+          const span = explorerHeatmapSpanXPx(innerWidth, seg.startDay, seg.endDay);
+          heatmapCellsG
+            .append("rect")
+            .attr("x", span.x)
+            .attr("y", hourRowTop(focusBounds.startHour))
+            .attr("width", span.width)
+            .attr("height", hourRowTop(focusBounds.endHour + 1) - hourRowTop(focusBounds.startHour))
+            .attr("fill", "none")
+            .attr("stroke", "#1f2937")
+            .attr("stroke-width", 3)
+            .attr("rx", 2)
+            .attr("ry", 2)
+            .style("pointer-events", "none");
+        }
       }
     }
 
@@ -971,7 +978,7 @@ export function UtciExplorer({
     const isSelected = (d: UtciDataRow) => {
       if (!rowPassesGlobalFilters(d, filter)) return false;
       if (!focusPeriod) return true;
-      return rowMatchesUtciComfortPeriod(d, focusPeriod, filter);
+      return rowMatchesUtciComfortPeriod(d, focusPeriod, filter, siteLatitude);
     };
 
     // Aggregate data
@@ -1260,6 +1267,7 @@ export function UtciExplorer({
     tutorialFocusPeriodId,
     barGradientSvgId,
     barChartFillMode,
+    siteLatitude,
   ]);
 
   // Calculate local stats for filtered data
@@ -1270,7 +1278,7 @@ export function UtciExplorer({
         : undefined;
     const filteredData = utciData.filter(d =>
       focusPeriod
-        ? rowMatchesUtciComfortPeriod(d, focusPeriod, filter)
+        ? rowMatchesUtciComfortPeriod(d, focusPeriod, filter, siteLatitude)
         : rowPassesGlobalFilters(d, filter)
     );
 
