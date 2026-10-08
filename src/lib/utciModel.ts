@@ -23,7 +23,13 @@ export const UTCI_CATEGORY_ORDER = Object.keys(UTCI_COLORS);
 
 export const UTCI_COMFORT_CATEGORY = 'no thermal stress';
 
+/**
+ * Official UTCI assessment scale (range bins), not nearest-threshold.
+ * Do not use `jsthermalcomfort`'s `stress_category`: its mapper picks the nearest
+ * boundary label, so e.g. UTCI 15°C (true comfort) is mislabeled "slight cold stress".
+ */
 export function getUtciCategoryForValue(val: number): string {
+  if (!Number.isFinite(val)) return 'slight cold stress';
   if (val < -40) return 'extreme cold stress';
   if (val < -27) return 'very strong cold stress';
   if (val < -13) return 'strong cold stress';
@@ -58,15 +64,18 @@ export function computeUtciForEpwRow(
   const tr = includeSun ? tdb + 0.02 * Math.max(0, ghr) : tdb;
 
   let utciVal = tdb;
-  let category = getUtciCategoryForValue(tdb);
   try {
-    const result = tc.models.utci(tdb, tr, v, rh, 'SI', true, false);
-    utciVal = Number.isNaN(result.utci) ? tdb : result.utci;
-    category = result.stress_category || getUtciCategoryForValue(utciVal);
+    // Numeric UTCI only — never use library stress_category (nearest-threshold bug).
+    const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, false);
+    const u = typeof result === 'number' ? result : result?.utci;
+    if (Number.isFinite(u)) {
+      utciVal = u as number;
+    }
   } catch {
-    // keep fallback
+    // keep dry-bulb fallback
   }
 
+  const category = getUtciCategoryForValue(utciVal);
   return {
     utci: utciVal,
     category,

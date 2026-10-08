@@ -519,16 +519,18 @@ export function UtciExplorer({
       const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
       const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
 
-      // Calculate UTCI
+      // Numeric UTCI from jsthermalcomfort; categorize with our range bins (library
+      // stress_category uses nearest-threshold and mislabels ~9–17°C as slight cold).
       let utciVal = tdb;
-      let category = getUtciCategoryForValue(tdb);
       try {
-        const result = tc.models.utci(tdb, tr, v, rh, 'SI', true, false);
-        utciVal = isNaN(result.utci) ? tdb : result.utci;
-        category = result.stress_category || getUtciCategoryForValue(utciVal);
+        const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, false);
+        if (result && Number.isFinite(result.utci)) {
+          utciVal = result.utci;
+        }
       } catch (e) {
-        // Fallback
+        // Fallback: dry-bulb
       }
+      const category = getUtciCategoryForValue(utciVal);
 
       return {
         ...d,
@@ -549,16 +551,16 @@ export function UtciExplorer({
       const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
       const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
 
-      // Calculate UTCI
       let utciVal = tdb;
-      let category = getUtciCategoryForValue(tdb);
       try {
-        const result = tc.models.utci(tdb, tr, v, rh, 'SI', true, false);
-        utciVal = isNaN(result.utci) ? tdb : result.utci;
-        category = result.stress_category || getUtciCategoryForValue(utciVal);
+        const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, false);
+        if (result && Number.isFinite(result.utci)) {
+          utciVal = result.utci;
+        }
       } catch (e) {
-        // Fallback
+        // Fallback: dry-bulb
       }
+      const category = getUtciCategoryForValue(utciVal);
 
       return {
         ...d,
