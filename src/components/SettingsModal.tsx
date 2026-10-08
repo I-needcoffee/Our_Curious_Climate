@@ -1,10 +1,19 @@
-import { useState } from 'react';
 import { X, Calendar, Clock, Palette, Sun, Moon, Settings, Filter, Thermometer, BarChart2 } from 'lucide-react';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import type { BarChartFillMode, GlobalFilterState } from '../lib/globalFilter';
 import type { UnitSystem } from '../App';
 import { TemperatureIsolationRange } from './TemperatureIsolationRange';
+import { WrappingRangeSlider } from './WrappingRangeSlider';
+import {
+  GLOBAL_HOUR_PRESETS,
+  HOUR_WRAP_HINT,
+  MONTH_WRAP_HINT,
+  SEASON_MONTH_PRESETS,
+  formatHourIsolationRange,
+  formatMonthIsolationRange,
+  isolationRangesEqual,
+} from '../lib/timeIsolationUi';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -23,8 +32,6 @@ interface SettingsModalProps {
   barChartFillMode: BarChartFillMode;
   onBarChartFillModeChange: (mode: BarChartFillMode) => void;
 }
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function SettingsModal({
   isOpen,
@@ -55,6 +62,9 @@ export function SettingsModal({
     setHeatmapTextColor(hex);
   };
 
+  const monthRange: [number, number] = [filter.startMonth, filter.endMonth];
+  const hourRange: [number, number] = [filter.startHour, filter.endHour];
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2">
       <div className={`rounded-xl shadow-xl max-w-md w-full max-h-[min(90vh,560px)] overflow-y-auto border ${theme === 'dark' ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-gray-900 border-gray-200'}`}>
@@ -76,7 +86,7 @@ export function SettingsModal({
               Global time filters
             </h3>
             
-            {/* Month Filter */}
+            {/* Month Filter — same wrapping slider + presets as Wind Rose */}
             <div className="space-y-3">
               <div className="flex items-center justify-between font-medium text-sm">
                 <div className="flex items-center gap-2">
@@ -84,70 +94,62 @@ export function SettingsModal({
                   <span>Months</span>
                 </div>
                 <span className={`rounded-full border px-2 py-0.5 font-mono text-xs ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-100'}`}>
-                  {filter.startMonth <= filter.endMonth 
-                    ? `${MONTHS[filter.startMonth - 1]} - ${MONTHS[filter.endMonth - 1]}`
-                    : `${MONTHS[filter.startMonth - 1]} - ${MONTHS[filter.endMonth - 1]} (Wrap)`}
+                  {formatMonthIsolationRange(monthRange)}
                 </span>
               </div>
-              <div className="px-2">
-                <Slider 
-                  range 
-                  min={1} 
-                  max={12} 
-                  value={[filter.startMonth, filter.endMonth]} 
-                  onChange={(val) => {
-                    if (Array.isArray(val)) {
-                      onChangeFilter({ ...filter, startMonth: val[0], endMonth: val[1] });
-                    }
-                  }}
-                  trackStyle={[{ backgroundColor: theme === 'dark' ? '#9ca3af' : '#525252', height: '4px' }]}
-                  handleStyle={[
-                    {
-                      borderColor: theme === 'dark' ? '#9ca3af' : '#525252',
-                      backgroundColor: 'white',
-                      opacity: 1,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                      width: '14px',
-                      height: '14px',
-                      marginTop: '-5px',
-                    },
-                    {
-                      borderColor: theme === 'dark' ? '#9ca3af' : '#525252',
-                      backgroundColor: 'white',
-                      opacity: 1,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                      width: '14px',
-                      height: '14px',
-                      marginTop: '-5px',
-                    },
-                  ]}
-                  railStyle={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6', height: '4px' }}
-                />
-              </div>
               <div className="flex flex-wrap gap-2">
-                {[
-                  { label: 'Spring', range: [3, 5] },
-                  { label: 'Summer', range: [6, 8] },
-                  { label: 'Fall', range: [9, 11] },
-                  { label: 'Winter', range: [12, 2] },
-                  { label: 'Annual', range: [1, 12] }
-                ].map((preset) => (
-                  <button
-                    key={preset.label}
-                    onClick={() => onChangeFilter({ ...filter, startMonth: preset.range[0], endMonth: preset.range[1] })}
-                    className={`text-xs font-medium rounded-full transition-colors border px-3 py-1.5 ${
-                      filter.startMonth === preset.range[0] && filter.endMonth === preset.range[1]
-                        ? (theme === 'dark' ? 'bg-gray-600 text-gray-100 border-gray-500' : 'bg-gray-200 text-gray-900 border-gray-400')
-                        : (theme === 'dark' ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')
-                    }`}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+                {SEASON_MONTH_PRESETS.map(preset => {
+                  const selected = isolationRangesEqual(monthRange, preset.range);
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() =>
+                        onChangeFilter({
+                          ...filter,
+                          startMonth: preset.range[0],
+                          endMonth: preset.range[1],
+                        })
+                      }
+                      className={`text-xs font-medium rounded-full transition-colors border px-3 py-1.5 ${
+                        selected
+                          ? theme === 'dark'
+                            ? 'bg-gray-600 text-gray-100 border-gray-500'
+                            : 'bg-gray-200 text-gray-900 border-gray-400'
+                          : theme === 'dark'
+                            ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                {MONTH_WRAP_HINT}
+              </p>
+              <div className="px-2">
+                <WrappingRangeSlider
+                  min={1}
+                  max={12}
+                  value={monthRange}
+                  onChange={([startMonth, endMonth]) =>
+                    onChangeFilter({ ...filter, startMonth, endMonth })
+                  }
+                  theme={theme}
+                  startAriaLabel="Start month"
+                  endAriaLabel="End month"
+                />
+                <div className="mt-1 flex justify-between">
+                  <span className="text-[10px] text-gray-400">Jan</span>
+                  <span className="text-[10px] text-gray-400">Jun</span>
+                  <span className="text-[10px] text-gray-400">Dec</span>
+                </div>
               </div>
             </div>
 
-            {/* Hour Filter */}
+            {/* Hour Filter — wrapping midnight, shared wording with Wind Rose */}
             <div className="space-y-3">
               <div className="flex items-center justify-between font-medium text-sm">
                 <div className="flex items-center gap-2">
@@ -155,64 +157,59 @@ export function SettingsModal({
                   <span>Hours</span>
                 </div>
                 <span className={`rounded-full border px-2 py-0.5 font-mono text-xs ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-100'}`}>
-                  {filter.startHour.toString().padStart(2, '0')}:00 - {filter.endHour.toString().padStart(2, '0')}:59
+                  {formatHourIsolationRange(hourRange)}
                 </span>
               </div>
-              <div className="px-2">
-                <Slider 
-                  range 
-                  min={0} 
-                  max={23} 
-                  value={[filter.startHour, filter.endHour]} 
-                  onChange={(val) => {
-                    if (Array.isArray(val)) {
-                      onChangeFilter({ ...filter, startHour: val[0], endHour: val[1] });
-                    }
-                  }}
-                  trackStyle={[{ backgroundColor: theme === 'dark' ? '#9ca3af' : '#525252', height: '4px' }]}
-                  handleStyle={[
-                    {
-                      borderColor: theme === 'dark' ? '#9ca3af' : '#525252',
-                      backgroundColor: 'white',
-                      opacity: 1,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                      width: '14px',
-                      height: '14px',
-                      marginTop: '-5px',
-                    },
-                    {
-                      borderColor: theme === 'dark' ? '#9ca3af' : '#525252',
-                      backgroundColor: 'white',
-                      opacity: 1,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                      width: '14px',
-                      height: '14px',
-                      marginTop: '-5px',
-                    },
-                  ]}
-                  railStyle={{ backgroundColor: theme === 'dark' ? '#374151' : '#f3f4f6', height: '4px' }}
-                />
-              </div>
               <div className="flex flex-wrap gap-2">
-                {[
-                  { label: '7am - 7pm', range: [7, 19] },
-                  { label: 'Morning (7-11)', range: [7, 11] },
-                  { label: 'Midday (11-3)', range: [11, 15] },
-                  { label: 'Afternoon (4-7)', range: [16, 19] },
-                  { label: 'All Day', range: [0, 23] }
-                ].map((preset) => (
-                  <button
-                    key={preset.label}
-                    onClick={() => onChangeFilter({ ...filter, startHour: preset.range[0], endHour: preset.range[1] })}
-                    className={`text-xs font-medium rounded-full transition-colors border px-3 py-1.5 ${
-                      filter.startHour === preset.range[0] && filter.endHour === preset.range[1]
-                        ? (theme === 'dark' ? 'bg-gray-600 text-gray-100 border-gray-500' : 'bg-gray-200 text-gray-900 border-gray-400')
-                        : (theme === 'dark' ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')
-                    }`}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+                {GLOBAL_HOUR_PRESETS.map(preset => {
+                  const selected = isolationRangesEqual(hourRange, preset.range);
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      title={preset.hint}
+                      onClick={() =>
+                        onChangeFilter({
+                          ...filter,
+                          startHour: preset.range[0],
+                          endHour: preset.range[1],
+                        })
+                      }
+                      className={`text-xs font-medium rounded-full transition-colors border px-3 py-1.5 ${
+                        selected
+                          ? theme === 'dark'
+                            ? 'bg-gray-600 text-gray-100 border-gray-500'
+                            : 'bg-gray-200 text-gray-900 border-gray-400'
+                          : theme === 'dark'
+                            ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                {HOUR_WRAP_HINT}
+              </p>
+              <div className="px-2">
+                <WrappingRangeSlider
+                  min={0}
+                  max={23}
+                  value={hourRange}
+                  onChange={([startHour, endHour]) =>
+                    onChangeFilter({ ...filter, startHour, endHour })
+                  }
+                  theme={theme}
+                  startAriaLabel="Start hour"
+                  endAriaLabel="End hour"
+                />
+                <div className="mt-1 flex justify-between">
+                  <span className="text-[10px] text-gray-400">12am</span>
+                  <span className="text-[10px] text-gray-400">12pm</span>
+                  <span className="text-[10px] text-gray-400">11pm</span>
+                </div>
               </div>
             </div>
           </div>

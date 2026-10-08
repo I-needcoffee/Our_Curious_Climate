@@ -30,6 +30,12 @@ import {
   aggregateCellStatistic,
   explorerBarSolidColor,
   explorerBarStatisticY,
+  globalFilterDaySegments,
+  hourFilterIsPartial,
+  hourInWrappedRange,
+  hourRangeOutlineSegments,
+  monthFilterIsPartial,
+  monthInRange,
   rowPassesGlobalFilters,
 } from '../lib/globalFilter';
 
@@ -503,11 +509,8 @@ export function DataExplorer({
         return `translate(${xp.x}, ${hourRowTop(d.y)})`;
       })
       .style("opacity", d => {
-        const isMonthMatch =
-          filter.startMonth <= filter.endMonth
-            ? d.month >= filter.startMonth && d.month <= filter.endMonth
-            : d.month >= filter.startMonth || d.month <= filter.endMonth;
-        const isHourMatch = d.y >= filter.startHour && d.y <= filter.endHour;
+        const isMonthMatch = monthInRange(d.month, filter.startMonth, filter.endMonth);
+        const isHourMatch = hourInWrappedRange(d.y, filter.startHour, filter.endHour);
         return isMonthMatch && isHourMatch ? 1 : 0.2;
       });
 
@@ -560,11 +563,9 @@ export function DataExplorer({
         .style("font-weight", "500")
         .style("pointer-events", "none")
         .style("opacity", d => {
-          const isMonthMatch = filter.startMonth <= filter.endMonth
-            ? (d.month >= filter.startMonth && d.month <= filter.endMonth)
-            : (d.month >= filter.startMonth || d.month <= filter.endMonth);
-          const isHourMatch = d.y >= filter.startHour && d.y <= filter.endHour;
-          return (isMonthMatch && isHourMatch) ? 1 : 0.2;
+          const isMonthMatch = monthInRange(d.month, filter.startMonth, filter.endMonth);
+          const isHourMatch = hourInWrappedRange(d.y, filter.startHour, filter.endHour);
+          return isMonthMatch && isHourMatch ? 1 : 0.2;
         })
         .text(d =>
           Number.isFinite(d.value) && explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width > overlayMinWidth
@@ -573,26 +574,25 @@ export function DataExplorer({
         );
     }
 
-    // Add bounding box for the selected region
-    if (filter.startMonth > 1 || filter.endMonth < 12 || filter.startHour > 0 || filter.endHour < 23) {
-      // Find start day of startMonth and end day of endMonth
-      const startDay = data.find(d => d.month === filter.startMonth)?.dayOfYear || 1;
-      const endDayData = [...data].reverse().find(d => d.month === filter.endMonth);
-      const endDay = endDayData ? endDayData.dayOfYear + 1 : 366;
-
-      {
-        const span = explorerHeatmapSpanXPx(innerWidth, startDay, endDay);
-        heatmapCellsG.append("rect")
-        .attr("x", span.x)
-        .attr("y", hourRowTop(filter.startHour))
-        .attr("width", span.width)
-        .attr("height", hourRowTop(filter.endHour + 1) - hourRowTop(filter.startHour))
-        .attr("fill", "none")
-        .attr("stroke", "#1f2937") // Dark grey
-        .attr("stroke-width", 3)
-        .attr("rx", 2)
-        .attr("ry", 2)
-        .style("pointer-events", "none");
+    // Bounding box(es) for the selected region (supports month/hour wrap)
+    if (monthFilterIsPartial(filter) || hourFilterIsPartial(filter)) {
+      const hourSegments = hourRangeOutlineSegments(filter.startHour, filter.endHour);
+      for (const daySeg of globalFilterDaySegments(data, filter)) {
+        const span = explorerHeatmapSpanXPx(innerWidth, daySeg.startDay, daySeg.endDay);
+        for (const hourSeg of hourSegments) {
+          heatmapCellsG
+            .append('rect')
+            .attr('x', span.x)
+            .attr('y', hourRowTop(hourSeg.startHour))
+            .attr('width', span.width)
+            .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
+            .attr('fill', 'none')
+            .attr('stroke', '#1f2937')
+            .attr('stroke-width', 3)
+            .attr('rx', 2)
+            .attr('ry', 2)
+            .style('pointer-events', 'none');
+        }
       }
     }
 

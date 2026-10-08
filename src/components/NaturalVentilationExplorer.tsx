@@ -15,6 +15,12 @@ import type { BarChartFillMode, GlobalFilterState, HeatmapCellStatistic } from '
 import {
   aggregateCellStatistic,
   explorerBarStatisticY,
+  globalFilterDaySegments,
+  hourFilterIsPartial,
+  hourInWrappedRange,
+  hourRangeOutlineSegments,
+  monthFilterIsPartial,
+  monthInRange,
   rowPassesGlobalFilters,
 } from '../lib/globalFilter';
 import { ChartTypeMenu } from './ChartTypeMenu';
@@ -246,11 +252,10 @@ export function NaturalVentilationExplorer({
     if (!currentData.length) return;
 
     const heatmapCellInGlobal = (month: number, hour: number) => {
-      const isMonthMatch =
-        filter.startMonth <= filter.endMonth
-          ? month >= filter.startMonth && month <= filter.endMonth
-          : month >= filter.startMonth || month <= filter.endMonth;
-      return isMonthMatch && hour >= filter.startHour && hour <= filter.endHour;
+      return (
+        monthInRange(month, filter.startMonth, filter.endMonth) &&
+        hourInWrappedRange(hour, filter.startHour, filter.endHour)
+      );
     };
 
     const heatmapCellOpacity = (month: number, hour: number) =>
@@ -468,28 +473,25 @@ export function NaturalVentilationExplorer({
         });
     }
 
-    if (
-      filter.startMonth > 1 ||
-      filter.endMonth < 12 ||
-      filter.startHour > 0 ||
-      filter.endHour < 23
-    ) {
-      const startDay = data.find(d => d.month === filter.startMonth)?.dayOfYear || 1;
-      const endDayData = [...data].reverse().find(d => d.month === filter.endMonth);
-      const endDay = endDayData ? endDayData.dayOfYear + 1 : 366;
-      const span = explorerHeatmapSpanXPx(innerWidth, startDay, endDay);
-      heatmapCellsG
-        .append('rect')
-        .attr('x', span.x)
-        .attr('y', hourRowTop(filter.startHour))
-        .attr('width', span.width)
-        .attr('height', hourRowTop(filter.endHour + 1) - hourRowTop(filter.startHour))
-        .attr('fill', 'none')
-        .attr('stroke', '#1f2937')
-        .attr('stroke-width', 3)
-        .attr('rx', 2)
-        .attr('ry', 2)
-        .style('pointer-events', 'none');
+    if (monthFilterIsPartial(filter) || hourFilterIsPartial(filter)) {
+      const hourSegments = hourRangeOutlineSegments(filter.startHour, filter.endHour);
+      for (const daySeg of globalFilterDaySegments(data, filter)) {
+        const span = explorerHeatmapSpanXPx(innerWidth, daySeg.startDay, daySeg.endDay);
+        for (const hourSeg of hourSegments) {
+          heatmapCellsG
+            .append('rect')
+            .attr('x', span.x)
+            .attr('y', hourRowTop(hourSeg.startHour))
+            .attr('width', span.width)
+            .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
+            .attr('fill', 'none')
+            .attr('stroke', '#1f2937')
+            .attr('stroke-width', 3)
+            .attr('rx', 2)
+            .attr('ry', 2)
+            .style('pointer-events', 'none');
+        }
+      }
     }
 
     const formatHourRow = (h: number) => formatEpwStationHour(h);

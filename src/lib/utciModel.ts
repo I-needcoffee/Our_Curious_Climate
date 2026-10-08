@@ -3,7 +3,11 @@ import tc from 'jsthermalcomfort';
 import type { EPWDataRow } from './epwParser';
 import { utciGradientExtentC } from './unitConversion';
 import type { GlobalFilterState, HeatmapCellStatistic } from './globalFilter';
-import { aggregateCellStatistic, rowPassesDryBulbTemperature } from './globalFilter';
+import {
+  aggregateCellStatistic,
+  hourInWrappedRange,
+  rowPassesDryBulbTemperature,
+} from './globalFilter';
 import { OUTDOOR_COMFORT_GREEN_HEX, OUTDOOR_COMFORT_GREEN_RGB } from './constants';
 import {
   ASTRONOMICAL_SEASON_LABELS,
@@ -105,10 +109,12 @@ function hourInIntersectedRange(
   periodEndInclusive: number,
   f: GlobalFilterState
 ): boolean {
-  const start = Math.max(periodStart, f.startHour);
-  const end = Math.min(periodEndInclusive, f.endHour);
-  if (start > end) return false;
-  return hour >= start && hour <= end;
+  const inPeriod =
+    periodStart <= periodEndInclusive
+      ? hour >= periodStart && hour <= periodEndInclusive
+      : hour >= periodStart || hour <= periodEndInclusive;
+  if (!inPeriod) return false;
+  return hourInWrappedRange(hour, f.startHour, f.endHour);
 }
 
 export type UtciComfortPeriodDef = {
@@ -229,7 +235,7 @@ function rowInPeriodSeason(
   );
 }
 
-/** Heatmap month/hour slot (no dry-bulb check). Month dims if it overlaps the season. */
+/** Heatmap month/hour slot (no dry-bulb check). Prefer `heatmapCellFocusDaySpans` for day-accurate isolation. */
 export function heatmapSlotInUtciComfortPeriod(
   month: number,
   hour: number,
@@ -247,12 +253,77 @@ export function heatmapSlotInUtciComfortPeriod(
   return hourInIntersectedRange(hour, period.startHour, period.endHour, filter);
 }
 
+function intersectDayRanges(
+  a0: number,
+  a1: number,
+  b0: number,
+  b1: number
+): { x0: number; x1: number } | null {
+  const x0 = Math.max(a0, b0);
+  const x1 = Math.min(a1, b1);
+  if (x0 >= x1) return null;
+  return { x0, x1 };
+}
+
+/**
+ * Day-of-year spans inside a heatmap cell `[x0, x1)` that fall in the focused
+ * comfort period (astronomical season + hours), for clipping visual isolation.
+ */
+export function heatmapCellFocusDaySpans(
+  x0: number,
+  x1: number,
+  hour: number,
+  period: UtciComfortPeriodDef,
+  filter: GlobalFilterState,
+  siteLatitude?: number | null
+): { x0: number; x1: number }[] {
+  if (!hourInIntersectedRange(hour, period.startHour, period.endHour, filter)) {
+    return [];
+  }
+  if (period.season === 'all') {
+    return x1 > x0 ? [{ x0, x1 }] : [];
+  }
+  const hemisphere = resolveHemisphere(siteLatitude);
+  const spans: { x0: number; x1: number }[] = [];
+  for (const seg of astronomicalSeasonDaySegments(period.season, hemisphere)) {
+    const hit = intersectDayRanges(x0, x1, seg.startDay, seg.endDayExclusive);
+    if (hit) spans.push(hit);
+  }
+  return spans;
+}
+
 export type UtciPeriodHeatmapBounds = {
   /** One or two day spans (end exclusive). Winter wraps the year. */
   segments: { startDay: number; endDay: number }[];
-  startHour: number;
-  endHour: number;
+  /** Hour bands (end exclusive); may be two when the global hour filter wraps midnight. */
+  hourSegments: { startHour: number; endHourExclusive: number }[];
 };
+
+function intersectPeriodHoursWithFilter(
+  periodStart: number,
+  periodEndInclusive: number,
+  filter: GlobalFilterState
+): { startHour: number; endHourExclusive: number }[] {
+  const selected: boolean[] = Array.from({ length: 24 }, (_, h) => {
+    const inPeriod =
+      periodStart <= periodEndInclusive
+        ? h >= periodStart && h <= periodEndInclusive
+        : h >= periodStart || h <= periodEndInclusive;
+    return inPeriod && hourInWrappedRange(h, filter.startHour, filter.endHour);
+  });
+
+  const segs: { startHour: number; endHourExclusive: number }[] = [];
+  let runStart: number | null = null;
+  for (let h = 0; h <= 24; h++) {
+    const on = h < 24 && selected[h];
+    if (on && runStart == null) runStart = h;
+    if (!on && runStart != null) {
+      segs.push({ startHour: runStart, endHourExclusive: h });
+      runStart = null;
+    }
+  }
+  return segs;
+}
 
 /** Day/hour bounds for a black focus outline on the heatmap (supports wrap-around seasons). */
 export function utciPeriodHeatmapBounds(
@@ -261,9 +332,12 @@ export function utciPeriodHeatmapBounds(
   filter: GlobalFilterState,
   siteLatitude?: number | null
 ): UtciPeriodHeatmapBounds | null {
-  const startHour = Math.max(period.startHour, filter.startHour);
-  const endHour = Math.min(period.endHour, filter.endHour);
-  if (startHour > endHour) return null;
+  const hourSegments = intersectPeriodHoursWithFilter(
+    period.startHour,
+    period.endHour,
+    filter
+  );
+  if (!hourSegments.length) return null;
 
   const hemisphere = resolveHemisphere(siteLatitude);
 
@@ -278,7 +352,7 @@ export function utciPeriodHeatmapBounds(
       if (d + 1 > endDay) endDay = d + 1;
     }
     if (startDay > endDay) return null;
-    return { segments: [{ startDay, endDay }], startHour, endHour };
+    return { segments: [{ startDay, endDay }], hourSegments };
   }
 
   const nominal = astronomicalSeasonDaySegments(period.season, hemisphere);
@@ -304,7 +378,7 @@ export function utciPeriodHeatmapBounds(
   }
 
   if (!segments.length) return null;
-  return { segments, startHour, endHour };
+  return { segments, hourSegments };
 }
 
 export function rowMatchesUtciComfortPeriod(

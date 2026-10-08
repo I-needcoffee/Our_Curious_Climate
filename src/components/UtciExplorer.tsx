@@ -19,6 +19,12 @@ import type { BarChartFillMode, GlobalFilterState, HeatmapCellStatistic } from '
 import {
   aggregateCellStatistic,
   explorerBarStatisticY,
+  globalFilterDaySegments,
+  hourFilterIsPartial,
+  hourInWrappedRange,
+  hourRangeOutlineSegments,
+  monthFilterIsPartial,
+  monthInRange,
   rowPassesGlobalFilters,
 } from '../lib/globalFilter';
 import { ChartTypeMenu } from './ChartTypeMenu';
@@ -60,7 +66,7 @@ import {
 import {
   getUtciCategoryForValue,
   getUtciComfortPeriodById,
-  heatmapSlotInUtciComfortPeriod,
+  heatmapCellFocusDaySpans,
   rowMatchesUtciComfortPeriod,
   summarizeUtciCellScenarios,
   UTCI_COLORS,
@@ -640,17 +646,17 @@ export function UtciExplorer({
         : undefined;
 
     const heatmapCellInGlobal = (month: number, hour: number) => {
-      const isMonthMatch =
-        filter.startMonth <= filter.endMonth
-          ? month >= filter.startMonth && month <= filter.endMonth
-          : month >= filter.startMonth || month <= filter.endMonth;
-      return isMonthMatch && hour >= filter.startHour && hour <= filter.endHour;
+      return (
+        monthInRange(month, filter.startMonth, filter.endMonth) &&
+        hourInWrappedRange(hour, filter.startHour, filter.endHour)
+      );
     };
 
-    const heatmapCellOpacity = (month: number, hour: number) => {
+    /** Opacity for a cell day-span `[x0,x1)` — bright only where it hits the focused season. */
+    const heatmapCellOpacity = (month: number, hour: number, x0: number, x1: number) => {
       if (!heatmapCellInGlobal(month, hour)) return 0.2;
       if (!focusPeriod) return 1;
-      return heatmapSlotInUtciComfortPeriod(month, hour, focusPeriod, filter, siteLatitude)
+      return heatmapCellFocusDaySpans(x0, x1, hour, focusPeriod, filter, siteLatitude).length > 0
         ? 1
         : 0.28;
     };
@@ -708,65 +714,201 @@ export function UtciExplorer({
 
     const emptyUtciFill = theme === 'dark' ? 'rgba(55,65,81,0.4)' : 'rgba(203,213,225,0.7)';
 
+    const rowInFocusPeriod = (row: UtciDataRow) =>
+      focusPeriod
+        ? rowMatchesUtciComfortPeriod(row, focusPeriod, filter, siteLatitude)
+        : rowPassesGlobalFilters(row, filter);
+
+    const aggregateUtciCellRows = (selectedRows: UtciDataRow[]) => {
+      let avgUtciVal: number;
+      let comfortRatio: number;
+      if (selectedRows.length === 0) {
+        avgUtciVal = NaN;
+        comfortRatio = 0;
+      } else if (showDifference && compareData) {
+        const primaryStat = aggregateCellStatistic(
+          selectedRows.map(d => d.utci),
+          heatmapCellStatistic
+        );
+        const compareValues = selectedRows
+          .map(v => {
+            const idx = data.indexOf(v);
+            const cD = compareData[idx];
+            if (!cD) return null;
+            const getUtci = (row: EPWDataRow) => {
+              const tdb = (row.dryBulbTemperature as number) || 0;
+              const rh = (row.relativeHumidity as number) || 50;
+              const windSpeed = (row.windSpeed as number) || 0;
+              const ghr = (row.globalHorizontalRadiation as number) || 0;
+              const v_wind = includeWind ? Math.max(0.5, windSpeed) : 0.5;
+              const tr = includeSun ? tdb + 0.02 * ghr : tdb;
+              try {
+                const result = tc.models.utci(tdb, tr, v_wind, rh, 'SI', false, false);
+                return Number.isFinite(result.utci) ? result.utci : tdb;
+              } catch {
+                return tdb;
+              }
+            };
+            return getUtci(cD);
+          })
+          .filter((v): v is number => v != null);
+        const compareStat = aggregateCellStatistic(compareValues, heatmapCellStatistic);
+        avgUtciVal = compareStat - primaryStat;
+        comfortRatio = 0;
+      } else {
+        avgUtciVal = aggregateCellStatistic(
+          selectedRows.map(d => d.utci),
+          heatmapCellStatistic
+        );
+        comfortRatio = aggregateCellStatistic(
+          selectedRows.map(d => d.isComfortable),
+          heatmapCellStatistic
+        );
+      }
+      return { avgUtciVal, comfortRatio };
+    };
+
+    /** Contiguous day-of-year runs (end exclusive) for splitting month/week cells on season edges. */
+    const contiguousDayRuns = (rows: UtciDataRow[]): { x0: number; x1: number; rows: UtciDataRow[] }[] => {
+      if (!rows.length) return [];
+      const byDay = d3.group(rows, d => d.dayOfYear as number);
+      const days = Array.from(byDay.keys()).sort((a, b) => a - b);
+      const runs: { x0: number; x1: number; rows: UtciDataRow[] }[] = [];
+      let x0 = days[0];
+      let x1 = days[0] + 1;
+      let runRows: UtciDataRow[] = [...(byDay.get(days[0]) ?? [])];
+      for (let i = 1; i < days.length; i++) {
+        if (days[i] === x1) {
+          x1 = days[i] + 1;
+          runRows.push(...(byDay.get(days[i]) ?? []));
+        } else {
+          runs.push({ x0, x1, rows: runRows });
+          x0 = days[i];
+          x1 = days[i] + 1;
+          runRows = [...(byDay.get(days[i]) ?? [])];
+        }
+      }
+      runs.push({ x0, x1, rows: runRows });
+      return runs;
+    };
+
+    const pushHeatmapCell = (opts: {
+      x0: number;
+      x1: number;
+      hour: number;
+      month: number;
+      label: string;
+      cellTitle: string;
+      selectedRows: UtciDataRow[];
+      tooltipPrefix: string;
+    }) => {
+      const { avgUtciVal, comfortRatio } = aggregateUtciCellRows(opts.selectedRows);
+      heatmapData.push({
+        x0: opts.x0,
+        x1: opts.x1,
+        y: opts.hour,
+        month: opts.month,
+        utci: avgUtciVal,
+        utciCategory: Number.isFinite(avgUtciVal)
+          ? getUtciCategoryForValue(avgUtciVal)
+          : 'no thermal stress',
+        isComfortable: comfortRatio,
+        label: opts.label,
+        cellRows: opts.selectedRows,
+        cellTitle: opts.cellTitle,
+        tooltip: !Number.isFinite(avgUtciVal)
+          ? `${opts.tooltipPrefix}\nNo hours in dry-bulb band`
+          : colorMode === 'comfortTime'
+            ? `${opts.tooltipPrefix} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}`
+            : `${opts.tooltipPrefix} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}`,
+      });
+    };
+
+    /**
+     * When a seasonal focus is active, split month/week cells at astronomical
+     * boundaries so visual isolation matches Dec 21–Mar 20 (etc.), not whole months.
+     */
+    const pushSplitOrWholeCell = (opts: {
+      values: UtciDataRow[];
+      hour: number;
+      month: number;
+      label: string;
+      cellTitle: string;
+      tooltipPrefix: string;
+      wholeX0: number;
+      wholeX1: number;
+    }) => {
+      const inGlobal = opts.values.filter(d => rowPassesGlobalFilters(d, filter));
+      if (!focusPeriod || focusPeriod.season === 'all') {
+        pushHeatmapCell({
+          x0: opts.wholeX0,
+          x1: opts.wholeX1,
+          hour: opts.hour,
+          month: opts.month,
+          label: opts.label,
+          cellTitle: opts.cellTitle,
+          selectedRows: inGlobal,
+          tooltipPrefix: opts.tooltipPrefix,
+        });
+        return;
+      }
+
+      const inFocus = inGlobal.filter(rowInFocusPeriod);
+      const outFocus = inGlobal.filter(d => !rowInFocusPeriod(d));
+      for (const run of contiguousDayRuns(outFocus)) {
+        pushHeatmapCell({
+          x0: run.x0,
+          x1: run.x1,
+          hour: opts.hour,
+          month: opts.month,
+          label: opts.label,
+          cellTitle: opts.cellTitle,
+          selectedRows: run.rows,
+          tooltipPrefix: opts.tooltipPrefix,
+        });
+      }
+      for (const run of contiguousDayRuns(inFocus)) {
+        pushHeatmapCell({
+          x0: run.x0,
+          x1: run.x1,
+          hour: opts.hour,
+          month: opts.month,
+          label: opts.label,
+          cellTitle: opts.cellTitle,
+          selectedRows: run.rows,
+          tooltipPrefix: opts.tooltipPrefix,
+        });
+      }
+      // Month/hour with no rows after filters — keep a dim placeholder span
+      if (!inGlobal.length) {
+        pushHeatmapCell({
+          x0: opts.wholeX0,
+          x1: opts.wholeX1,
+          hour: opts.hour,
+          month: opts.month,
+          label: opts.label,
+          cellTitle: opts.cellTitle,
+          selectedRows: [],
+          tooltipPrefix: opts.tooltipPrefix,
+        });
+      }
+    };
+
     if (aggregation === 'month') {
       const groups = d3.group(currentData, d => d.month, d => d.hour);
       Array.from(groups).forEach(([month, hourGroups]) => {
         Array.from(hourGroups).forEach(([hour, values]) => {
           const startDay = values[0].dayOfYear;
           const endDay = values[values.length - 1].dayOfYear + 1;
-          const selectedRows = values.filter(d => rowPassesGlobalFilters(d, filter));
-          
-          let avgUtciVal: number;
-          let comfortRatio: number;
-          if (selectedRows.length === 0) {
-            avgUtciVal = NaN;
-            comfortRatio = 0;
-          } else if (showDifference && compareData) {
-            const primaryStat = aggregateCellStatistic(selectedRows.map(d => d.utci), heatmapCellStatistic);
-            const compareValues = selectedRows.map(v => {
-              const idx = data.indexOf(v);
-              const cD = compareData[idx];
-              if (!cD) return null;
-              
-              const getUtci = (row: EPWDataRow) => {
-                const tdb = (row.dryBulbTemperature as number) || 0;
-                const rh = (row.relativeHumidity as number) || 50;
-                const windSpeed = (row.windSpeed as number) || 0;
-                const ghr = (row.globalHorizontalRadiation as number) || 0;
-                const v_wind = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-                const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
-                try {
-                  const result = tc.models.utci(tdb, tr, v_wind, rh, 'SI', true, false);
-                  return isNaN(result.utci) ? tdb : result.utci;
-                } catch (e) { return tdb; }
-              };
-              return getUtci(cD);
-            }).filter(v => v !== null) as number[];
-            const compareStat = aggregateCellStatistic(compareValues, heatmapCellStatistic);
-            avgUtciVal = compareStat - primaryStat;
-            comfortRatio = 0;
-          } else {
-            avgUtciVal = aggregateCellStatistic(selectedRows.map(d => d.utci), heatmapCellStatistic);
-            comfortRatio = aggregateCellStatistic(selectedRows.map(d => d.isComfortable), heatmapCellStatistic);
-          }
-          
-          heatmapData.push({
-            x0: startDay,
-            x1: endDay,
-            y: hour,
-            month: month,
-            utci: avgUtciVal,
-            utciCategory: Number.isFinite(avgUtciVal) ? getUtciCategoryForValue(avgUtciVal) : 'no thermal stress',
-            isComfortable: comfortRatio,
+          pushSplitOrWholeCell({
+            values,
+            hour,
+            month,
             label: `${monthNames[month - 1]}`,
-            cellRows: selectedRows,
             cellTitle: `${monthNames[month - 1]} · ${formatEpwStationHour(hour)}`,
-            tooltip:
-              !Number.isFinite(avgUtciVal)
-                ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band`
-                : colorMode === 'comfortTime'
-                  ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}`
-                  : `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}`
+            tooltipPrefix: `${monthNames[month - 1]} ${formatEpwStationHour(hour)}`,
+            wholeX0: startDay,
+            wholeX1: endDay,
           });
         });
       });
@@ -776,37 +918,21 @@ export function UtciExplorer({
         Array.from(hourGroups).forEach(([hour, values]) => {
           const startDay = week * 7 + 1;
           const endDay = Math.min((week + 1) * 7 + 1, 366);
-          const selectedRows = values.filter(d => rowPassesGlobalFilters(d, filter));
-          const avgUtci =
-            selectedRows.length === 0
-              ? NaN
-              : aggregateCellStatistic(selectedRows.map(d => d.utci), heatmapCellStatistic);
-          const comfortRatio =
-            selectedRows.length === 0
-              ? 0
-              : aggregateCellStatistic(selectedRows.map(d => d.isComfortable), heatmapCellStatistic);
           const month = values[0].month;
-          heatmapData.push({
-            x0: startDay,
-            x1: endDay,
-            y: hour,
-            month: month,
-            utci: avgUtci,
-            utciCategory: Number.isFinite(avgUtci) ? getUtciCategoryForValue(avgUtci) : 'no thermal stress',
-            isComfortable: comfortRatio,
+          pushSplitOrWholeCell({
+            values,
+            hour,
+            month,
             label: `W${week + 1}`,
-            cellRows: selectedRows,
             cellTitle: `Week ${week + 1} · ${formatEpwStationHour(hour)}`,
-            tooltip: !Number.isFinite(avgUtci)
-              ? `Week ${week + 1} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band`
-              : colorMode === 'comfortTime'
-                ? `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtci).toFixed(1)}${utciUnit}`
-                : `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nUTCI: ${convertUtci(avgUtci).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtci)}`
+            tooltipPrefix: `Week ${week + 1} ${formatEpwStationHour(hour)}`,
+            wholeX0: startDay,
+            wholeX1: endDay,
           });
         });
       });
     } else {
-      // day or hour
+      // day or hour — keep all globally filtered hours; dim those outside the focus season
       heatmapData = currentData.map(d => {
         const pass = rowPassesGlobalFilters(d, filter);
         const utciVal = pass ? d.utci : NaN;
@@ -825,7 +951,7 @@ export function UtciExplorer({
             ? `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`
             : colorMode === 'comfortTime'
               ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}`
-              : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}`
+              : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}`,
         };
       });
     }
@@ -867,7 +993,7 @@ export function UtciExplorer({
       })
       .style("stroke", aggregation === 'month' || aggregation === 'week' ? 'rgba(0,0,0,0.1)' : 'none')
       .style("stroke-width", "1px")
-      .style("opacity", d => heatmapCellOpacity(d.month, d.y))
+      .style("opacity", d => heatmapCellOpacity(d.month, d.y, d.x0, d.x1))
       .style("cursor", d =>
         !showDifference && Array.isArray(d.cellRows) && d.cellRows.length > 0 ? 'pointer' : 'default'
       )
@@ -901,7 +1027,7 @@ export function UtciExplorer({
         .style("font-size", `${aggregation === 'month' ? overlayFontMonthPx : overlayFontWeekPx}px`)
         .style("font-weight", "500")
         .style("pointer-events", "none")
-        .style("opacity", d => heatmapCellOpacity(d.month, d.y))
+        .style("opacity", d => heatmapCellOpacity(d.month, d.y, d.x0, d.x1))
         // Only show text if the cell is wide enough
         .text(d => {
           if (
@@ -916,25 +1042,25 @@ export function UtciExplorer({
         });
     }
 
-    // Add bounding box for the selected region
-    if (filter.startMonth > 1 || filter.endMonth < 12 || filter.startHour > 0 || filter.endHour < 23) {
-      const startDay = data.find(d => d.month === filter.startMonth)?.dayOfYear || 1;
-      const endDayData = [...data].reverse().find(d => d.month === filter.endMonth);
-      const endDay = endDayData ? endDayData.dayOfYear + 1 : 366;
-
-      {
-        const span = explorerHeatmapSpanXPx(innerWidth, startDay, endDay);
-        heatmapCellsG.append("rect")
-        .attr("x", span.x)
-        .attr("y", hourRowTop(filter.startHour))
-        .attr("width", span.width)
-        .attr("height", hourRowTop(filter.endHour + 1) - hourRowTop(filter.startHour))
-        .attr("fill", "none")
-        .attr("stroke", "#1f2937") // Dark grey
-        .attr("stroke-width", 3)
-        .attr("rx", 2)
-        .attr("ry", 2)
-        .style("pointer-events", "none");
+    // Bounding box(es) for the selected region (supports month/hour wrap)
+    if (monthFilterIsPartial(filter) || hourFilterIsPartial(filter)) {
+      const hourSegments = hourRangeOutlineSegments(filter.startHour, filter.endHour);
+      for (const daySeg of globalFilterDaySegments(data, filter)) {
+        const span = explorerHeatmapSpanXPx(innerWidth, daySeg.startDay, daySeg.endDay);
+        for (const hourSeg of hourSegments) {
+          heatmapCellsG
+            .append('rect')
+            .attr('x', span.x)
+            .attr('y', hourRowTop(hourSeg.startHour))
+            .attr('width', span.width)
+            .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
+            .attr('fill', 'none')
+            .attr('stroke', '#1f2937')
+            .attr('stroke-width', 3)
+            .attr('rx', 2)
+            .attr('ry', 2)
+            .style('pointer-events', 'none');
+        }
       }
     }
 
@@ -943,18 +1069,20 @@ export function UtciExplorer({
       if (focusBounds) {
         for (const seg of focusBounds.segments) {
           const span = explorerHeatmapSpanXPx(innerWidth, seg.startDay, seg.endDay);
-          heatmapCellsG
-            .append("rect")
-            .attr("x", span.x)
-            .attr("y", hourRowTop(focusBounds.startHour))
-            .attr("width", span.width)
-            .attr("height", hourRowTop(focusBounds.endHour + 1) - hourRowTop(focusBounds.startHour))
-            .attr("fill", "none")
-            .attr("stroke", "#1f2937")
-            .attr("stroke-width", 3)
-            .attr("rx", 2)
-            .attr("ry", 2)
-            .style("pointer-events", "none");
+          for (const hourSeg of focusBounds.hourSegments) {
+            heatmapCellsG
+              .append('rect')
+              .attr('x', span.x)
+              .attr('y', hourRowTop(hourSeg.startHour))
+              .attr('width', span.width)
+              .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
+              .attr('fill', 'none')
+              .attr('stroke', '#1f2937')
+              .attr('stroke-width', 3)
+              .attr('rx', 2)
+              .attr('ry', 2)
+              .style('pointer-events', 'none');
+          }
         }
       }
     }

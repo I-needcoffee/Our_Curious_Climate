@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 export type WrapRange = [number, number];
 
@@ -116,7 +116,7 @@ export function WrappingRangeSlider({
     window.removeEventListener('pointercancel', stopDrag);
   }, [onPointerMove]);
 
-  const startDrag = (which: 'start' | 'end', e: React.PointerEvent) => {
+  const startDrag = (which: 'start' | 'end', e: ReactPointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     dragRef.current = which;
@@ -127,7 +127,7 @@ export function WrappingRangeSlider({
     applyHandle(which, valueFromClientX(e.clientX, railRef.current!.getBoundingClientRect(), min, max, step));
   };
 
-  const onRailPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onRailPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const rail = railRef.current;
     if (!rail) return;

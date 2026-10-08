@@ -21,6 +21,16 @@ import {
 import { ExportHeaderCaption, exportCaptionLinesWithUnit } from './ExportHeaderCaption';
 import { CardModal } from './CardModal';
 import { WrappingRangeSlider } from './WrappingRangeSlider';
+import {
+  HOUR_WRAP_HINT,
+  MONTH_WRAP_HINT,
+  SEASON_MONTH_PRESETS,
+  WIND_ROSE_HOUR_PRESETS,
+  formatHourIsolationRange,
+  formatMonthIsolationRange,
+  isolationRangesEqual,
+  type IsolationRange,
+} from '../lib/timeIsolationUi';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
 import { sequentialHeatmapColorFn } from '../lib/heatmapColorAdjust';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
@@ -63,47 +73,10 @@ interface WindRoseProps {
 }
 
 const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** Quiet gaps between compass labels: SE–SSE and NW–NNW. */
 const RING_LABEL_BEARINGS_DEG = [146.25, 326.25];
 
-type WindRoseSeason = 'annual' | 'spring' | 'summer' | 'fall' | 'winter';
-type WindRoseHours = 'all' | 'day' | 'night';
-type HourMonthRange = [number, number];
-
-const WIND_ROSE_SEASONS: { id: WindRoseSeason; label: string; months: HourMonthRange }[] = [
-  { id: 'annual', label: 'Annual', months: [1, 12] },
-  { id: 'spring', label: 'Spring', months: [3, 5] },
-  { id: 'summer', label: 'Summer', months: [6, 8] },
-  { id: 'fall', label: 'Fall', months: [9, 11] },
-  { id: 'winter', label: 'Winter', months: [12, 2] },
-];
-
-const WIND_ROSE_HOURS: { id: WindRoseHours; label: string; hint: string; hours: HourMonthRange }[] = [
-  { id: 'all', label: 'All hours', hint: '12am–11pm', hours: [0, 23] },
-  { id: 'day', label: 'Day', hint: '7am–7pm', hours: [7, 19] },
-  { id: 'night', label: 'Night', hint: '8pm–7am', hours: [20, 6] },
-];
-
-function rangesEqual(a: HourMonthRange, b: HourMonthRange): boolean {
-  return a[0] === b[0] && a[1] === b[1];
-}
-
-function formatHourClock(hour: number): string {
-  const suffix = hour >= 12 && hour < 24 ? 'pm' : 'am';
-  const hr = hour % 12 === 0 ? 12 : hour % 12;
-  return `${hr}${suffix}`;
-}
-
-function formatHourRange(range: HourMonthRange): string {
-  const label = `${formatHourClock(range[0])}–${formatHourClock(range[1])}`;
-  return range[0] <= range[1] ? label : `${label} wrap`;
-}
-
-function formatMonthRange(range: HourMonthRange): string {
-  const label = `${MONTH_SHORT[range[0] - 1]}–${MONTH_SHORT[range[1] - 1]}`;
-  return range[0] <= range[1] ? label : `${label} wrap`;
-}
+type HourMonthRange = IsolationRange;
 
 function rowMatchesWindRoseWindow(
   row: EPWDataRow,
@@ -1033,21 +1006,21 @@ export function WindRose({
                       Time of day
                     </label>
                     <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {formatHourRange(hourRange)}
+                      {formatHourIsolationRange(hourRange)}
                     </span>
                   </div>
                   <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                    Isolates this rose only. Drag a handle past the other to wrap around midnight (Night is 8pm–7am).
+                    Isolates this rose only. {HOUR_WRAP_HINT}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {WIND_ROSE_HOURS.map(preset => {
-                      const selected = rangesEqual(hourRange, preset.hours);
+                    {WIND_ROSE_HOUR_PRESETS.map(preset => {
+                      const selected = isolationRangesEqual(hourRange, preset.range);
                       return (
                         <button
                           key={preset.id}
                           type="button"
                           title={preset.hint}
-                          onClick={() => setHourRange(preset.hours)}
+                          onClick={() => setHourRange(preset.range)}
                           className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
                             selected
                               ? 'border-blue-600 bg-blue-600 text-white'
@@ -1080,17 +1053,17 @@ export function WindRose({
                       Months
                     </label>
                     <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {formatMonthRange(monthRange)}
+                      {formatMonthIsolationRange(monthRange)}
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {WIND_ROSE_SEASONS.map(preset => {
-                      const selected = rangesEqual(monthRange, preset.months);
+                    {SEASON_MONTH_PRESETS.map(preset => {
+                      const selected = isolationRangesEqual(monthRange, preset.range);
                       return (
                         <button
                           key={preset.id}
                           type="button"
-                          onClick={() => setMonthRange(preset.months)}
+                          onClick={() => setMonthRange(preset.range)}
                           className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
                             selected
                               ? 'border-blue-600 bg-blue-600 text-white'
@@ -1103,7 +1076,7 @@ export function WindRose({
                     })}
                   </div>
                   <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                    Drag a handle past the other to wrap around the year (Winter is Dec–Feb).
+                    {MONTH_WRAP_HINT}
                   </p>
                   <div className="px-2">
                     <WrappingRangeSlider

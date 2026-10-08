@@ -42,9 +42,61 @@ export function hourInWrappedRange(hour: number, startHour: number, endHour: num
     : hour >= startHour || hour <= endHour;
 }
 
+/** True when month isolation is not the full calendar year. */
+export function monthFilterIsPartial(f: Pick<GlobalFilterState, 'startMonth' | 'endMonth'>): boolean {
+  return !(f.startMonth === 1 && f.endMonth === 12);
+}
+
+/** True when hour isolation is not the full day. */
+export function hourFilterIsPartial(f: Pick<GlobalFilterState, 'startHour' | 'endHour'>): boolean {
+  return !(f.startHour === 0 && f.endHour === 23);
+}
+
+/**
+ * Inclusive hour filter as one or two half-open [start, endExclusive) segments
+ * for heatmap outlines (supports midnight wrap).
+ */
+export function hourRangeOutlineSegments(
+  startHour: number,
+  endHour: number
+): { startHour: number; endHourExclusive: number }[] {
+  if (startHour <= endHour) {
+    return [{ startHour, endHourExclusive: endHour + 1 }];
+  }
+  return [
+    { startHour, endHourExclusive: 24 },
+    { startHour: 0, endHourExclusive: endHour + 1 },
+  ];
+}
+
+/**
+ * Day-of-year spans (end exclusive) for the global month filter outline.
+ * Supports Dec→Feb wrap as two segments.
+ */
+export function globalFilterDaySegments(
+  data: EPWDataRow[],
+  filter: Pick<GlobalFilterState, 'startMonth' | 'endMonth'>
+): { startDay: number; endDay: number }[] {
+  if (!monthFilterIsPartial(filter)) {
+    return [{ startDay: 1, endDay: 366 }];
+  }
+  if (filter.startMonth <= filter.endMonth) {
+    const startDay = data.find(d => d.month === filter.startMonth)?.dayOfYear || 1;
+    const endDayData = [...data].reverse().find(d => d.month === filter.endMonth);
+    const endDay = endDayData ? endDayData.dayOfYear + 1 : 366;
+    return [{ startDay, endDay }];
+  }
+  const startDay = data.find(d => d.month === filter.startMonth)?.dayOfYear || 1;
+  const segs: { startDay: number; endDay: number }[] = [{ startDay, endDay: 366 }];
+  const endDayData = [...data].reverse().find(d => d.month === filter.endMonth);
+  const endDay = endDayData ? endDayData.dayOfYear + 1 : 1;
+  if (endDay > 1) segs.push({ startDay: 1, endDay });
+  return segs;
+}
+
 export function rowsMatchSeasonHours(row: EPWDataRow, f: GlobalFilterState): boolean {
   const isMonthMatch = monthInRange(row.month, f.startMonth, f.endMonth);
-  const isHourMatch = row.hour >= f.startHour && row.hour <= f.endHour;
+  const isHourMatch = hourInWrappedRange(row.hour, f.startHour, f.endHour);
   return isMonthMatch && isHourMatch;
 }
 
