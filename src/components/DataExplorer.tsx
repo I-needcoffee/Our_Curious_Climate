@@ -13,6 +13,7 @@ import {
 } from '../lib/explorerBarGradient';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
 import { dataExplorerDiffValuesForAggregation } from '../lib/dataExplorerDiffAggregation';
+import { epwEquivalentHourKey, indexEpwByEquivalentHour } from '../lib/epwClockMatch';
 import { symmetricDiffBound } from '../lib/symmetricDiffDomain';
 import {
   isSolarNightEpwStation,
@@ -54,6 +55,12 @@ import {
   CHART_TOOLBAR_EXPORT_ROW_CLASS,
   CHART_TOOLBAR_HEADER_PAD,
   CHART_TOOLBAR_ROW_CLASS,
+  chartToolbarChipButtonClass,
+  chartToolbarRoundButtonClass,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  comparePaneLabelClass,
+  chartToolbarRemoveButtonClass,
+  chartToolbarRevealClassFor,
 } from '../lib/chartToolbarLayout';
 import { CardModal } from './CardModal';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
@@ -68,14 +75,20 @@ import {
   explorerHeatmapRowLayout,
   explorerInnerWidth,
   explorerBarChartHeightPx,
+  explorerBarPath,
+  explorerBarSitsOnBaseline,
   explorerHeatmapCellXPx,
   explorerHeatmapHeightPx,
   explorerHeatmapSpanXPx,
   explorerHeatmapXOfDay,
   explorerMonthLabelCenterDays,
   explorerSvgHeightPx,
+  explorerSvgTypography,
   EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS,
+  fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
+import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 
 const EMPTY_VARIABLES_FALLBACK: EPWVariable = {
   id: 'dryBulbTemperature',
@@ -157,6 +170,7 @@ export function DataExplorer({
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 400 });
+  const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
 
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -226,9 +240,7 @@ export function DataExplorer({
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = expandChromeStrip
-    ? 'pointer-events-auto max-h-[52px] overflow-visible opacity-100 pt-1 transition-[max-height,opacity] duration-200 ease-out'
-    : 'pointer-events-none max-h-0 overflow-hidden opacity-0 transition-[max-height,opacity] duration-200 ease-out group-hover:pointer-events-auto group-hover:max-h-[48px] group-hover:opacity-100 focus-within:pointer-events-auto focus-within:max-h-[48px] focus-within:opacity-100';
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
   const removeBtnRevealClass = isMobile
     ? 'pointer-events-auto opacity-100'
     : 'pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
@@ -303,13 +315,17 @@ export function DataExplorer({
   useEffect(() => {
     if (!svgRef.current || dimensions.width === 0) return;
 
+    const compareByHour = compareData ? indexEpwByEquivalentHour(compareData) : null;
+    const compareRowFor = (row: EPWDataRow) =>
+      compareByHour?.get(epwEquivalentHourKey(row));
+
     const width = EXPLORER_SVG_BASE_WIDTH;
     const margin = EXPLORER_SVG_MARGIN;
     const innerWidth = explorerInnerWidth();
-    const barChartHeight = explorerBarChartHeightPx();
+    const barChartHeight = explorerBarChartHeightPx(svgHeight);
     const monthAxisBand = EXPLORER_MONTH_AXIS_BAND_PX;
-    const heatmapBodyHeight = explorerHeatmapHeightPx();
-    const height = explorerSvgHeightPx();
+    const heatmapBodyHeight = explorerHeatmapHeightPx(svgHeight);
+    const height = explorerSvgHeightPx(svgHeight);
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
@@ -376,7 +392,7 @@ export function DataExplorer({
           } else if (showDifference && compareData) {
             const p = aggVarSeries(selectedRows);
             const cmpVals = selectedRows
-              .map(v => compareData[data.indexOf(v)]?.[colorVar] as number)
+              .map(v => compareRowFor(v)?.[colorVar] as number)
               .filter((x): x is number => x != null && typeof x === 'number' && !Number.isNaN(x));
             const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic);
             val = convertValue(c - p, colorVarDef.unit, true);
@@ -421,7 +437,7 @@ export function DataExplorer({
           } else if (showDifference && compareData) {
             const p = aggVarSeries(selectedRows);
             const cmpVals = selectedRows
-              .map(v => compareData[data.indexOf(v)]?.[colorVar] as number)
+              .map(v => compareRowFor(v)?.[colorVar] as number)
               .filter((x): x is number => x != null && typeof x === 'number' && !Number.isNaN(x));
             const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic);
             val = convertValue(c - p, colorVarDef.unit, true);
@@ -457,7 +473,7 @@ export function DataExplorer({
           val = NaN;
         } else if (showDifference && compareData) {
           const pv = aggregateCellStatistic([d[colorVar] as number], heatmapCellStatistic);
-          const cmp = compareData[i]?.[colorVar];
+          const cmp = compareRowFor(d)?.[colorVar];
           const cv = aggregateCellStatistic(
             cmp != null && typeof cmp === 'number' ? [cmp] : [],
             heatmapCellStatistic
@@ -493,10 +509,8 @@ export function DataExplorer({
       explorerHeatmapRowLayout(heatmapBodyHeight);
     const minDayCellWidth = innerWidth / 366;
     const overlayMinWidth = Math.max(12, minDayCellWidth * 1.1, cellInnerHeightPx * 0.75);
-    const heatmapHourAxisPx = Math.max(5, Math.min(9, cellInnerHeightPx * 0.33));
-    const heatmapMonthAxisPx = Math.max(7, Math.min(11, Math.min(innerWidth / 26, cellInnerHeightPx * 0.45)));
-    const overlayFontMonthPx = Math.max(6, Math.min(12, Math.min(cellInnerHeightPx * 0.4, innerWidth / 22)));
-    const overlayFontWeekPx = Math.max(5, Math.min(10, overlayFontMonthPx * 0.82));
+    const type = explorerSvgTypography(renderScale, cellInnerHeightPx);
+    const axisInk = chartAxisInk(heatmapTextColor, theme);
 
     const heatmapCellsG = heatmapG.append("g").attr("transform", `translate(0, ${monthAxisBand})`);
 
@@ -520,11 +534,9 @@ export function DataExplorer({
         explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width
       )
       .attr("height", d => rowInnerHeight(d.y))
-      .attr("rx", 2) // Smaller corner radius
+      .attr("rx", 2)
       .attr("ry", 2)
       .style("fill", d => heatmapFill(d.value))
-      .style("stroke", (aggregation === 'month' || aggregation === 'week') ? "rgba(0,0,0,0.1)" : "none")
-      .style("stroke-width", "1px")
       .append("title")
       .text(d => d.tooltip);
 
@@ -552,15 +564,15 @@ export function DataExplorer({
     }
 
     // Overlay text for month and week aggregations if cells are large enough
-    if (aggregation === 'month' || aggregation === 'week') {
-      cells.append("text")
-        .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2 - 0.5)
-        .attr("y", d => rowInnerHeight(d.y) / 2 - 0.5)
+    if ((aggregation === 'month' || aggregation === 'week') && type.showCellValues) {
+      const cellLabels = cells.append("text")
+        .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2)
+        .attr("y", d => rowInnerHeight(d.y) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", heatmapTextColor)
-        .style("font-size", `${aggregation === 'month' ? overlayFontMonthPx : overlayFontWeekPx}px`)
-        .style("font-weight", "500")
+        .style("fill", heatmapCellInk(heatmapTextColor))
+        .style("font-size", `${type.cellValuePx}px`)
+        .style("font-weight", HEATMAP_CELL_FONT_WEIGHT)
         .style("pointer-events", "none")
         .style("opacity", d => {
           const isMonthMatch = monthInRange(d.month, filter.startMonth, filter.endMonth);
@@ -572,6 +584,12 @@ export function DataExplorer({
             ? Math.round(d.value)
             : ""
         );
+      fitHeatmapCellLabels(
+        cellLabels,
+        d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width,
+        type.cellValuePx,
+        renderScale
+      );
     }
 
     // Bounding box(es) for the selected region (supports month/hour wrap)
@@ -601,15 +619,15 @@ export function DataExplorer({
       .attr("class", "heatmap-hour-labels")
       .attr("pointer-events", "none")
       .selectAll("text")
-      .data(d3.range(0, 24))
+      .data(d3.range(0, 24, type.hourStride))
       .join("text")
-      .attr("x", -4)
+      .attr("x", -5)
       .attr("y", h => hourRowCenter(h))
       .attr("dominant-baseline", "middle")
       .attr("text-anchor", "end")
-      .style("fill", heatmapTextColor)
+      .style("fill", axisInk)
       .style("font-weight", "500")
-      .style("font-size", `${heatmapHourAxisPx}px`)
+      .style("font-size", `${type.hourPx}px`)
       .text(h => formatHourRow(h));
 
     const isSelected = (d: EPWDataRow) => rowPassesGlobalFilters(d, filter);
@@ -628,6 +646,11 @@ export function DataExplorer({
       month: number;
     }[] = [];
 
+    const convertFinite = (value: number | null | undefined, isDelta = false) =>
+      typeof value === 'number' && Number.isFinite(value)
+        ? convertValue(value, colorVarDef.unit, isDelta)
+        : NaN;
+
     const calculateValues = (values: EPWDataRow[], selectedValues: EPWDataRow[]) => {
       let valAll: number,
         valSelected: number | null = null;
@@ -640,76 +663,76 @@ export function DataExplorer({
         explorerUsesDailyAvgBarExtents(colorVar, colorVarDef.category) && aggregation !== 'hour';
 
       if (showDifference && compareData) {
-        valAll = convertValue(d3.mean(values, d => d[colorVar] as number) || 0, colorVarDef.unit);
-        const compareValuesAll = values.map(v => compareData[data.indexOf(v)]?.[colorVar] as number).filter(v => v !== null);
-        compareValAll = convertValue(d3.mean(compareValuesAll) || 0, colorVarDef.unit);
+        valAll = convertFinite(d3.mean(values, d => d[colorVar] as number) );
+        const compareValuesAll = values.map(v => compareRowFor(v)?.[colorVar] as number).filter(v => v !== null);
+        compareValAll = convertFinite(d3.mean(compareValuesAll) );
 
         if (selectedValues.length > 0) {
-          valSelected = convertValue(d3.mean(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
+          valSelected = convertFinite(d3.mean(selectedValues, d => d[colorVar] as number) );
           if (useDailyExtents) {
             const ext = meanDailyLowHighForRows(selectedValues, colorVar);
             if (ext) {
-              minSelected = convertValue(ext.low, colorVarDef.unit);
-              maxSelected = convertValue(ext.high, colorVarDef.unit);
+              minSelected = convertFinite(ext.low);
+              maxSelected = convertFinite(ext.high);
             } else {
-              minSelected = convertValue(d3.min(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
-              maxSelected = convertValue(d3.max(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
+              minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
+              maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
             }
           } else {
-            minSelected = convertValue(d3.min(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
-            maxSelected = convertValue(d3.max(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
+            minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
+            maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
           }
 
-          const compareValuesSel = selectedValues.map(v => compareData[data.indexOf(v)]?.[colorVar] as number).filter(v => v !== null);
-          compareValSelected = convertValue(d3.mean(compareValuesSel) || 0, colorVarDef.unit);
+          const compareValuesSel = selectedValues.map(v => compareRowFor(v)?.[colorVar] as number).filter(v => v !== null);
+          compareValSelected = convertFinite(d3.mean(compareValuesSel) );
 
           const compareRowsAtSel = selectedValues
-            .map(v => compareData[data.indexOf(v)])
+            .map(v => compareRowFor(v))
             .filter((r): r is EPWDataRow => r != null);
           if (compareRowsAtSel.length > 0) {
             if (useDailyExtents) {
               const ecmp = meanDailyLowHighForRows(compareRowsAtSel, colorVar);
               if (ecmp) {
-                compareMinSelected = convertValue(ecmp.low, colorVarDef.unit);
-                compareMaxSelected = convertValue(ecmp.high, colorVarDef.unit);
+                compareMinSelected = convertFinite(ecmp.low);
+                compareMaxSelected = convertFinite(ecmp.high);
               } else {
-                compareMinSelected = convertValue(
-                  d3.min(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) || 0,
+                compareMinSelected = convertFinite(
+                  d3.min(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
                   colorVarDef.unit
                 );
-                compareMaxSelected = convertValue(
-                  d3.max(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) || 0,
+                compareMaxSelected = convertFinite(
+                  d3.max(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
                   colorVarDef.unit
                 );
               }
             } else {
-              compareMinSelected = convertValue(
-                d3.min(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) || 0,
+              compareMinSelected = convertFinite(
+                d3.min(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
                 colorVarDef.unit
               );
-              compareMaxSelected = convertValue(
-                d3.max(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) || 0,
+              compareMaxSelected = convertFinite(
+                d3.max(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
                 colorVarDef.unit
               );
             }
           }
         }
       } else {
-        valAll = convertValue(d3.mean(values, d => d[colorVar] as number) || 0, colorVarDef.unit);
+        valAll = convertFinite(d3.mean(values, d => d[colorVar] as number) );
         if (selectedValues.length > 0) {
-          valSelected = convertValue(d3.mean(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
+          valSelected = convertFinite(d3.mean(selectedValues, d => d[colorVar] as number) );
           if (useDailyExtents) {
             const ext = meanDailyLowHighForRows(selectedValues, colorVar);
             if (ext) {
-              minSelected = convertValue(ext.low, colorVarDef.unit);
-              maxSelected = convertValue(ext.high, colorVarDef.unit);
+              minSelected = convertFinite(ext.low);
+              maxSelected = convertFinite(ext.high);
             } else {
-              minSelected = convertValue(d3.min(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
-              maxSelected = convertValue(d3.max(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
+              minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
+              maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
             }
           } else {
-            minSelected = convertValue(d3.min(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
-            maxSelected = convertValue(d3.max(selectedValues, d => d[colorVar] as number) || 0, colorVarDef.unit);
+            minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
+            maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
           }
         }
       }
@@ -728,8 +751,15 @@ export function DataExplorer({
     if (aggregation === 'hour') {
       aggregatedData = data.map((d, i) => {
         const selected = isSelected(d);
-        const val = convertValue((d[colorVar] as number) || 0, colorVarDef.unit);
-        const compareVal = showDifference && compareData ? convertValue((compareData[i]?.[colorVar] as number) || 0, colorVarDef.unit) : undefined;
+        const raw = d[colorVar] as number;
+        const val = typeof raw === 'number' && Number.isFinite(raw) ? convertValue(raw, colorVarDef.unit) : NaN;
+        const compareRaw = compareRowFor(d)?.[colorVar] as number | undefined;
+        const compareVal =
+          showDifference && compareData
+            ? typeof compareRaw === 'number' && Number.isFinite(compareRaw)
+              ? convertValue(compareRaw, colorVarDef.unit)
+              : NaN
+            : undefined;
         return {
           x0: d.dayOfYear + d.hour / 24,
           x1: d.dayOfYear + (d.hour + 1) / 24,
@@ -990,12 +1020,11 @@ export function DataExplorer({
         const topY = Math.min(yMinPx, yMaxPx);
         const barH = Math.max(1, Math.abs(yMinPx - yMaxPx));
         const pillR = Math.min(barW / 2, barH / 2);
+        const bottomY = topY + barH;
+        const baselinePx = yScaleBar.range()[0];
 
-        group.append("rect")
-          .attr("x", xPos)
-          .attr("y", topY)
-          .attr("width", barW)
-          .attr("height", barH)
+        group.append("path")
+          .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(bottomY, baselinePx)))
           .style(
             "fill",
             chartBarFill ??
@@ -1005,9 +1034,7 @@ export function DataExplorer({
                 maxSelected: maxVal,
               })
           )
-          .style("opacity", 0.6)
-          .attr("rx", pillR)
-          .attr("ry", pillR);
+          .style("opacity", 0.6);
 
         // Indicator dot: matches footer Low/Ave/High (bars still span mean daily min–max when applicable).
         if (aggregation !== 'hour') {
@@ -1041,7 +1068,7 @@ export function DataExplorer({
       .call(yAxisBar)
       .call(g => g.select(".domain").remove())
       .call(g => g.selectAll(".tick line").remove())
-      .call(g => g.selectAll(".tick text").style("fill", heatmapTextColor).style("font-weight", "500").style("font-size", `${heatmapMonthAxisPx}px`));
+      .call(g => g.selectAll(".tick text").style("fill", axisInk).style("font-weight", "500").style("font-size", `${type.axisPx}px`));
 
     const monthCenters = explorerMonthLabelCenterDays();
     heatmapG.append("g")
@@ -1059,12 +1086,14 @@ export function DataExplorer({
       .attr("y", monthAxisBand / 2)
       .attr("dominant-baseline", "middle")
       .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
-      .style("font-weight", "500")
-      .style("font-size", `${heatmapMonthAxisPx}px`)
+      .style("fill", axisInk)
+      .style("font-weight", "600")
+      .style("font-size", `${type.monthPx}px`)
       .text(d => d.label);
 
   }, [
+    renderScale,
+    svgHeight,
     data,
     compareData,
     showDifference,
@@ -1092,11 +1121,12 @@ export function DataExplorer({
     const filteredData = data.filter(d => rowPassesGlobalFilters(d, filter));
 
     if (showDifference && compareData) {
+      const compareByHour = indexEpwByEquivalentHour(compareData);
       const diffs = filteredData.map(d => {
-        const idx = data.indexOf(d);
         const primaryVal = d[colorVar] as number;
-        const compareVal = compareData[idx]?.[colorVar] as number;
-        if (primaryVal === null || compareVal === null) return null;
+        const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
+        if (typeof primaryVal !== 'number' || typeof compareVal !== 'number') return null;
+        if (!Number.isFinite(primaryVal) || !Number.isFinite(compareVal)) return null;
         return compareVal - primaryVal;
       }).filter(v => v !== null) as number[];
 
@@ -1128,8 +1158,8 @@ export function DataExplorer({
     >
       {(exportMode || !pairSuppressHeader) && (
       <div
-        className={`flex flex-col ${exportMode ? '' : 'border-b'} ${
-          exportMode ? 'bg-white' : (theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white')
+        className={`flex flex-col ${
+          exportMode ? 'bg-white' : (theme === 'dark' ? 'bg-gray-800' : 'bg-white')
         } ${diffFillColumn && !exportMode ? 'shrink-0 py-0.5' : CHART_TOOLBAR_HEADER_PAD}`}
       >
         <div className="flex flex-col min-w-0">
@@ -1150,11 +1180,7 @@ export function DataExplorer({
           ) : comparePane === 'secondary' ? (
             <>
               <div
-                className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                  theme === 'dark'
-                    ? 'border-gray-700 bg-gray-950 text-gray-100'
-                    : 'border-gray-800 bg-gray-950 text-white'
-                }`}
+                className={comparePaneLabelClass(theme, 'comparison')}
               >
                 Comparison · {paneCity ?? '—'}
               </div>
@@ -1202,15 +1228,7 @@ export function DataExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats)}
                           title="Statistics"
                         >
                           Stats
@@ -1219,18 +1237,10 @@ export function DataExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings)}
                           title="Chart settings"
                         >
-                          <Settings2 className="w-3 h-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -1242,11 +1252,7 @@ export function DataExplorer({
             <>
               {comparePane === 'primary' && paneCity && (
                 <div
-                  className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                    theme === 'dark'
-                      ? 'border-gray-600 bg-gray-700/50 text-gray-100'
-                      : 'border-gray-300 bg-gray-200/90 text-gray-900'
-                  }`}
+                  className={comparePaneLabelClass(theme, 'baseline')}
                 >
                   Baseline · {paneCity}
                 </div>
@@ -1288,23 +1294,24 @@ export function DataExplorer({
                     <button
                       type="button"
                       onClick={onRemove}
-                      className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-hard-sm transition-all active:scale-95 ${
+                      className={
                         showDifference
-                          ? theme === 'dark'
-                            ? 'border border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/40'
-                            : 'border border-red-100 bg-red-50 text-red-600 hover:bg-red-100'
-                          : theme === 'dark'
-                            ? 'text-gray-400 hover:bg-red-900/20 hover:text-red-400'
-                            : 'text-gray-400 hover:bg-red-50 hover:text-red-500'
-                      }`}
+                          ? `inline-flex h-7 items-center gap-1 rounded-full px-3 text-xs font-semibold transition-colors active:scale-95 ${
+                              theme === 'dark'
+                                ? 'bg-red-900/30 text-red-300 hover:bg-red-900/50'
+                                : 'bg-red-50 text-red-600 hover:bg-red-100'
+                            }`
+                          : chartToolbarRemoveButtonClass(theme)
+                      }
+                      title={showDifference ? 'Hide difference' : 'Remove chart'}
                     >
                       {showDifference ? (
                         <>
-                          <X className="w-3 h-3" />
+                          <X className="h-3.5 w-3.5" />
                           <span>Hide</span>
                         </>
                       ) : (
-                        <X className="w-3.5 h-3.5" />
+                        <X className="h-4 w-4" />
                       )}
                     </button>
                   </div>
@@ -1323,15 +1330,7 @@ export function DataExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats)}
                           title="Statistics"
                         >
                           Stats
@@ -1340,18 +1339,10 @@ export function DataExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings)}
                           title="Chart settings"
                         >
-                          <Settings2 className="w-3 h-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -1387,21 +1378,21 @@ export function DataExplorer({
         anchorRef={outerRef as any}
       >
         <div className="grid grid-cols-2 gap-2">
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
           </div>
         </div>
       </CardModal>
@@ -1421,19 +1412,19 @@ export function DataExplorer({
               <button 
                 type="button"
                 onClick={() => setShowGradientModal(true)}
-                className="text-[10px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
+                className="text-[11px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
               >
                 + Create
               </button>
             </div>
-            <div className={`flex overflow-x-auto rounded-full border p-1.5 ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+            <div className={`flex overflow-x-auto rounded-full p-1.5 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
               {paletteGradients.map(g => (
                 <button
                   key={g.id}
                   type="button"
                   onClick={() => setGradientId(g.id)}
-                  className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full border-2 transition-all shadow-hard-sm ${
-                    gradientId === g.id ? 'border-gray-700 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
+                  className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full transition-all ${
+                    gradientId === g.id ? 'scale-110 shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_14px_rgba(59,130,246,0.6)]' : 'opacity-85 hover:scale-105 hover:opacity-100'
                   }`}
                   style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
                   title={g.name}
@@ -1446,8 +1437,8 @@ export function DataExplorer({
             <select 
               value={colorVar} 
               onChange={e => setColorVar(e.target.value)}
-              className={`w-full rounded-full border p-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-gray-500 ${
-                theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+              className={`w-full rounded-full border-0 px-3.5 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-gray-500 ${
+                theme === 'dark' ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
               }`}
             >
               {Object.entries(

@@ -135,8 +135,8 @@ export function TutorialHoverPopoverLayer({
   /** Match primary UI blue used for the Directions control. */
   const surface =
     theme === 'dark'
-      ? 'border border-blue-400/55 bg-blue-950 text-blue-50 shadow-xl ring-1 ring-blue-500/35'
-      : 'border border-blue-500 bg-blue-50 text-gray-900 shadow-lg ring-2 ring-blue-100';
+      ? 'bg-blue-950 text-blue-50 shadow-[0_8px_24px_rgba(0,0,0,0.4),0_0_28px_rgba(59,130,246,0.35)]'
+      : 'bg-blue-50 text-gray-900 shadow-[0_8px_24px_rgba(15,23,42,0.12),0_0_28px_rgba(59,130,246,0.3)]';
 
   if (!open) return null;
 
@@ -144,7 +144,7 @@ export function TutorialHoverPopoverLayer({
     <div
       ref={panelRef}
       role="tooltip"
-      className={`pointer-events-auto fixed max-w-[min(300px,calc(100vw-20px))] rounded-lg px-3 py-2 ${surface}`}
+      className={`pointer-events-auto fixed max-w-[min(320px,calc(100vw-20px))] rounded-2xl px-3.5 py-2.5 ${surface}`}
       style={{ left: box.left, top: box.top, maxWidth: box.maxW, zIndex }}
       onMouseEnter={cancelHide}
       onMouseLeave={() => {
@@ -155,11 +155,11 @@ export function TutorialHoverPopoverLayer({
       }}
     >
       <div
-        className={`text-[10px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-blue-200' : 'text-blue-800'}`}
+        className={`text-[11px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-blue-200' : 'text-blue-800'}`}
       >
         {open.title}
       </div>
-      <p className={`mt-1 text-xs leading-snug ${theme === 'dark' ? 'text-blue-100/95' : 'text-gray-700'}`}>{open.body}</p>
+      <p className={`mt-1 text-[13px] leading-snug ${theme === 'dark' ? 'text-blue-100/95' : 'text-gray-700'}`}>{open.body}</p>
     </div>,
     document.body
   );

@@ -61,8 +61,8 @@ export function IemWindSetupModal({
 
   const shell =
     theme === 'dark'
-      ? 'border-gray-600 bg-gray-800 text-gray-100'
-      : 'border-gray-200 bg-white text-gray-900';
+      ? 'bg-gray-800 text-gray-100'
+      : 'bg-white text-gray-900';
 
   return createPortal(
     <div
@@ -74,7 +74,7 @@ export function IemWindSetupModal({
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div className={`relative w-full max-w-md rounded-2xl border p-4 shadow-hard-xl sm:p-5 ${shell}`}>
+      <div className={`relative w-full max-w-md rounded-3xl p-5 glow-xl sm:p-6 ${shell}`}>
         <button
           type="button"
           onClick={onCancel}
@@ -94,14 +94,14 @@ export function IemWindSetupModal({
         </p>
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
-            <span className={`text-[10px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+            <span className={`text-xs font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
               Start year
             </span>
             <select
               value={start}
               onChange={e => setStart(Number(e.target.value))}
-              className={`rounded-md border px-2 py-1.5 text-sm tabular-nums ${
-                theme === 'dark' ? 'border-gray-600 bg-gray-900/40 text-gray-100' : 'border-gray-200 bg-white text-gray-900'
+              className={`rounded-full px-3.5 py-1.5 text-sm tabular-nums ${
+                theme === 'dark' ? 'bg-gray-900/40 text-gray-100' : 'bg-gray-100 text-gray-900'
               }`}
             >
               {years.map(y => (
@@ -112,14 +112,14 @@ export function IemWindSetupModal({
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className={`text-[10px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+            <span className={`text-xs font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
               End year
             </span>
             <select
               value={end}
               onChange={e => setEnd(Number(e.target.value))}
-              className={`rounded-md border px-2 py-1.5 text-sm tabular-nums ${
-                theme === 'dark' ? 'border-gray-600 bg-gray-900/40 text-gray-100' : 'border-gray-200 bg-white text-gray-900'
+              className={`rounded-full px-3.5 py-1.5 text-sm tabular-nums ${
+                theme === 'dark' ? 'bg-gray-900/40 text-gray-100' : 'bg-gray-100 text-gray-900'
               }`}
             >
               {years.map(y => (
@@ -143,7 +143,7 @@ export function IemWindSetupModal({
           <button
             type="button"
             onClick={apply}
-            className={`rounded-full px-5 py-2 text-sm font-semibold text-white shadow-hard-sm ${
+            className={`rounded-full px-5 py-2 text-sm font-semibold text-white glow-sm ${
               theme === 'dark' ? 'bg-sky-600 hover:bg-sky-500' : 'bg-gray-800 hover:bg-gray-900'
             }`}
           >

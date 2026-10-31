@@ -74,14 +74,9 @@ export function Grid4x2ComfortExportOutline({
 
   if (!active || !box) return null;
 
-  const exportGroupBorder =
-    theme === 'dark'
-      ? 'rounded-xl border border-gray-700 shadow-hard-lg'
-      : 'rounded-xl border border-gray-100 shadow-hard-lg';
-
   return (
     <div
-      className={`pointer-events-none absolute z-[5] ${exportGroupBorder}`}
+      className="pointer-events-none absolute z-[5] rounded-2xl glow-lg"
       style={{
         left: box.left,
         top: box.top,

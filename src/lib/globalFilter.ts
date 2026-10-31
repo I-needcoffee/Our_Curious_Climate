@@ -169,10 +169,13 @@ export function explorerBarStatisticY(
   return dims.valueSelected;
 }
 
-/** Reduce hourly samples in one heatmap cell to a scalar (default: mean ≈ footer “Ave”). */
+/**
+ * Reduce hourly samples in one heatmap cell to a scalar (default: mean ≈ footer “Ave”).
+ * An empty bin is “no value” (NaN), not zero — zero is a real measurement.
+ */
 export function aggregateCellStatistic(values: number[], stat: HeatmapCellStatistic): number {
-  const v = values.filter(x => typeof x === 'number' && !Number.isNaN(x));
-  if (!v.length) return 0;
+  const v = values.filter(x => typeof x === 'number' && Number.isFinite(x));
+  if (!v.length) return NaN;
   if (stat === 'mean') return v.reduce((a, b) => a + b, 0) / v.length;
   if (stat === 'high') return Math.max(...v);
   return Math.min(...v);

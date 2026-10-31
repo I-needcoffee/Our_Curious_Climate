@@ -1,8 +1,10 @@
-import { X, Calendar, Clock, Palette, Sun, Moon, Settings, Filter, Thermometer, BarChart2 } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { X, Calendar, Clock, Palette, Sun, Moon, Settings, Filter, Thermometer, BarChart2, Type } from 'lucide-react';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import type { BarChartFillMode, GlobalFilterState } from '../lib/globalFilter';
 import type { UnitSystem } from '../App';
+import { CHART_TEXT_AUTO, chartAxisInk } from '../lib/chartInk';
 import { TemperatureIsolationRange } from './TemperatureIsolationRange';
 import { WrappingRangeSlider } from './WrappingRangeSlider';
 import {
@@ -51,9 +53,13 @@ export function SettingsModal({
 }: SettingsModalProps) {
   if (!isOpen) return null;
 
+  const dark = theme === 'dark';
+  const textAuto = heatmapTextColor === CHART_TEXT_AUTO;
+  const customTextColor = chartAxisInk(heatmapTextColor, theme);
+
   const getGrayscaleValue = (hex: string) => {
     const r = parseInt(hex.slice(1, 3), 16);
-    return Math.round((r / 255) * 100);
+    return Number.isFinite(r) ? Math.round((r / 255) * 100) : 0;
   };
 
   const setGrayscaleValue = (val: number) => {
@@ -65,161 +71,146 @@ export function SettingsModal({
   const monthRange: [number, number] = [filter.startMonth, filter.endMonth];
   const hourRange: [number, number] = [filter.startHour, filter.endHour];
 
+  const optionPill = (selected: boolean) =>
+    `rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+      selected
+        ? dark
+          ? 'bg-gray-100 text-gray-900 glow-sm'
+          : 'bg-gray-900 text-white glow-sm'
+        : dark
+          ? 'bg-gray-700/70 text-gray-300 hover:bg-gray-700 hover:text-white'
+          : 'bg-white text-gray-700 glow-sm hover:bg-gray-100 hover:text-gray-900'
+    }`;
+  const valueBadge = `rounded-full px-2.5 py-1 font-mono text-xs font-semibold ${
+    dark ? 'bg-gray-700 text-gray-100' : 'bg-white text-gray-800 glow-sm'
+  }`;
+  const hint = `text-xs leading-relaxed ${dark ? 'text-gray-400' : 'text-gray-500'}`;
+  const tick = `text-xs font-medium ${dark ? 'text-gray-400' : 'text-gray-500'}`;
+  const rowLabel = 'flex items-center gap-2 text-sm font-semibold';
+  const iconInk = dark ? 'text-gray-300' : 'text-gray-700';
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-2">
-      <div className={`rounded-xl shadow-xl max-w-md w-full max-h-[min(90vh,560px)] overflow-y-auto border ${theme === 'dark' ? 'bg-gray-800 text-white border-gray-700' : 'bg-white text-gray-900 border-gray-200'}`}>
-        <div className={`flex items-center justify-between p-2 border-b sticky top-0 z-10 ${theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Settings className="w-4 h-4 text-gray-900 dark:text-gray-100" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+      <div
+        className={`max-h-[min(90vh,680px)] w-full max-w-lg overflow-y-auto rounded-3xl glow-xl ${
+          dark ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
+        }`}
+      >
+        <div className={`sticky top-0 z-10 flex items-center justify-between px-5 pb-2 pt-4 ${dark ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className="flex items-center gap-2.5 text-lg font-bold tracking-[-0.01em]">
+            <Settings className={`h-5 w-5 ${iconInk}`} />
             <span>Settings</span>
           </div>
-          <button type="button" onClick={onClose} className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${theme === 'dark' ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}>
-            <X className="w-4 h-4" />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close settings"
+            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
+              dark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
+            }`}
+          >
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="p-3 space-y-4">
-          {/* Time Filters */}
-          <div className="space-y-4">
-            <h3 className="font-semibold text-xs border-b pb-1.5 flex items-center gap-2">
-              <Filter className="w-3.5 h-3.5 text-gray-900 dark:text-gray-100" />
-              Global time filters
-            </h3>
-            
+        <div className="space-y-4 px-4 pb-5 pt-1">
+          <SettingsSection theme={theme} icon={<Filter className={`h-4 w-4 ${iconInk}`} />} title="Global time filters">
             {/* Month Filter — same wrapping slider + presets as Wind Rose */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between font-medium text-sm">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-gray-900 dark:text-gray-100" />
-                  <span>Months</span>
-                </div>
-                <span className={`rounded-full border px-2 py-0.5 font-mono text-xs ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-100'}`}>
-                  {formatMonthIsolationRange(monthRange)}
+              <div className="flex items-center justify-between">
+                <span className={rowLabel}>
+                  <Calendar className={`h-4 w-4 ${iconInk}`} />
+                  Months
                 </span>
+                <span className={valueBadge}>{formatMonthIsolationRange(monthRange)}</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {SEASON_MONTH_PRESETS.map(preset => {
-                  const selected = isolationRangesEqual(monthRange, preset.range);
-                  return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() =>
-                        onChangeFilter({
-                          ...filter,
-                          startMonth: preset.range[0],
-                          endMonth: preset.range[1],
-                        })
-                      }
-                      className={`text-xs font-medium rounded-full transition-colors border px-3 py-1.5 ${
-                        selected
-                          ? theme === 'dark'
-                            ? 'bg-gray-600 text-gray-100 border-gray-500'
-                            : 'bg-gray-200 text-gray-900 border-gray-400'
-                          : theme === 'dark'
-                            ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'
-                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
+                {SEASON_MONTH_PRESETS.map(preset => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() =>
+                      onChangeFilter({
+                        ...filter,
+                        startMonth: preset.range[0],
+                        endMonth: preset.range[1],
+                      })
+                    }
+                    className={optionPill(isolationRangesEqual(monthRange, preset.range))}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
               </div>
-              <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                {MONTH_WRAP_HINT}
-              </p>
+              <p className={hint}>{MONTH_WRAP_HINT}</p>
               <div className="px-2">
                 <WrappingRangeSlider
                   min={1}
                   max={12}
                   value={monthRange}
-                  onChange={([startMonth, endMonth]) =>
-                    onChangeFilter({ ...filter, startMonth, endMonth })
-                  }
+                  onChange={([startMonth, endMonth]) => onChangeFilter({ ...filter, startMonth, endMonth })}
                   theme={theme}
                   startAriaLabel="Start month"
                   endAriaLabel="End month"
                 />
-                <div className="mt-1 flex justify-between">
-                  <span className="text-[10px] text-gray-400">Jan</span>
-                  <span className="text-[10px] text-gray-400">Jun</span>
-                  <span className="text-[10px] text-gray-400">Dec</span>
+                <div className="mt-1.5 flex justify-between">
+                  <span className={tick}>Jan</span>
+                  <span className={tick}>Jun</span>
+                  <span className={tick}>Dec</span>
                 </div>
               </div>
             </div>
 
             {/* Hour Filter — wrapping midnight, shared wording with Wind Rose */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between font-medium text-sm">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-gray-900 dark:text-gray-100" />
-                  <span>Hours</span>
-                </div>
-                <span className={`rounded-full border px-2 py-0.5 font-mono text-xs ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-100'}`}>
-                  {formatHourIsolationRange(hourRange)}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <span className={rowLabel}>
+                  <Clock className={`h-4 w-4 ${iconInk}`} />
+                  Hours
                 </span>
+                <span className={valueBadge}>{formatHourIsolationRange(hourRange)}</span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {GLOBAL_HOUR_PRESETS.map(preset => {
-                  const selected = isolationRangesEqual(hourRange, preset.range);
-                  return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      title={preset.hint}
-                      onClick={() =>
-                        onChangeFilter({
-                          ...filter,
-                          startHour: preset.range[0],
-                          endHour: preset.range[1],
-                        })
-                      }
-                      className={`text-xs font-medium rounded-full transition-colors border px-3 py-1.5 ${
-                        selected
-                          ? theme === 'dark'
-                            ? 'bg-gray-600 text-gray-100 border-gray-500'
-                            : 'bg-gray-200 text-gray-900 border-gray-400'
-                          : theme === 'dark'
-                            ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'
-                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
+                {GLOBAL_HOUR_PRESETS.map(preset => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    title={preset.hint}
+                    onClick={() =>
+                      onChangeFilter({
+                        ...filter,
+                        startHour: preset.range[0],
+                        endHour: preset.range[1],
+                      })
+                    }
+                    className={optionPill(isolationRangesEqual(hourRange, preset.range))}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
               </div>
-              <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
-                {HOUR_WRAP_HINT}
-              </p>
+              <p className={hint}>{HOUR_WRAP_HINT}</p>
               <div className="px-2">
                 <WrappingRangeSlider
                   min={0}
                   max={23}
                   value={hourRange}
-                  onChange={([startHour, endHour]) =>
-                    onChangeFilter({ ...filter, startHour, endHour })
-                  }
+                  onChange={([startHour, endHour]) => onChangeFilter({ ...filter, startHour, endHour })}
                   theme={theme}
                   startAriaLabel="Start hour"
                   endAriaLabel="End hour"
                 />
-                <div className="mt-1 flex justify-between">
-                  <span className="text-[10px] text-gray-400">12am</span>
-                  <span className="text-[10px] text-gray-400">12pm</span>
-                  <span className="text-[10px] text-gray-400">11pm</span>
+                <div className="mt-1.5 flex justify-between">
+                  <span className={tick}>12am</span>
+                  <span className={tick}>12pm</span>
+                  <span className={tick}>11pm</span>
                 </div>
               </div>
             </div>
-          </div>
+          </SettingsSection>
 
           {/* Dry-bulb isolation — dual slider + typed limits (stored °C) */}
-          <div className={`space-y-3 border-t pt-4 ${theme === 'dark' ? 'border-gray-700' : 'border-gray-100'}`}>
-            <div className="flex items-center gap-2 font-medium text-sm">
-              <Thermometer className="w-4 h-4 text-gray-900 dark:text-gray-100" />
-              <span>Temperature isolation</span>
-            </div>
+          <SettingsSection theme={theme} icon={<Thermometer className={`h-4 w-4 ${iconInk}`} />} title="Temperature isolation">
             <TemperatureIsolationRange
               filter={filter}
               onChangeFilter={onChangeFilter}
@@ -228,150 +219,178 @@ export function SettingsModal({
               extentMinC={dryBulbExtentMinC}
               extentMaxC={dryBulbExtentMaxC}
             />
-          </div>
+          </SettingsSection>
 
-          {/* Graphics Adjustments */}
-          <div className="space-y-4">
-            <h3 className="font-semibold text-xs border-b pb-1.5 flex items-center gap-2">
-              <Palette className="w-3.5 h-3.5 text-gray-900 dark:text-gray-100" />
-              Graphics adjustments
-            </h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Theme Toggle */}
-              <div className="space-y-3">
-                <span className="font-medium text-sm">Interface Theme</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setTheme('light');
-                      setHeatmapTextColor('#000000');
-                    }}
-                    className={`flex-1 flex items-center justify-center gap-2 rounded-full font-medium transition-colors border text-sm p-2 ${theme === 'light' ? 'bg-gray-200 text-gray-900 border-gray-400 shadow-sm' : 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'}`}
-                  >
-                    <Sun className="w-4 h-4" />
-                    Light
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTheme('dark');
-                      setHeatmapTextColor('#ffffff');
-                    }}
-                    className={`flex-1 flex items-center justify-center gap-2 rounded-full font-medium transition-colors border text-sm p-2 ${theme === 'dark' ? 'bg-gray-600 text-gray-100 border-gray-500 shadow-sm' : 'bg-transparent text-gray-500 border-gray-200 hover:bg-gray-50'}`}
-                  >
-                    <Moon className="w-4 h-4" />
-                    Dark
-                  </button>
-                </div>
-              </div>
-
-              {/* Text Color Slider */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between font-medium text-sm">
-                  <span>Chart Text Color</span>
-                  <div className="flex items-center gap-2">
-                    <div 
-                      className={`h-3 w-3 rounded-full border ${theme === 'dark' ? 'border-gray-600' : 'border-gray-200'}`} 
-                      style={{ backgroundColor: heatmapTextColor }}
-                    />
-                    <span className={`rounded-full border px-2 py-0.5 font-mono text-xs ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-100'}`}>
-                      {heatmapTextColor.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 px-2">
-                  <span className={`font-bold uppercase tracking-wider text-[10px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>Black</span>
-                  <div className="flex-1">
-                    <Slider 
-                      min={0} 
-                      max={100} 
-                      value={getGrayscaleValue(heatmapTextColor)} 
-                      onChange={(val) => {
-                        if (typeof val === 'number') {
-                          setGrayscaleValue(val);
-                        }
-                      }}
-                      trackStyle={[{ backgroundColor: theme === 'dark' ? '#9ca3af' : '#525252', height: '4px' }]}
-                      handleStyle={[
-                        {
-                          borderColor: theme === 'dark' ? '#9ca3af' : '#525252',
-                          backgroundColor: 'white',
-                          opacity: 1,
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                          width: '14px',
-                          height: '14px',
-                          marginTop: '-5px',
-                        },
-                      ]}
-                      railStyle={{ background: 'linear-gradient(to right, #000, #fff)', height: '4px' }}
-                    />
-                  </div>
-                  <span className={`font-bold uppercase tracking-wider text-[10px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>White</span>
-                </div>
-              </div>
-
-              {/* Bar chart fill */}
-              <div className="space-y-3 sm:col-span-2">
-                <span className="font-medium text-sm flex items-center gap-2">
-                  <BarChart2 className="w-4 h-4 text-gray-900 dark:text-gray-100" />
-                  Bar chart colors
-                </span>
-                <p className={`text-xs leading-snug ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Single tone uses the footer Low / Ave / High selection. Gradient tone fills each bar with the
-                  variable&apos;s legend ramp from min to max.
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onBarChartFillModeChange('solid')}
-                    className={`flex-1 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${
-                      barChartFillMode === 'solid'
-                        ? theme === 'dark'
-                          ? 'bg-gray-600 text-gray-100 border-gray-500 shadow-sm'
-                          : 'bg-gray-200 text-gray-900 border-gray-400 shadow-sm'
-                        : theme === 'dark'
-                          ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'
-                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    Single tone
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onBarChartFillModeChange('gradient')}
-                    className={`flex-1 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${
-                      barChartFillMode === 'gradient'
-                        ? theme === 'dark'
-                          ? 'bg-gray-600 text-gray-100 border-gray-500 shadow-sm'
-                          : 'bg-gray-200 text-gray-900 border-gray-400 shadow-sm'
-                        : theme === 'dark'
-                          ? 'bg-transparent text-gray-400 border-gray-700 hover:bg-gray-700'
-                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    Gradient tone
-                  </button>
-                </div>
-              </div>
-
-              {/* Color Palettes */}
-              <div className="space-y-3 sm:col-span-2">
-                <span className="font-medium text-sm">Color Palettes</span>
+          <SettingsSection theme={theme} icon={<Palette className={`h-4 w-4 ${iconInk}`} />} title="Graphics">
+            <div className="space-y-2.5">
+              <span className={rowLabel}>Interface theme</span>
+              <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => {
-                    onClose();
-                    setShowGradientModal(true);
+                    setTheme('light');
+                    if (!textAuto) setHeatmapTextColor('#000000');
                   }}
-                  className={`flex items-center justify-center gap-1.5 w-full rounded-full font-medium transition-colors border text-sm p-2 ${theme === 'dark' ? 'border-gray-600 bg-gray-700 text-gray-100 hover:bg-gray-600' : 'border-gray-300 bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
+                  className={`flex flex-1 items-center justify-center gap-2 ${optionPill(theme === 'light')}`}
                 >
-                  <Palette className="w-4 h-4" />
-                  Create New Gradient
+                  <Sun className="h-4 w-4" />
+                  Light
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTheme('dark');
+                    if (!textAuto) setHeatmapTextColor('#ffffff');
+                  }}
+                  className={`flex flex-1 items-center justify-center gap-2 ${optionPill(theme === 'dark')}`}
+                >
+                  <Moon className="h-4 w-4" />
+                  Dark
                 </button>
               </div>
             </div>
-          </div>
+
+            <div className="space-y-2.5 pt-2">
+              <div className="flex items-center justify-between">
+                <span className={rowLabel}>
+                  <Type className={`h-4 w-4 ${iconInk}`} />
+                  Chart text color
+                </span>
+                {!textAuto && (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full glow-sm" style={{ backgroundColor: customTextColor }} />
+                    <span className={valueBadge}>{customTextColor.toUpperCase()}</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHeatmapTextColor(CHART_TEXT_AUTO)}
+                  className={`flex-1 ${optionPill(textAuto)}`}
+                >
+                  Auto contrast
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (textAuto) setHeatmapTextColor(dark ? '#ffffff' : '#000000');
+                  }}
+                  className={`flex-1 ${optionPill(!textAuto)}`}
+                >
+                  Custom
+                </button>
+              </div>
+              {textAuto ? (
+                <p className={hint}>
+                  Axis labels follow the theme, and values printed on heatmap cells switch between black and white
+                  for the strongest contrast against each cell.
+                </p>
+              ) : (
+                <div className="flex items-center gap-3 px-2 pt-1">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Black
+                  </span>
+                  <div className="flex-1">
+                    <Slider
+                      min={0}
+                      max={100}
+                      value={getGrayscaleValue(customTextColor)}
+                      onChange={val => {
+                        if (typeof val === 'number') setGrayscaleValue(val);
+                      }}
+                      trackStyle={[{ backgroundColor: 'transparent', height: '6px' }]}
+                      handleStyle={[
+                        {
+                          border: 'none',
+                          backgroundColor: 'white',
+                          opacity: 1,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.25), 0 0 10px rgba(0,0,0,0.15)',
+                          width: '18px',
+                          height: '18px',
+                          marginTop: '-6px',
+                        },
+                      ]}
+                      railStyle={{ background: 'linear-gradient(to right, #000, #fff)', height: '6px', borderRadius: 9999 }}
+                    />
+                  </div>
+                  <span className={`text-[11px] font-bold uppercase tracking-wider ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    White
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2.5 pt-2">
+              <span className={rowLabel}>
+                <BarChart2 className={`h-4 w-4 ${iconInk}`} />
+                Bar chart colors
+              </span>
+              <p className={hint}>
+                Single tone uses the footer Low / Ave / High selection. Gradient tone fills each bar with the
+                variable&apos;s legend ramp from min to max.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onBarChartFillModeChange('solid')}
+                  className={`flex-1 ${optionPill(barChartFillMode === 'solid')}`}
+                >
+                  Single tone
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onBarChartFillModeChange('gradient')}
+                  className={`flex-1 ${optionPill(barChartFillMode === 'gradient')}`}
+                >
+                  Gradient tone
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 pt-2">
+              <span className={rowLabel}>Color palettes</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  setShowGradientModal(true);
+                }}
+                className={`flex w-full items-center justify-center gap-2 ${optionPill(false)}`}
+              >
+                <Palette className="h-4 w-4" />
+                Create new gradient
+              </button>
+            </div>
+          </SettingsSection>
         </div>
       </div>
     </div>
+  );
+}
+
+function SettingsSection({
+  theme,
+  icon,
+  title,
+  children,
+}: {
+  theme: 'light' | 'dark';
+  icon: ReactNode;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`space-y-3 rounded-2xl p-4 ${theme === 'dark' ? 'bg-gray-900/40' : 'bg-gray-50'}`}>
+      <h3
+        className={`flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${
+          theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+        }`}
+      >
+        {icon}
+        {title}
+      </h3>
+      {children}
+    </section>
   );
 }

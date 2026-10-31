@@ -74,9 +74,8 @@ export function SingleModeLayout({
         ghost.style.height = `${Math.max(48, r.height)}px`;
         ghost.style.borderRadius = '16px';
         ghost.style.boxSizing = 'border-box';
-        ghost.style.background = 'rgba(255,255,255,0.06)';
-        ghost.style.border = theme === 'dark' ? '2px solid rgba(209,213,219,0.85)' : '2px solid rgba(55,65,81,0.55)';
-        ghost.style.boxShadow = '0 10px 30px rgba(0,0,0,0.18)';
+        ghost.style.background = theme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(17,24,39,0.07)';
+        ghost.style.boxShadow = '0 10px 30px rgba(0,0,0,0.18), 0 0 36px rgba(59,130,246,0.25)';
         ghost.style.position = 'fixed';
         ghost.style.top = '-10000px';
         ghost.style.left = '-10000px';
@@ -161,8 +160,8 @@ export function SingleModeLayout({
 
     const dragRing = isDropTarget
       ? theme === 'dark'
-        ? 'ring-[3px] ring-gray-200/85 ring-offset-2 ring-offset-gray-900'
-        : 'ring-[3px] ring-gray-900/30 ring-offset-2 ring-offset-white'
+        ? '!shadow-[0_0_0_1px_rgba(147,197,253,0.35),0_0_36px_rgba(96,165,250,0.55)]'
+        : '!shadow-[0_0_0_1px_rgba(59,130,246,0.18),0_0_36px_rgba(59,130,246,0.40)]'
       : '';
 
     const chartReorderDim =
@@ -187,10 +186,10 @@ export function SingleModeLayout({
             draggable
             onDragStart={e => onDragStart(e, globalIndex)}
             onDragEnd={onDragEnd}
-            className={`absolute bottom-2 right-2 z-[45] inline-flex items-center justify-center rounded-full border p-1.5 shadow-sm cursor-grab active:cursor-grabbing select-none opacity-0 transition-opacity duration-150 group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 ${
+            className={`absolute bottom-2 right-2 z-[45] inline-flex items-center justify-center rounded-full p-1.5 glow-md cursor-grab active:cursor-grabbing select-none opacity-0 transition-opacity duration-150 group-hover/slot:opacity-100 group-focus-within/slot:opacity-100 ${
               theme === 'dark'
-                ? 'border-gray-600 bg-gray-900/70 text-gray-200 hover:bg-gray-900'
-                : 'border-gray-200 bg-white/90 text-gray-700 hover:bg-white'
+                ? 'bg-gray-900/80 text-gray-200 hover:bg-gray-900'
+                : 'bg-white/95 text-gray-700 hover:bg-white'
             }`}
             title="Drag to swap cards"
             onClick={e => e.stopPropagation()}
@@ -207,7 +206,7 @@ export function SingleModeLayout({
             />
           </div>
         ) : (
-          <div className={`min-h-0 flex-1 flex flex-col overflow-hidden ${chartReorderDim}`}>{renderChart(slot)}</div>
+          <div className={`min-h-0 flex-1 flex flex-col overflow-hidden rounded-[inherit] ${chartReorderDim}`}>{renderChart(slot)}</div>
         )}
       </div>
     );
@@ -225,8 +224,8 @@ export function SingleModeLayout({
               {pageSlots.map((slot, idx) => {
                 let className = 'w-full min-h-[340px] flex flex-col overflow-visible ';
                 if (!exportMode) {
-                  className += `rounded-xl border shadow-hard-lg ${
-                    theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
+                  className += `rounded-2xl glow-lg ${
+                    theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                   }`;
                 }
                 return (
@@ -249,8 +248,8 @@ export function SingleModeLayout({
                   let className =
                     'flex h-full min-h-[46vh] w-full flex-col overflow-visible md:min-h-0 ';
                   if (!exportMode) {
-                    className += `rounded-xl border shadow-hard-lg ${
-                      theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
+                    className += `rounded-2xl glow-lg ${
+                      theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                     }`;
                   }
                   return (
@@ -273,13 +272,13 @@ export function SingleModeLayout({
 
           {layoutMode === 'hero-left' && (
             // Primary column share must match tutorial mode (2fr chart + 3fr guide → 2/5) so the hero card width is unchanged when switching layouts.
-            <div className="grid w-full gap-2 flex-1 min-h-0 grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] md:[grid-template-rows:minmax(0,1fr)_minmax(0,1fr)] md:overflow-visible">
+            <div className="grid w-full gap-2.5 flex-1 min-h-0 grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] md:[grid-template-rows:minmax(0,1fr)_minmax(0,1fr)] md:overflow-visible">
               {pageSlots.map((slot, idx) => {
                 const isHero = idx === 0;
                 let className = 'w-full min-h-0 h-full flex flex-col overflow-visible ';
                 if (!exportMode) {
-                  className += `rounded-xl border shadow-hard-lg ${
-                    theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
+                  className += `rounded-2xl glow-lg ${
+                    theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                   }`;
                 }
                 if (isHero) className += ' md:col-span-1 md:row-span-2';
@@ -290,15 +289,15 @@ export function SingleModeLayout({
           )}
 
           {layoutMode === 'grid-4x2' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 w-full flex-1 min-h-0 md:[grid-template-rows:minmax(0,1fr)_minmax(0,1fr)] md:overflow-visible">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5 w-full flex-1 min-h-0 md:[grid-template-rows:minmax(0,1fr)_minmax(0,1fr)] md:overflow-visible">
               {(pageSlots.length >= 8 ? GRID_4X2_DISPLAY_ORDER : pageSlots.map((_, i) => i)).map(
                 (originalIdx, visualPos) => {
                   const slot = pageSlots[originalIdx];
                   if (!slot) return null;
                   let className = 'w-full min-h-0 h-full flex flex-col overflow-hidden col-span-1 ';
                   if (!exportMode) {
-                    className += `rounded-xl border shadow-hard-lg ${
-                      theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
+                    className += `rounded-2xl glow-lg ${
+                      theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                     }`;
                   }
                   return renderSlotShell(
@@ -315,12 +314,12 @@ export function SingleModeLayout({
           )}
 
           {layoutMode === 'focus-deep' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full flex-1 min-h-0 md:overflow-visible">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 w-full flex-1 min-h-0 md:overflow-visible">
               {pageSlots.map((slot, idx) => {
                 let className = 'w-full min-h-0 h-full flex flex-col overflow-hidden col-span-1 ';
                 if (!exportMode) {
-                  className += `rounded-xl border shadow-hard-lg ${
-                    theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
+                  className += `rounded-2xl glow-lg ${
+                    theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                   }`;
                 }
                 return renderSlotShell(slot, idx, pageIndex, pageSlots, className);
@@ -360,46 +359,34 @@ function EmptySlot({
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-1 flex-col px-1.5 py-1 sm:px-2 sm:py-1.5">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col p-2">
       <div
-        className={`flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed px-3 py-5 sm:px-4 sm:py-6 ${
-          theme === 'dark'
-            ? 'border-gray-600 bg-gray-900/20'
-            : 'border-gray-300 bg-gray-50/40'
+        className={`flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl px-4 py-6 ${
+          theme === 'dark' ? 'bg-gray-900/25' : 'bg-gray-50'
         }`}
       >
         <p
-          className={`mb-3 w-full shrink-0 text-center text-xs font-medium leading-snug sm:mb-4 ${
-            theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+          className={`mb-4 w-full shrink-0 text-center text-sm font-semibold leading-snug ${
+            theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
           }`}
         >
-          Select chart type
+          Add a chart
         </p>
-        <div className="flex max-w-full flex-wrap items-center justify-center gap-3 sm:gap-4">
+        <div className="flex max-w-[22rem] flex-wrap items-center justify-center gap-2">
           {EMPTY_SLOT_CHOICES.map(({ type, label, Icon }) => (
             <button
               key={type}
               type="button"
               onClick={() => onSelectType(type)}
-              aria-label={label}
               title={label}
-              className={`group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all active:scale-95 sm:h-12 sm:w-12 ${
+              className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-full pl-3 pr-3.5 text-[13px] font-semibold glow-sm transition-all active:scale-95 ${
                 theme === 'dark'
-                  ? 'border-gray-600 bg-gray-800 text-gray-200 hover:border-gray-500 hover:bg-gray-700 hover:text-white'
-                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-gray-800 text-gray-200 hover:bg-gray-700 hover:text-white'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900'
               }`}
             >
-              <Icon className="h-5 w-5 sm:h-[22px] sm:w-[22px]" strokeWidth={2} aria-hidden />
-              <span
-                className={`pointer-events-none absolute left-1/2 top-full z-20 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-semibold opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 ${
-                  theme === 'dark'
-                    ? 'bg-gray-100 text-gray-900 ring-1 ring-gray-700/30'
-                    : 'bg-gray-900 text-white ring-1 ring-black/10'
-                }`}
-                role="tooltip"
-              >
-                {label}
-              </span>
+              <Icon className="h-4 w-4" strokeWidth={2} aria-hidden />
+              {label}
             </button>
           ))}
         </div>

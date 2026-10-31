@@ -4,8 +4,9 @@ import type { GlobalFilterState } from '../lib/globalFilter';
 import { rowPassesGlobalFilters } from '../lib/globalFilter';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { UnitSystem } from '../App';
+import { epwEquivalentHourKey, indexEpwByEquivalentHour, isFiniteNumber } from '../lib/epwClockMatch';
+import { computeUtciForEpwRow } from '../lib/utciModel';
 import { UNIT_C, UNIT_F } from '../lib/unitConversion';
-import tc from 'jsthermalcomfort';
 
 interface SummaryStatsProps {
   data: EPWDataRow[];
@@ -40,64 +41,46 @@ export function SummaryStats({ data, compareData, showDifference, variables, fil
   let utciCount = 0;
   let comfortHours = 0;
 
+  const compareByHour = showDifference && compareData ? indexEpwByEquivalentHour(compareData) : null;
+
   filteredData.forEach(d => {
-    const idx = data.indexOf(d);
+    const compareRow = compareByHour?.get(epwEquivalentHourKey(d));
     
     const getVal = (v: EPWVariable | undefined) => {
-      if (!v) return 0;
-      const primaryVal = (d[v.id] as number) || 0;
+      if (!v) return null;
+      const primaryVal = d[v.id] as number;
+      if (!isFiniteNumber(primaryVal)) return null;
       if (showDifference && compareData) {
-        const compareVal = (compareData[idx]?.[v.id] as number) || 0;
+        const compareVal = compareRow?.[v.id] as number;
+        if (!isFiniteNumber(compareVal)) return null;
         return primaryVal - compareVal;
       }
       return primaryVal;
     };
 
-    avgTemp += getVal(tempVar);
-    avgRh += getVal(rhVar);
-    avgWind += getVal(windVar);
-    totalRain += getVal(rainVar);
+    const add = (bucket: 'temp' | 'rh' | 'wind' | 'rain', value: number | null) => {
+      if (value == null) return;
+      if (bucket === 'temp') avgTemp += value;
+      if (bucket === 'rh') avgRh += value;
+      if (bucket === 'wind') avgWind += value;
+      if (bucket === 'rain') totalRain += value;
+    };
+    add('temp', getVal(tempVar));
+    add('rh', getVal(rhVar));
+    add('wind', getVal(windVar));
+    add('rain', getVal(rainVar));
     
-    // Calculate UTCI
-    const tdb = (d.dryBulbTemperature as number) || 20;
-    const rh = (d.relativeHumidity as number) || 50;
-    const windSpeed = (d.windSpeed as number) || 0.5;
-    const ghr = (d.globalHorizontalRadiation as number) || 0;
-
-    const v = Math.max(0.5, windSpeed);
-    const tr = tdb + (0.02 * ghr);
-
-    let utciVal = tdb;
-    try {
-      const result = tc.models.utci(tdb, tr, v, rh, 'SI', true, false);
-      utciVal = isNaN(result.utci) ? tdb : result.utci;
-    } catch (e) {
-      // Fallback
-    }
-
+    const primaryUtci = computeUtciForEpwRow(d)?.utci;
+    const compareUtci = compareRow ? computeUtciForEpwRow(compareRow)?.utci : undefined;
     if (showDifference && compareData) {
-      const cD = compareData[idx];
-      if (cD) {
-        const cTdb = (cD.dryBulbTemperature as number) || 20;
-        const cRh = (cD.relativeHumidity as number) || 50;
-        const cWindSpeed = (cD.windSpeed as number) || 0.5;
-        const cGhr = (cD.globalHorizontalRadiation as number) || 0;
-        const cV = Math.max(0.5, cWindSpeed);
-        const cTr = cTdb + (0.02 * cGhr);
-        let cUtciVal = cTdb;
-        try {
-          const cResult = tc.models.utci(cTdb, cTr, cV, cRh, 'SI', true, false);
-          cUtciVal = isNaN(cResult.utci) ? cTdb : cResult.utci;
-        } catch (e) {}
-        utciVal = utciVal - cUtciVal;
+      if (primaryUtci != null && compareUtci != null) {
+        avgUtci += primaryUtci - compareUtci;
+        utciCount++;
       }
-    }
-    
-    avgUtci += utciVal;
-    utciCount++;
-    
-    if (!showDifference && utciVal >= 9 && utciVal <= 26) {
-      comfortHours++;
+    } else if (primaryUtci != null) {
+      avgUtci += primaryUtci;
+      utciCount++;
+      if (primaryUtci >= 9 && primaryUtci <= 26) comfortHours++;
     }
   });
 

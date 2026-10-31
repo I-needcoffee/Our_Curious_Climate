@@ -88,14 +88,14 @@ export function UtciCellScenarioModal({
             return (
               <div
                 key={s.scenario.id}
-                className={`flex flex-col overflow-hidden rounded-2xl border ${
+                className={`flex flex-col overflow-hidden rounded-2xl ${
                   isActive
                     ? theme === 'dark'
-                      ? 'border-blue-500/70 bg-gray-900/60 ring-1 ring-blue-500/40'
-                      : 'border-blue-400 bg-white ring-1 ring-blue-300'
+                      ? 'bg-gray-900/60 shadow-[0_0_0_1px_rgba(59,130,246,0.35),0_0_24px_rgba(59,130,246,0.45)]'
+                      : 'bg-white shadow-[0_0_0_1px_rgba(59,130,246,0.2),0_0_24px_rgba(59,130,246,0.35)]'
                     : theme === 'dark'
-                      ? 'border-gray-600 bg-gray-900/40'
-                      : 'border-gray-200 bg-gray-50'
+                      ? 'bg-gray-900/40'
+                      : 'bg-gray-50'
                 }`}
               >
                 <div
@@ -109,7 +109,7 @@ export function UtciCellScenarioModal({
                       <p className={`m-0 text-[11px] font-bold leading-tight ${ink}`}>
                         {s.scenario.shortLabel}
                       </p>
-                      <p className={`m-0 mt-0.5 text-[9px] leading-snug ${muted}`}>
+                      <p className={`m-0 mt-0.5 text-[11px] leading-snug ${muted}`}>
                         {s.scenario.label}
                       </p>
                     </div>
@@ -142,7 +142,7 @@ export function UtciCellScenarioModal({
                   </div>
 
                   <div>
-                    <p className={`m-0 text-[9px] font-semibold uppercase tracking-wide ${muted}`}>
+                    <p className={`m-0 text-[11px] font-semibold uppercase tracking-wide ${muted}`}>
                       Feels like
                     </p>
                     <p className={`m-0 text-lg font-semibold tabular-nums leading-none ${ink}`}>
@@ -152,7 +152,7 @@ export function UtciCellScenarioModal({
                   </div>
 
                   <div>
-                    <p className={`m-0 text-[9px] font-semibold uppercase tracking-wide ${muted}`}>
+                    <p className={`m-0 text-[11px] font-semibold uppercase tracking-wide ${muted}`}>
                       Stress category
                     </p>
                     <p
@@ -165,7 +165,7 @@ export function UtciCellScenarioModal({
                     </p>
                   </div>
 
-                  <p className={`m-0 mt-auto text-[9px] ${muted}`}>
+                  <p className={`m-0 mt-auto text-[11px] ${muted}`}>
                     Comfort time {comfortPct}
                     {s.hourCount > 0 ? ` · ${s.hourCount} hr${s.hourCount === 1 ? '' : 's'}` : ''}
                     {isActive ? ' · chart view' : ''}
@@ -176,7 +176,7 @@ export function UtciCellScenarioModal({
           })}
         </div>
 
-        <p className={`m-0 text-[10px] leading-snug ${muted}`}>
+        <p className={`m-0 text-xs leading-snug ${muted}`}>
           Values use the same Low / Ave / High setting as the chart. Click a matrix scenario or the
           sun/wind badges to change what the 12×24 shows.
         </p>

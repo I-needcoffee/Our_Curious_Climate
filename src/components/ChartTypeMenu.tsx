@@ -150,16 +150,16 @@ export function ChartTypeMenu({
       className={`${chartToolbarTypePillClass(theme)} shrink-0 pl-0.5 pr-0.5 group-hover/chart-type:pr-1.5 group-focus-within/chart-type:pr-1.5 @lg:pl-1 @lg:pr-1 @lg:group-hover/chart-type:pr-2 @lg:group-focus-within/chart-type:pr-2 ${
         disabled ? 'cursor-default opacity-60' : ''
       }`}
-      title={`Change chart type Â· ${typeLabel}`}
+      title={`Change chart type · ${typeLabel}`}
     >
       <span className={`${CHART_TOOLBAR_ICON_SLOT_CLASS} shrink-0`}>
         <Icon className={CHART_TOOLBAR_ICON_GLYPH_CLASS} />
       </span>
       <span
-        className={`pointer-events-none flex max-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out motion-reduce:transition-none group-hover/chart-type:max-w-[10rem] group-hover/chart-type:pl-1 group-hover/chart-type:opacity-100 group-focus-within/chart-type:max-w-[10rem] group-focus-within/chart-type:pl-1 group-focus-within/chart-type:opacity-100 @lg:group-hover/chart-type:max-w-[12rem] @lg:group-focus-within/chart-type:max-w-[12rem] ${CHART_TOOLBAR_TITLE_TEXT_CLASS} text-gray-800`}
+        className={`pointer-events-none flex max-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out motion-reduce:transition-none group-hover/chart-type:max-w-[10rem] group-hover/chart-type:pl-1 group-hover/chart-type:opacity-100 group-focus-within/chart-type:max-w-[10rem] group-focus-within/chart-type:pl-1 group-focus-within/chart-type:opacity-100 @lg:group-hover/chart-type:max-w-[12rem] @lg:group-focus-within/chart-type:max-w-[12rem] ${CHART_TOOLBAR_TITLE_TEXT_CLASS} ${dark ? 'text-gray-100' : 'text-gray-800'}`}
         aria-hidden
       >
-        <span className="truncate font-medium">{typeLabel}</span>
+        <span className="truncate">{typeLabel}</span>
         <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-3.5 @lg:w-3.5" strokeWidth={2.25} />
       </span>
     </button>
@@ -184,8 +184,8 @@ export function ChartTypeMenu({
             id={menuId}
             ref={menuRef}
             role="menu"
-            className={`absolute left-0 z-50 mt-1 min-w-[168px] overflow-hidden rounded-lg border shadow-hard-lg ${
-              dark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+            className={`absolute left-0 z-50 mt-1.5 min-w-[188px] space-y-0.5 overflow-hidden rounded-2xl p-1.5 glow-xl ${
+              dark ? 'bg-gray-800' : 'bg-white'
             }`}
           >
             {CHART_TYPE_MENU_OPTIONS.map(t => {
@@ -200,7 +200,7 @@ export function ChartTypeMenu({
                     dismissDiscover();
                     onChange(t);
                   }}
-                  className={`w-full rounded-full px-3 py-1.5 text-left text-[12px] font-semibold transition-colors ${
+                  className={`w-full rounded-full px-3.5 py-2 text-left text-sm font-semibold transition-colors ${
                     active
                       ? dark
                         ? 'bg-gray-700 text-white'
@@ -233,7 +233,7 @@ export function ChartTypeMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        className={`inline-flex max-w-full min-w-0 truncate font-semibold uppercase tracking-wide text-[10px] underline-offset-2 transition-colors duration-200 w-max ${
+        className={`inline-flex max-w-full min-w-0 truncate font-semibold uppercase tracking-wide text-xs underline-offset-2 transition-colors duration-200 w-max ${
           disabled ? 'cursor-default opacity-60' : 'hover:underline'
         } ${dark ? 'text-gray-200' : 'text-gray-800'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 ${className ?? ''}`}
         title={label}
@@ -246,8 +246,8 @@ export function ChartTypeMenu({
           id={menuId}
           ref={menuRef}
           role="menu"
-          className={`absolute left-0 z-50 mt-1 min-w-[168px] overflow-hidden rounded-lg border shadow-hard-lg ${
-            dark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+          className={`absolute left-0 z-50 mt-1.5 min-w-[188px] space-y-0.5 overflow-hidden rounded-2xl p-1.5 glow-xl ${
+            dark ? 'bg-gray-800' : 'bg-white'
           }`}
         >
           {CHART_TYPE_MENU_OPTIONS.map(t => {
@@ -262,7 +262,7 @@ export function ChartTypeMenu({
                   dismissDiscover();
                   onChange(t);
                 }}
-                className={`w-full rounded-full px-3 py-1.5 text-left text-[12px] font-semibold transition-colors ${
+                className={`w-full rounded-full px-3.5 py-2 text-left text-sm font-semibold transition-colors ${
                   active
                     ? dark
                       ? 'bg-gray-700 text-white'

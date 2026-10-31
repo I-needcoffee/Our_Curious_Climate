@@ -94,11 +94,14 @@ async function letterboxDataUrl(
   return format === 'jpeg' ? canvas.toDataURL('image/jpeg', 0.95) : canvas.toDataURL('image/png');
 }
 
+/** Chart ResizeObservers debounce ~100ms, then re-render SVG text sized for the new frame. */
+const CHART_RESIZE_SETTLE_MS = 350;
+
 function waitForLayout(): Promise<void> {
   return new Promise(resolve => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        window.setTimeout(resolve, 120);
+        window.setTimeout(resolve, CHART_RESIZE_SETTLE_MS);
       });
     });
   });

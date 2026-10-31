@@ -223,8 +223,8 @@ export function WindStationPickerModal({
 
   const shell =
     theme === 'dark'
-      ? 'border-gray-600 bg-gray-800 text-gray-100'
-      : 'border-gray-200 bg-white text-gray-900';
+      ? 'bg-gray-800 text-gray-100'
+      : 'bg-white text-gray-900';
 
   const canContinue = userPickedStation && !!selected?.stationId;
 
@@ -239,7 +239,7 @@ export function WindStationPickerModal({
       }}
     >
       <div
-        className={`relative flex max-h-[min(92vh,820px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-hard-xl ${shell}`}
+        className={`relative flex max-h-[min(92vh,820px)] w-full max-w-3xl flex-col overflow-hidden rounded-3xl glow-xl ${shell}`}
       >
         <button
           type="button"
@@ -260,7 +260,7 @@ export function WindStationPickerModal({
             Map is centered on your EPW site. Blue = ASOS (airport METAR), green = RWIS (road weather). Wind availability
             is estimated from IEM catalog metadata — not probed station-by-station.
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <span className="inline-flex items-center gap-1">
               <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#ea580c] ring-1 ring-white" aria-hidden />
               EPW site
@@ -277,15 +277,15 @@ export function WindStationPickerModal({
           </div>
           {needsStatePicker ? (
             <div
-              className={`mt-3 rounded-lg border px-3 py-2.5 text-xs leading-snug ${
+              className={`mt-3 rounded-2xl px-4 py-3 text-[13px] leading-snug ${
                 theme === 'dark'
-                  ? 'border-amber-700/60 bg-amber-950/40 text-amber-100'
-                  : 'border-amber-200 bg-amber-50 text-amber-950'
+                  ? 'bg-amber-950/40 text-amber-100'
+                  : 'bg-amber-50 text-amber-950'
               }`}
             >
               <p>{statePickerNote}</p>
               <label className="mt-2 flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">U.S. state</span>
+                <span className="text-xs font-semibold uppercase tracking-wide opacity-80">U.S. state</span>
                 <select
                   value={manualStateCode}
                   onChange={e => {
@@ -293,10 +293,10 @@ export function WindStationPickerModal({
                     setUserPickedStation(false);
                     setSelected(null);
                   }}
-                  className={`rounded-md border px-2 py-1.5 text-sm ${
+                  className={`rounded-full px-3.5 py-1.5 text-sm ${
                     theme === 'dark'
-                      ? 'border-gray-600 bg-gray-900/60 text-gray-100'
-                      : 'border-gray-200 bg-white text-gray-900'
+                      ? 'bg-gray-900/60 text-gray-100'
+                      : 'bg-gray-100 text-gray-900'
                   }`}
                 >
                   <option value="">Select state…</option>
@@ -378,9 +378,9 @@ export function WindStationPickerModal({
           )}
         </div>
 
-        <div className={`shrink-0 space-y-2 border-t px-4 py-3 sm:px-5 ${theme === 'dark' ? 'border-gray-700' : 'border-gray-100'}`}>
+        <div className={`shrink-0 space-y-2 px-4 py-3 sm:px-5 ${theme === 'dark' ? 'bg-gray-900/30' : 'bg-gray-50'}`}>
           {rwisNote ? (
-            <p className={`text-[10px] ${theme === 'dark' ? 'text-amber-300/90' : 'text-amber-800'}`}>{rwisNote}</p>
+            <p className={`text-xs ${theme === 'dark' ? 'text-amber-300/90' : 'text-amber-800'}`}>{rwisNote}</p>
           ) : null}
           {selectedStation ? (
             <div className={`rounded-lg px-3 py-2 text-xs ${theme === 'dark' ? 'bg-gray-900/50' : 'bg-gray-50'}`}>
@@ -421,7 +421,7 @@ export function WindStationPickerModal({
               }}
               className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors duration-200 ${
                 canContinue
-                  ? 'cursor-pointer bg-gray-900 text-white shadow-hard-sm hover:bg-gray-800'
+                  ? 'cursor-pointer bg-gray-900 text-white glow-sm hover:bg-gray-800'
                   : `cursor-not-allowed ${
                       theme === 'dark'
                         ? 'bg-gray-700 text-gray-500'

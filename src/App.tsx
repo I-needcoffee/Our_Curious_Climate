@@ -27,10 +27,11 @@ import { ExportModeToolbar } from './components/ExportModeToolbar';
 import { SingleModeLayout } from './components/SingleModeLayout';
 import { ComparisonModeLayout } from './components/ComparisonModeLayout';
 import { TutorialLiveProvider } from './context/TutorialLiveContext';
-import { MapPin, ArrowLeft, Plus, Sun, BarChart2, Wind, ThermometerSun, Settings, X, Compass, BarChart3, Radar, Download, FileJson, CloudLightning, Info } from 'lucide-react';
+import { MapPin, ArrowLeft, Plus, Sun, BarChart2, Wind, ThermometerSun, Settings, X, Compass, BarChart3, Radar, Download, FileJson, CloudLightning, Info, MoreHorizontal } from 'lucide-react';
 import { DiscoverPulseShell } from './components/onboarding/DiscoverPulseShell';
 import { dismissOnboarding, ONBOARDING_KEYS } from './lib/onboardingStorage';
 import { CARTO_LIGHT_ALL_WATER_HEX, GRADIENTS } from './lib/constants';
+import { CHART_TEXT_AUTO } from './lib/chartInk';
 import { TUTORIAL_LEGEND_DOM_ID } from './lib/tutorialCopy';
 import { GradientDef } from './components/InteractiveLegend';
 import { ParsedEPW } from './lib/epwParser';
@@ -69,7 +70,7 @@ function useMediaMinWidthPx(minWidthPx: number, ssrFallback: boolean) {
 
 /** Toolbar pictograms for single-mode dashboard layouts (stroke-only, rounded rects). */
 function LayoutIconHeroLeft({ className }: { className?: string }) {
-  /** Shared vertical band so hero column and 3Ã—2 grid share top/bottom edges. */
+  /** Shared vertical band so hero column and 3×2 grid share top/bottom edges. */
   const top = 4;
   const bandH = 20;
   const rowH = 9;
@@ -145,7 +146,7 @@ export type LayoutMode = 'hero-left' | 'grid-4x2' | 'focus-deep' | 'tutorial' | 
 function LayoutIconStacked({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      {/* Single card with a leftâ†”right arrow to suggest full-width single-column layout. */}
+      {/* Single card with a left↔right arrow to suggest full-width single-column layout. */}
       <rect x="5" y="4" width="30" height="20" rx="3" stroke="currentColor" strokeWidth="1.75" />
       <path
         d="M14 14h12m0 0-2.5-2.5M26 14l-2.5 2.5M14 14l2.5-2.5M14 14l2.5 2.5"
@@ -159,41 +160,52 @@ function LayoutIconStacked({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Layout switcher order. The first two are the primary pair shown as always-visible segments
+ * (Grid is the default overview, Details is the natural next step); the rest live behind a "…"
+ * toggle so the common path stays one click.
+ */
 const LAYOUT_PICKER: readonly {
   mode: LayoutMode;
   ariaLabel: string;
   title: string;
   Icon: typeof LayoutIconHeroLeft;
+  primary: boolean;
 }[] = [
-  {
-    mode: 'hero-left',
-    ariaLabel: 'Focus Grid layout',
-    title: 'Focus Grid',
-    Icon: LayoutIconHeroLeft,
-  },
   {
     mode: 'grid-4x2',
     ariaLabel: 'Grid layout',
     title: 'Grid',
     Icon: LayoutIconGrid4x2,
-  },
-  {
-    mode: 'focus-deep',
-    ariaLabel: 'Side-by-Side layout',
-    title: 'Side-by-Side',
-    Icon: LayoutIconFocusDeep,
+    primary: true,
   },
   {
     mode: 'tutorial',
     ariaLabel: 'Details layout',
     title: 'Details',
     Icon: LayoutIconTutorial,
+    primary: true,
+  },
+  {
+    mode: 'hero-left',
+    ariaLabel: 'Focus Grid layout',
+    title: 'Focus Grid',
+    Icon: LayoutIconHeroLeft,
+    primary: false,
+  },
+  {
+    mode: 'focus-deep',
+    ariaLabel: 'Side-by-Side layout',
+    title: 'Side-by-Side',
+    Icon: LayoutIconFocusDeep,
+    primary: false,
   },
   {
     mode: 'stacked',
     ariaLabel: 'Stacked layout',
     title: 'Stacked',
     Icon: LayoutIconStacked,
+    primary: false,
   },
 ];
 
@@ -398,7 +410,7 @@ export default function App() {
     }
     setDstDisplayEnabled(selectedFiles.some(f => f.metadata.daylightSavings === 'yes'));
   }, [selectedFiles]);
-  const [heatmapTextColor, setHeatmapTextColor] = useState<string>('#000000');
+  const [heatmapTextColor, setHeatmapTextColor] = useState<string>(CHART_TEXT_AUTO);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   const windIemGlobal = useWindIemGlobalPrefs();
@@ -413,7 +425,7 @@ export default function App() {
     ...DEFAULT_GLOBAL_FILTER,
   }));
 
-  /** Heatmaps: statistic taken within each aggregation cell (â€œAveâ€ = mean). Shared app-wide via footer toggle. */
+  /** Heatmaps: statistic taken within each aggregation cell (“Ave” = mean). Shared app-wide via footer toggle. */
   const [heatmapCellStatistic, setHeatmapCellStatistic] = useState<HeatmapCellStatistic>('mean');
   /** Explorer bar charts: solid footer statistic color vs legend-aligned gradient (Settings). */
   const [barChartFillMode, setBarChartFillMode] = useState<BarChartFillMode>('solid');
@@ -476,7 +488,7 @@ export default function App() {
     }));
   }, [exportMode, exportCaptionFiles]);
 
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('hero-left');
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid-4x2');
   const smUp = useMediaMinWidthPx(640, true);
   const activeLayoutPicker = useMemo(() => {
     if (viewMode !== 'single') return LAYOUT_PICKER;
@@ -489,27 +501,32 @@ export default function App() {
     setLayoutMode(prev => (prev === 'tutorial' || prev === 'stacked' ? prev : 'tutorial'));
   }, [smUp, viewMode]);
 
-  const activeLayoutPick = useMemo(
-    () => activeLayoutPicker.find(o => o.mode === layoutMode) ?? activeLayoutPicker[0] ?? LAYOUT_PICKER[0],
-    [layoutMode, activeLayoutPicker]
-  );
-  const layoutAlternates = useMemo(
-    () => activeLayoutPicker.filter(o => o.mode !== layoutMode),
-    [activeLayoutPicker, layoutMode]
-  );
-  const layoutPeekAlternate = layoutAlternates[0];
-  const layoutMoreAlternates = layoutAlternates.slice(1);
-  const ActiveLayoutIcon = activeLayoutPick.Icon;
   const [layoutPickerOpen, setLayoutPickerOpen] = useState(false);
+  /**
+   * Always-visible segments: Grid + Details (or the two phone layouts). If the user is on a
+   * layout from the "…" set, that one also appears as a third selected chip so they can see
+   * where they are without opening the menu.
+   */
+  const layoutSegments = useMemo(() => {
+    if (!smUp) return activeLayoutPicker;
+    const primary = activeLayoutPicker.filter(o => o.primary);
+    const activeMore = activeLayoutPicker.find(o => !o.primary && o.mode === layoutMode);
+    return activeMore ? [...primary, activeMore] : primary;
+  }, [smUp, activeLayoutPicker, layoutMode]);
+  const moreLayouts = useMemo(
+    () => (smUp ? activeLayoutPicker.filter(o => !o.primary) : []),
+    [smUp, activeLayoutPicker]
+  );
+  const layoutHasMore = moreLayouts.length > 0;
   /** Positioning root for export outline around bottom-right chart + comfort stats. */
   const grid4x2ExportWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (smUp) setLayoutPickerOpen(false);
-  }, [smUp]);
+    setLayoutPickerOpen(false);
+  }, [smUp, layoutMode]);
 
   useEffect(() => {
-    if (smUp || !layoutPickerOpen) return;
+    if (!layoutPickerOpen) return;
     /**
      * Close on outside *click* only (not touchstart). A document touchstart would run before the
      * child button's onClick, could collapse the panel and steal the tap; max-w-0 + overflow
@@ -587,7 +604,7 @@ export default function App() {
 
   const iemAttributionInExport = windIemGlobal.source === 'iem' && dashboardHasWindCharts;
 
-  /** Low/Ave/High applies to 12Ã—24 explorer-style heatmaps only; comparison mode always includes those cards. */
+  /** Low/Ave/High applies to 12×24 explorer-style heatmaps only; comparison mode always includes those cards. */
   const dashboardHasHeatmap1224 = useMemo(() => {
     if (viewMode === 'comparison') return true;
     return slots.some(s => s.type === 'explorer' || s.type === 'wind' || s.type === 'utci');
@@ -681,7 +698,8 @@ export default function App() {
       } else {
         setSelectedFiles(newFiles);
         if (newFiles.length === 1) {
-          setLayoutMode('tutorial');
+          /** First file opens on the Grid overview (phones only have Details/Stacked). */
+          setLayoutMode(smUp ? 'grid-4x2' : 'tutorial');
         } else if (newFiles.length > 1) {
           setViewMode('comparison');
           setShowDifference(true);
@@ -915,33 +933,33 @@ export default function App() {
       >
         {selectedFiles.length > 0 && (
           <div className="absolute left-3 right-3 top-3 z-[2000] flex flex-col gap-2 sm:left-4 sm:right-auto sm:max-w-md">
-            <div className="rounded-xl border border-gray-200/90 bg-white/95 px-3 py-2.5 shadow-hard-md backdrop-blur-sm">
+            <div className="rounded-2xl bg-white/95 px-4 py-3 glow-lg backdrop-blur-sm">
               {isSelectingFile ? (
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500">
                   {selectedFiles.length > 1 ? 'Add or change comparison site' : 'Add another site'}
                 </p>
               ) : null}
-              <p className="mt-0.5 text-sm font-semibold text-gray-900">
+              <p className="mt-0.5 text-base font-bold tracking-[-0.01em] text-gray-900">
                 {isSelectingFile ? 'Pick a location on the map' : 'Loaded weather file'}
               </p>
-              <ul className="mt-1.5 space-y-1">
+              <ul className="mt-2 space-y-1.5">
                 {selectedFiles.map((file, index) => (
-                  <li key={`${file.metadata.city}-${index}`} className="flex items-start gap-1.5 text-[12px] leading-snug text-gray-700">
-                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden />
+                  <li key={`${file.metadata.city}-${index}`} className="flex items-start gap-2 text-[13px] leading-snug text-gray-700">
+                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" aria-hidden />
                     <span className="min-w-0">
-                      <span className="font-medium text-gray-900">{weatherPlaceLine(file) || file.metadata.city}</span>
+                      <span className="font-semibold text-gray-900">{weatherPlaceLine(file) || file.metadata.city}</span>
                       {weatherFileTypeLine(file) ? (
-                        <span className="text-gray-500"> Â· {weatherFileTypeLine(file)}</span>
+                        <span className="text-gray-500"> · {weatherFileTypeLine(file)}</span>
                       ) : null}
                     </span>
                   </li>
                 ))}
               </ul>
-              <div className="mt-2.5 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => setIsSelectingFile(false)}
-                  className="rounded-full bg-gray-900 px-3 py-1.5 text-[11px] font-semibold text-white shadow-hard-sm hover:bg-gray-800"
+                  className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white glow-sm hover:bg-gray-800"
                 >
                   Back to dashboard
                 </button>
@@ -949,7 +967,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setIsSelectingFile(false)}
-                    className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[11px] font-medium text-gray-700 hover:bg-gray-50"
+                    className="rounded-full bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-200"
                   >
                     Cancel
                   </button>
@@ -969,7 +987,7 @@ export default function App() {
             basemapStyle={mapBasemapStyle}
           />
         </div>
-        <div className="relative z-[5000] flex w-full shrink-0 items-center gap-2 border-t border-gray-200/80 bg-[#fcfbf8] px-2 py-1.5 sm:px-3">
+        <div className="relative z-[5000] flex w-full shrink-0 items-center gap-2 bg-[#fcfbf8] px-2 py-1.5 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] sm:px-3">
           <BasemapStyleToggle
             value={mapBasemapStyle}
             onChange={style => {
@@ -1051,10 +1069,10 @@ export default function App() {
       {/* Top Navigation Bar */}
       <div
         id="tutorial-nav-bar"
-        className={`relative z-30 flex min-h-0 w-full min-w-0 items-center justify-between gap-2 border-b px-2 py-1.5 transition-[background-color,border-color,box-shadow] duration-200 sm:px-3 ${
+        className={`relative z-30 flex min-h-0 w-full min-w-0 items-center justify-between gap-2 px-2 py-1.5 transition-[background-color,box-shadow] duration-200 sm:px-3 ${
           theme === 'dark'
-            ? 'bg-gray-800 border-gray-700 shadow-[0_1px_0_0_rgba(0,0,0,0.35)]'
-            : 'bg-white border-gray-200 shadow-sm'
+            ? 'bg-gray-800 shadow-[0_2px_18px_rgba(0,0,0,0.35)]'
+            : 'bg-white shadow-[0_2px_18px_rgba(15,23,42,0.07)]'
         }`}
       >
         <div className="flex min-h-0 min-w-0 flex-1 items-center gap-2 overflow-visible sm:gap-4">
@@ -1066,7 +1084,7 @@ export default function App() {
                 setSelectedFiles([]);
                 setShowDifference(false);
               }}
-              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent p-0 shadow-hard-sm transition-[color,background-color,border-color,box-shadow] duration-200 sm:h-10 sm:w-10 ${theme === 'dark' ? 'text-gray-300 hover:border-gray-600 hover:bg-gray-700' : 'text-gray-600 hover:border-gray-200 hover:bg-gray-100'}`}
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow] duration-200 sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
               title="Back to Map"
             >
               <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -1082,12 +1100,12 @@ export default function App() {
               return (
               <div 
                 key={index} 
-                className={`group flex shrink-0 items-center gap-1 px-1.5 py-0.5 sm:gap-1.5 sm:px-2.5 sm:py-1 rounded-full border transition-[color,background-color,border-color,box-shadow] duration-200 cursor-pointer ${
+                className={`group flex shrink-0 items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1.5 transition-[color,background-color,box-shadow] duration-200 cursor-pointer sm:gap-2 sm:py-1.5 sm:pl-3 sm:pr-2 ${
                   viewMode === 'single' && activeFileIndex === index 
                     ? (theme === 'dark'
-                      ? 'bg-gray-600 border-gray-500 text-gray-100 shadow-sm z-10'
-                      : 'bg-gray-100 border-gray-300 text-gray-900 shadow-sm z-10')
-                    : (theme === 'dark' ? 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100')
+                      ? 'bg-gray-600 text-gray-100 glow-md z-10'
+                      : 'bg-white text-gray-900 glow-md z-10')
+                    : (theme === 'dark' ? 'bg-gray-700/70 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200/80')
                 }`}
                 onClick={() => {
                   if (viewMode === 'single') {
@@ -1100,15 +1118,15 @@ export default function App() {
                 }
               >
                 <MapPin
-                  className={`h-2.5 w-2.5 shrink-0 sm:h-3 sm:w-3 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-200' : 'text-gray-600') : (theme === 'dark' ? 'text-gray-400' : 'text-gray-500')}`}
+                  className={`h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-200' : 'text-gray-600') : (theme === 'dark' ? 'text-gray-400' : 'text-gray-500')}`}
                 />
-                <div className="flex max-w-[11rem] min-w-0 flex-col gap-0.5 text-left leading-none sm:max-w-[15rem]">
-                  <span className="truncate text-[10px] font-semibold leading-none sm:text-[11px]">
+                <div className="flex max-w-[12rem] min-w-0 flex-col gap-1 text-left leading-none sm:max-w-[17rem]">
+                  <span className="truncate text-xs font-semibold leading-none sm:text-[13px]">
                     {weatherPlaceLine(file) || file.metadata.city}
                   </span>
                   {fileTypeNote ? (
                     <span
-                      className={`truncate text-[9px] font-medium leading-none tracking-wide sm:text-[10px] ${
+                      className={`truncate text-[10.5px] font-medium leading-none sm:text-[11px] ${
                         viewMode === 'single' && activeFileIndex === index
                           ? theme === 'dark'
                             ? 'text-gray-300'
@@ -1137,10 +1155,10 @@ export default function App() {
                     setDifferenceBaselineIndex(0);
                     setDifferenceCompareIndex(1);
                   }}
-                  className={`ml-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-red-500/10 hover:text-red-500 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-300' : 'text-gray-500') : 'text-gray-400'}`}
+                  className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-red-500/10 hover:text-red-500 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-300' : 'text-gray-500') : 'text-gray-400'}`}
                   title="Remove file"
                 >
-                  <X className="h-2 w-2 sm:h-2.5 sm:w-2.5" />
+                  <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 </button>
               </div>
               );
@@ -1153,9 +1171,9 @@ export default function App() {
                   dismissOnboarding(ONBOARDING_KEYS.addLocation);
                   setIsSelectingFile(true);
                 }}
-                className={`flex shrink-0 items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] font-medium transition-colors sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px] ${theme === 'dark' ? 'border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200' : 'border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-700'}`}
+                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors sm:h-9 sm:px-3.5 sm:text-[13px] ${theme === 'dark' ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200/80 hover:text-gray-900'}`}
               >
-                <Plus className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> Add
+                <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> Add
               </button>
             </DiscoverPulseShell>
           </div>
@@ -1165,18 +1183,18 @@ export default function App() {
           {selectedFiles.length > 1 && (
             <div
               id="tutorial-nav-viewmode"
-              className={`flex shrink-0 items-center rounded-full border p-0.5 sm:p-1 ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200 shadow-hard-sm'}`}
+              className={`flex shrink-0 items-center gap-0.5 rounded-full p-1 ${theme === 'dark' ? 'bg-gray-700/70' : 'bg-gray-100'}`}
             >
               <button
                 onClick={() => {
                   setViewMode('single');
                   setShowDifference(false);
                 }}
-                className={`min-w-0 shrink rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3 sm:py-1.5 sm:text-xs ${
+                className={`min-w-0 shrink rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 sm:text-xs ${
                   viewMode === 'single'
                     ? theme === 'dark'
-                      ? 'bg-gray-600 text-white hover:bg-gray-500'
-                      : 'bg-gray-200 text-gray-900 shadow-sm hover:bg-gray-300'
+                      ? 'bg-gray-500 text-white glow-sm'
+                      : 'bg-white text-gray-900 glow-sm'
                     : theme === 'dark'
                       ? 'text-gray-400 hover:text-gray-200'
                       : 'text-gray-500 hover:text-gray-700'
@@ -1189,11 +1207,11 @@ export default function App() {
                   setViewMode('comparison');
                   setShowDifference(true);
                 }}
-                className={`min-w-0 shrink rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3 sm:py-1.5 sm:text-xs ${
+                className={`min-w-0 shrink rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 sm:text-xs ${
                   viewMode === 'comparison'
                     ? theme === 'dark'
-                      ? 'bg-gray-600 text-white hover:bg-gray-500'
-                      : 'bg-gray-200 text-gray-900 shadow-sm hover:bg-gray-300'
+                      ? 'bg-gray-500 text-white glow-sm'
+                      : 'bg-white text-gray-900 glow-sm'
                     : theme === 'dark'
                       ? 'text-gray-400 hover:text-gray-200'
                       : 'text-gray-500 hover:text-gray-700'
@@ -1207,83 +1225,109 @@ export default function App() {
           {viewMode === 'single' && (
             <div
               id="tutorial-nav-layouts"
-              title="Hover or focus to change dashboard layout"
-              className={`group/layout-pick inline-flex h-9 shrink-0 items-stretch rounded-full border p-0.5 sm:h-10 ${
-                theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-100 shadow-hard-sm'
-              }`}
-              role="group"
-              aria-label="Dashboard layout"
+              className="relative inline-flex shrink-0"
             >
-              {smUp && layoutPeekAlternate
-                ? (() => {
-                    const PeekIcon = layoutPeekAlternate.Icon;
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => setLayoutMode(layoutPeekAlternate.mode)}
-                        aria-label={layoutPeekAlternate.ariaLabel}
-                        title={layoutPeekAlternate.title}
-                        className={`flex min-w-9 shrink-0 items-center justify-center rounded-full px-2 opacity-75 transition-[opacity,background-color] duration-200 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
-                          theme === 'dark'
-                            ? 'text-gray-500 hover:bg-gray-700/50 hover:text-gray-300'
-                            : 'text-gray-400 hover:bg-white/50 hover:text-gray-700'
+              <div
+                className={`inline-flex h-9 shrink-0 items-stretch gap-0.5 rounded-full p-1 sm:h-10 ${
+                  theme === 'dark' ? 'bg-gray-700/70' : 'bg-gray-100'
+                }`}
+                role="group"
+                aria-label="Dashboard layout"
+              >
+                {layoutSegments.map(({ mode, ariaLabel, title, Icon }) => {
+                  const active = mode === layoutMode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setLayoutMode(mode)}
+                      aria-label={ariaLabel}
+                      aria-pressed={active}
+                      title={title}
+                      className={`flex min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
+                        active
+                          ? theme === 'dark'
+                            ? 'bg-gray-500 text-gray-100 glow-sm'
+                            : 'bg-white text-gray-900 glow-sm'
+                          : theme === 'dark'
+                            ? 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-200'
+                            : 'text-gray-500 hover:bg-white/60 hover:text-gray-800'
+                      }`}
+                    >
+                      <Icon className="h-[18px] w-[26px] sm:h-5 sm:w-7" />
+                      <span
+                        className={`hidden max-w-[7rem] truncate pr-1 text-xs leading-none md:inline ${
+                          active ? 'font-semibold' : 'font-medium'
                         }`}
                       >
-                        <PeekIcon className="h-[18px] w-[26px] sm:h-5 sm:w-7" />
-                      </button>
-                    );
-                  })()
-                : null}
-              <div
-                className={
-                  !smUp
-                    ? layoutPickerOpen
-                      ? 'flex min-w-0 shrink-0 gap-0.5 overflow-hidden max-w-[min(12rem,calc(100vw-5rem))] opacity-100 pointer-events-auto transition-[max-width,opacity] duration-300 ease-out motion-reduce:transition-none'
-                      : 'flex min-w-0 shrink-0 gap-0.5 max-w-0 overflow-hidden opacity-0 pointer-events-none transition-[max-width,opacity] duration-300 ease-out motion-reduce:transition-none'
-                    : 'flex min-w-0 shrink-0 gap-0.5 overflow-hidden max-w-0 opacity-0 pointer-events-none transition-[max-width,opacity] duration-300 ease-out motion-reduce:transition-none group-hover/layout-pick:pointer-events-auto group-hover/layout-pick:max-w-[9.5rem] group-hover/layout-pick:opacity-100 group-focus-within/layout-pick:pointer-events-auto group-focus-within/layout-pick:max-w-[9.5rem] group-focus-within/layout-pick:opacity-100 sm:group-hover/layout-pick:max-w-[10.5rem] sm:group-focus-within/layout-pick:max-w-[10.5rem]'
-                }
-              >
-                {(!smUp ? layoutAlternates : layoutMoreAlternates).map(({ mode, ariaLabel, title, Icon }) => (
+                        {title}
+                      </span>
+                    </button>
+                  );
+                })}
+                {layoutHasMore && (
                   <button
-                    key={mode}
                     type="button"
-                    onClick={() => {
-                      setLayoutMode(mode);
-                      setLayoutPickerOpen(false);
-                    }}
-                    aria-label={ariaLabel}
-                    title={title}
+                    onClick={() => setLayoutPickerOpen(v => !v)}
+                    aria-expanded={layoutPickerOpen}
+                    aria-haspopup="menu"
+                    aria-label="More layouts"
+                    title="More layouts"
                     className={`flex min-w-9 shrink-0 items-center justify-center rounded-full px-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
-                      theme === 'dark'
-                        ? 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-200'
-                        : 'text-gray-500 hover:bg-white/60 hover:text-gray-800'
+                      layoutPickerOpen || moreLayouts.some(o => o.mode === layoutMode)
+                        ? theme === 'dark'
+                          ? 'bg-gray-600/70 text-gray-200'
+                          : 'bg-white/70 text-gray-800'
+                        : theme === 'dark'
+                          ? 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-200'
+                          : 'text-gray-500 hover:bg-white/60 hover:text-gray-800'
                     }`}
                   >
-                    <Icon className="h-[18px] w-[26px] sm:h-5 sm:w-7" />
+                    <MoreHorizontal className="h-4 w-4" aria-hidden />
                   </button>
-                ))}
+                )}
               </div>
-              <button
-                type="button"
-                className={`flex min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition-colors duration-200 sm:min-w-10 sm:px-2.5 md:min-w-0 ${
-                  theme === 'dark' ? 'bg-gray-600 text-gray-100 shadow-sm' : 'bg-white text-gray-900 shadow-sm'
-                }`}
-                title={activeLayoutPick.title}
-                aria-current="true"
-                aria-label={activeLayoutPick.ariaLabel}
-                onClick={() => {
-                  if (!smUp) setLayoutPickerOpen(v => !v);
-                }}
-              >
-                <ActiveLayoutIcon className="h-[18px] w-[26px] sm:h-5 sm:w-7" />
-                <span className="hidden max-w-[5.5rem] truncate text-[9px] font-semibold leading-none md:inline">
-                  {activeLayoutPick.title}
-                </span>
-              </button>
+              {layoutPickerOpen && moreLayouts.length > 0 && (
+                <div
+                  role="menu"
+                  aria-label="More layouts"
+                  className={`absolute right-0 top-full z-40 mt-1.5 min-w-[11rem] rounded-2xl p-1 glow-lg ${
+                    theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'
+                  }`}
+                >
+                  {moreLayouts.map(({ mode, ariaLabel, title, Icon }) => {
+                    const active = mode === layoutMode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setLayoutMode(mode);
+                          setLayoutPickerOpen(false);
+                        }}
+                        aria-label={ariaLabel}
+                        className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs transition-colors ${
+                          active
+                            ? theme === 'dark'
+                              ? 'bg-gray-700 font-semibold'
+                              : 'bg-gray-100 font-semibold'
+                            : theme === 'dark'
+                              ? 'font-medium text-gray-300 hover:bg-gray-700/70'
+                              : 'font-medium text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Icon className="h-4 w-6 shrink-0" />
+                        <span>{title}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
-          <div className={`h-5 sm:h-6 w-px mx-0.5 sm:mx-1 hidden xs:block shrink-0 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
+          <div className="mx-0.5 hidden w-1 shrink-0 xs:block sm:mx-1" aria-hidden />
 
           {exportMode ? (
             <ExportModeToolbar
@@ -1303,7 +1347,7 @@ export default function App() {
               id="tutorial-nav-settings"
               type="button"
               onClick={() => setShowSettingsModal(true)}
-              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border p-0 shadow-hard-sm transition-[color,background-color,border-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 border-gray-200 text-gray-700 hover:bg-gray-200'}`}
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
               title="Global settings"
             >
               <Settings className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden />
@@ -1314,7 +1358,7 @@ export default function App() {
                 type="button"
                 data-export-ui
                 onClick={() => setExportMode(true)}
-                className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border p-0 shadow-hard-sm transition-[color,background-color,border-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 border-gray-200 text-gray-700 hover:bg-gray-200'}`}
+                className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
                 title="Export layout"
               >
                 <Download className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -1331,12 +1375,12 @@ export default function App() {
       {showGradientModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
           <div
-            className={`w-full max-w-xs rounded-lg border p-3 shadow-hard-xl sm:max-w-sm ${
-              theme === 'dark' ? 'border-gray-600 bg-gray-800 text-gray-100' : 'border-gray-200 bg-white text-gray-900'
+            className={`w-full max-w-xs rounded-3xl p-5 glow-xl sm:max-w-sm ${
+              theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'
             }`}
           >
-            <h3 className="mb-2 text-sm font-bold">Create custom gradient</h3>
-            <div className="space-y-2">
+            <h3 className="mb-3 text-lg font-bold tracking-[-0.01em]">Create custom gradient</h3>
+            <div className="space-y-3">
               <div>
                 <label
                   className={`mb-1 block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}
@@ -1347,10 +1391,10 @@ export default function App() {
                   type="text"
                   value={newGradientName}
                   onChange={e => setNewGradientName(e.target.value)}
-                  className={`w-full rounded-full border px-3 py-2 text-sm transition-colors duration-200 ${
+                  className={`w-full rounded-full px-4 py-2 text-sm transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
                     theme === 'dark'
-                      ? 'border-gray-600 bg-gray-900/50 text-gray-100 placeholder:text-gray-500'
-                      : 'border-gray-300 bg-white text-gray-900'
+                      ? 'bg-gray-900/50 text-gray-100 placeholder:text-gray-500'
+                      : 'bg-gray-100 text-gray-900 placeholder:text-gray-400'
                   }`}
                   placeholder="e.g., My Cool Gradient"
                 />
@@ -1382,10 +1426,10 @@ export default function App() {
                           newColors[i] = e.target.value;
                           setNewGradientColors(newColors);
                         }}
-                        className={`flex-1 rounded-full border px-2 py-1 text-sm font-mono transition-colors duration-200 ${
+                        className={`flex-1 rounded-full px-3 py-1.5 text-sm font-mono transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
                           theme === 'dark'
-                            ? 'border-gray-600 bg-gray-900/50 text-gray-100'
-                            : 'border-gray-300 bg-white text-gray-900'
+                            ? 'bg-gray-900/50 text-gray-100'
+                            : 'bg-gray-100 text-gray-900'
                         }`}
                       />
                       {newGradientColors.length > 2 && (
@@ -1427,7 +1471,7 @@ export default function App() {
               </button>
               <button 
                 onClick={handleAddGradient}
-                className={`rounded-full px-6 py-2 text-sm font-bold text-white shadow-hard-md transition-colors duration-200 ${
+                className={`rounded-full px-6 py-2 text-sm font-bold text-white glow-md transition-colors duration-200 ${
                   theme === 'dark' ? 'bg-sky-600 hover:bg-sky-500' : 'bg-gray-800 hover:bg-gray-900'
                 }`}
               >
@@ -1438,15 +1482,16 @@ export default function App() {
         </div>
       )}
 
-      {/* Dashboard Area â€” main charts flex-1; footer strip shrink-0 so pills never overlap cards */}
+      {/* Dashboard Area — main charts flex-1; footer strip shrink-0 so pills never overlap cards */}
       <div 
         id="dashboard-area"
+        data-export-mode={exportMode ? '' : undefined}
         className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[background-color] duration-200 ease-out ${exportMode ? 'bg-white' : ''}`}
         style={{
           backgroundColor: exportMode ? '#ffffff' : theme === 'dark' ? '#121211' : '#fcfbf8',
         }}
       >
-        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden px-1.5 pt-1.5 pb-0 sm:px-2 sm:pt-2 ${exportMode ? 'bg-white' : ''}`}>
+        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden px-2 pt-2 pb-0 sm:px-3 sm:pt-3 ${exportMode ? 'bg-white' : ''}`}>
           {showSettingsModal && (
             <SettingsModal
               isOpen={showSettingsModal}
@@ -1529,7 +1574,7 @@ export default function App() {
                 {layoutMode === 'grid-4x2' ? (
                   <div
                     ref={grid4x2ExportWrapRef}
-                    className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,16.666%)] grid-rows-[1fr_1fr] gap-x-2 gap-y-2 items-stretch"
+                    className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,16.666%)] grid-rows-[1fr_1fr] gap-2.5 items-stretch"
                   >
                     <Grid4x2ComfortExportOutline
                       active={exportMode}
@@ -1554,11 +1599,9 @@ export default function App() {
 
           </div>
         <div
-          className={`shrink-0 overflow-visible border-t ${
-            exportMode ? 'border-gray-200 bg-white' : theme === 'dark' ? 'border-gray-800/80 bg-inherit' : 'border-gray-200/80 bg-inherit'
-          }`}
+          className={`shrink-0 overflow-visible ${exportMode ? 'bg-white' : 'bg-inherit'}`}
         >
-          <div className="w-full px-1.5 py-1 sm:px-2">
+          <div className="w-full px-2 py-1.5 sm:px-3">
             <SiteFooter
               theme={theme}
               exportMode={exportMode}

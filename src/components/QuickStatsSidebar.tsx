@@ -1,14 +1,13 @@
 import React, { useMemo } from 'react';
-// @ts-ignore
-import tc from 'jsthermalcomfort';
 import type { EPWDataRow } from '../lib/epwParser';
 import type { UnitSystem } from '../App';
 import { UNIT_C, UNIT_F } from '../lib/unitConversion';
 import {
-  ASTRONOMICAL_SEASON_LABELS,
+  formatAstronomicalSeasonLabel,
   hemisphereFromLatitude,
   seasonForDate,
 } from '../lib/seasons';
+import { computeUtciForEpwRow, utciRowOutsideModelRange, UTCI_CLOCK_WINDOWS, UTCI_HOUR_WINDOW_NOTE } from '../lib/utciModel';
 
 function cToF(v: number) {
   return v * (9 / 5) + 32;
@@ -49,17 +48,7 @@ function utciComfortableC(utciC: number) {
 }
 
 function computeUtciC(row: EPWDataRow) {
-  const tdb = row.dryBulbTemperature as number;
-  const rh = row.relativeHumidity as number;
-  const wind = row.windSpeed as number;
-  const ghr = row.globalHorizontalRadiation as number;
-  if ([tdb, rh, wind, ghr].some(v => v === null || v === undefined || Number.isNaN(v))) return null;
-
-  const vWind = Math.max(0.5, wind);
-  const tr = tdb + 0.02 * Math.max(0, ghr);
-  const result = tc.models.utci(tdb, tr, vWind, rh, 'SI', true, false);
-  const utci = (result?.utci ?? result) as number;
-  return Number.isFinite(utci) ? utci : null;
+  return computeUtciForEpwRow(row)?.utci ?? null;
 }
 
 function ratio(n: number, d: number) {
@@ -81,9 +70,13 @@ function computeQuickStatsFromRows(
   const hemisphere = hemisphereFromLatitude(siteLatitude);
 
   const tempsC = data.map(r => r.dryBulbTemperature as number).filter(v => v != null && Number.isFinite(v));
-  const rad = data
-    .map(r => (r.directNormalRadiation as number) ?? (r.globalHorizontalRadiation as number))
-    .filter(v => v != null && Number.isFinite(v));
+  const dni = data.map(r => r.directNormalRadiation as number).filter(v => v != null && Number.isFinite(v));
+  const ghi = data.map(r => r.globalHorizontalRadiation as number).filter(v => v != null && Number.isFinite(v));
+  const useDirectNormal = dni.length > 0;
+  const peakSource = useDirectNormal ? dni : ghi;
+  const peakRad = max(peakSource);
+  const radUnit = 'Wh/m²';
+  const peakRadHint = useDirectNormal ? 'Direct normal' : 'Global horizontal';
   const humid = data.map(r => r.relativeHumidity as number).filter(v => v != null && Number.isFinite(v));
   const cloudTenths = data.map(r => r.totalSkyCover as number).filter(v => v != null && Number.isFinite(v));
 
@@ -95,9 +88,6 @@ function computeQuickStatsFromRows(
   const lo = unitSystem === 'imperial' ? cToF(loC) : loC;
   const avg = unitSystem === 'imperial' ? cToF(avgC) : avgC;
   const tUnit = unitSystem === 'imperial' ? UNIT_F : UNIT_C;
-
-  const peakRad = max(rad);
-  const radUnit = 'Wh/m²';
 
   const avgHumid = mean(humid);
   const avgCloudPct = mean(cloudTenths) * 10;
@@ -118,7 +108,10 @@ function computeQuickStatsFromRows(
   let comfortAfternoonN = 0;
   let comfortAfternoonD = 0;
 
+  let utciOutOfRange = 0;
+
   for (const r of data) {
+    if (utciRowOutsideModelRange(r)) utciOutOfRange += 1;
     const utciC = computeUtciC(r);
     if (utciC == null) continue;
     const ok = utciComfortableC(utciC);
@@ -130,7 +123,7 @@ function computeQuickStatsFromRows(
     const m = r.month as number;
     const day = r.day as number;
 
-    if (inHourRange(h, 7, 19)) {
+    if (inHourRange(h, UTCI_CLOCK_WINDOWS.day.start, UTCI_CLOCK_WINDOWS.day.end + 1)) {
       comfortDayD += 1;
       if (ok) comfortDayN += 1;
 
@@ -139,15 +132,15 @@ function computeQuickStatsFromRows(
       if (ok) comfortSeasonN[s] += 1;
     }
 
-    if (inHourRange(h, 7, 10)) {
+    if (inHourRange(h, UTCI_CLOCK_WINDOWS.morning.start, UTCI_CLOCK_WINDOWS.morning.end + 1)) {
       comfortMorningD += 1;
       if (ok) comfortMorningN += 1;
     }
-    if (inHourRange(h, 11, 14)) {
+    if (inHourRange(h, UTCI_CLOCK_WINDOWS.midday.start, UTCI_CLOCK_WINDOWS.midday.end + 1)) {
       comfortMiddayD += 1;
       if (ok) comfortMiddayN += 1;
     }
-    if (inHourRange(h, 15, 19)) {
+    if (inHourRange(h, UTCI_CLOCK_WINDOWS.afternoon.start, UTCI_CLOCK_WINDOWS.afternoon.end + 1)) {
       comfortAfternoonD += 1;
       if (ok) comfortAfternoonN += 1;
     }
@@ -158,6 +151,7 @@ function computeQuickStatsFromRows(
     lowTemp: `${formatNumber(lo, 1)} ${tUnit}`,
     avgTemp: `${formatNumber(avg, 1)} ${tUnit}`,
     peakRad: `${formatNumber(peakRad, 0)} ${radUnit}`,
+    peakRadHint,
     avgHumidity: `${formatNumber(avgHumid, 0)} %`,
     avgCloudCover: `${formatNumber(avgCloudPct, 0)} %`,
     comfortAll: pct(comfortAllN, comfortAllD),
@@ -173,6 +167,7 @@ function computeQuickStatsFromRows(
       fall: pct(comfortSeasonN.fall, comfortSeasonD.fall),
       winter: pct(comfortSeasonN.winter, comfortSeasonD.winter),
     },
+    utciOutOfRange,
   };
 }
 
@@ -199,90 +194,135 @@ export function Grid4x2StatsColumn({
     [rows, unitSystem, siteLatitude]
   );
 
-  const cardShell =
-    theme === 'dark'
-      ? 'rounded-xl border border-gray-700 bg-gray-800 shadow-hard-lg'
-      : 'rounded-xl border border-gray-100 bg-white shadow-hard-lg';
+  const dark = theme === 'dark';
+  const cardShell = `rounded-2xl ${dark ? 'bg-gray-800' : 'bg-white'} ${exportMode ? '' : 'glow-lg'}`;
+  const heading = `truncate text-[10px] font-bold uppercase tracking-wider @[14rem]:text-[11px] ${dark ? 'text-gray-400' : 'text-gray-500'}`;
+  const groupLabel = `truncate text-[10px] font-semibold uppercase tracking-wide ${dark ? 'text-gray-400' : 'text-gray-500'}`;
+  const labelInk = dark ? 'text-gray-400' : 'text-gray-500';
+  const mutedInk = dark ? 'text-gray-500' : 'text-gray-400';
+  const valueInk = dark ? 'text-gray-100' : 'text-gray-900';
+  const groupBg = dark ? 'bg-gray-700/40' : 'bg-gray-50';
+  const group = `flex w-full min-w-0 flex-col items-start gap-0.5 rounded-xl px-2.5 py-1.5 @[14rem]:gap-1 @[14rem]:py-2 ${groupBg}`;
 
-  const comfortShell =
-    exportMode
-      ? theme === 'dark'
-        ? 'rounded-xl border-0 bg-gray-800 shadow-none'
-        : 'rounded-xl border-0 bg-white shadow-none'
-      : cardShell;
+  const Value = ({ value, emphasis = false }: { value: string; emphasis?: boolean }) => {
+    const [rawNum, ...unit] = value.split(' ');
+    const num = rawNum.replace(/^-/, '\u2212');
+    return (
+      <span className="inline-flex shrink-0 items-baseline gap-0.5 whitespace-nowrap leading-none tabular-nums">
+        <span
+          className={`${emphasis ? 'text-sm font-semibold @[14rem]:text-base' : 'text-xs font-medium @[14rem]:text-[13px]'} leading-none ${valueInk}`}
+        >
+          {num}
+        </span>
+        {unit.length ? (
+          <span className={`text-[10px] font-normal ${mutedInk}`}>{unit.join(' ')}</span>
+        ) : null}
+      </span>
+    );
+  };
 
-  const muted = theme === 'dark' ? 'text-gray-300' : 'text-gray-700';
-  const label = theme === 'dark' ? 'text-gray-200' : 'text-gray-900';
-  const breakdownTone =
-    theme === 'dark' ? 'text-gray-400/85 opacity-[0.78]' : 'text-gray-500/90 opacity-[0.72]';
+  /** Name plus a muted detail (date or hour range) that only shows when the panel is wide enough. */
+  const DetailLabel = ({ name, detail }: { name: string; detail: string }) => (
+    <>
+      {name}
+      <span className={`hidden @[14rem]:inline ${mutedInk}`}> {detail}</span>
+    </>
+  );
 
-  const Stat = ({ title, value }: { title: string; value: string }) => (
-    <div className="min-w-0 w-full">
-      <div className={`truncate text-[10px] font-bold ${label}`}>{title}</div>
-      <div className={`truncate text-[11px] font-medium ${muted}`}>{value}</div>
+  /** `"Spring (Mar 21–Jun 20)"` → name + date range. */
+  const SeasonLabel = ({ label }: { label: string }) => {
+    const [name, range = ''] = label.split(' (');
+    return <DetailLabel name={name} detail={range.replace(/\)$/, '')} />;
+  };
+
+  /**
+   * One tight pair: the number sits immediately after its label. Rows stack left-aligned so a
+   * short label is never stranded on the left with its value on the far right.
+   */
+  const Row = ({
+    label,
+    value,
+    title,
+    hint,
+  }: {
+    label: React.ReactNode;
+    value: string;
+    title?: string;
+    hint?: string;
+  }) => (
+    <div className="flex max-w-full min-w-0 flex-col">
+      <div className="flex max-w-full min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0">
+        <span
+          className={`min-w-0 truncate text-[11px] leading-snug @[14rem]:text-xs ${labelInk}`}
+          title={title}
+        >
+          {label}
+        </span>
+        <Value value={value} />
+      </div>
+      {hint ? <span className={`text-[10px] leading-tight ${mutedInk}`}>{hint}</span> : null}
     </div>
   );
 
-  const ComfortRow = ({ left, right }: { left: React.ReactNode; right: string }) => (
-    <div className={`flex min-w-0 w-full items-baseline justify-between gap-2 ${breakdownTone}`}>
-      <span className="min-w-0 shrink truncate text-[10px] font-bold leading-snug">{left}</span>
-      <span className="shrink-0 text-[11px] font-medium tabular-nums leading-snug">{right}</span>
-    </div>
-  );
-
-  const panelInner = 'flex min-h-0 w-full flex-1 flex-col gap-2 overflow-y-auto px-2.5 py-2';
+  const panelInner =
+    'flex min-h-0 w-full flex-1 flex-col gap-1.5 overflow-y-auto p-2.5 @[14rem]:gap-2 @[14rem]:p-3 [&>*]:shrink-0';
 
   return (
     <div className="contents">
-      <aside className={`col-start-2 row-start-1 flex min-h-0 min-w-0 flex-col ${cardShell}`}>
+      <aside className={`@container col-start-2 row-start-1 flex min-h-0 min-w-0 flex-col ${cardShell}`}>
         <div className={panelInner}>
-          <Stat title="High temp" value={stats.highTemp} />
-          <Stat title="Low temp" value={stats.lowTemp} />
-          <Stat title="Ave temp" value={stats.avgTemp} />
-          <Stat title="Peak radiation" value={stats.peakRad} />
-          <Stat title="Average humidity" value={stats.avgHumidity} />
-          <Stat title="Average cloud cover" value={stats.avgCloudCover} />
+          <p className={heading}>Annual weather</p>
+          <div className={group}>
+            <p className={groupLabel}>Temperature</p>
+            <Row label="High" value={stats.highTemp} />
+            <Row label="Low" value={stats.lowTemp} />
+            <Row label="Average" value={stats.avgTemp} />
+          </div>
+          <div className={group}>
+            <p className={groupLabel}>Sun &amp; sky</p>
+            <Row label="Peak radiation" hint={stats.peakRadHint} value={stats.peakRad} />
+            <Row label="Avg humidity" hint="Relative humidity" value={stats.avgHumidity} />
+            <Row label="Avg cloud cover" hint="Total sky cover" value={stats.avgCloudCover} />
+          </div>
         </div>
       </aside>
 
       <aside
         id="grid4x2-comfort-stats"
-        className={`col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col ${comfortShell}`}
+        className={`@container col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col ${cardShell}`}
         aria-label="Outdoor comfort summary"
       >
         <div className={panelInner}>
-          <Stat title="Avg time in comfort zone" value={stats.comfortAll} />
-
-          <div className="w-full space-y-1">
-            <p className={`truncate pb-0.5 text-[10px] font-bold ${label}`}>7am–7pm</p>
-            <div className="space-y-1">
-              <ComfortRow left="Annual" right={stats.comfort7am7pmAnnual} />
-              <ComfortRow
-                left={ASTRONOMICAL_SEASON_LABELS.spring}
-                right={stats.comfort7to19BySeason.spring}
-              />
-              <ComfortRow
-                left={ASTRONOMICAL_SEASON_LABELS.summer}
-                right={stats.comfort7to19BySeason.summer}
-              />
-              <ComfortRow
-                left={ASTRONOMICAL_SEASON_LABELS.fall}
-                right={stats.comfort7to19BySeason.fall}
-              />
-              <ComfortRow
-                left={ASTRONOMICAL_SEASON_LABELS.winter}
-                right={stats.comfort7to19BySeason.winter}
-              />
-            </div>
+          <p className={heading}>Outdoor comfort</p>
+          {stats.utciOutOfRange > 0 ? (
+            <p className={`text-[10px] leading-snug ${mutedInk}`}>
+              {stats.utciOutOfRange.toLocaleString()} hours are outside the UTCI model range, so they are not included in these percentages.
+            </p>
+          ) : null}
+          <div className={group}>
+            <Row label="Time in comfort" value={stats.comfortAll} />
           </div>
 
-          <div className="w-full space-y-1">
-            <p className={`truncate pb-0.5 text-[10px] font-bold ${label}`}>Annual</p>
-            <div className="space-y-1">
-              <ComfortRow left="Morning (7am–10am)" right={stats.comfortDayParts.morning} />
-              <ComfortRow left="Midday (11am–2pm)" right={stats.comfortDayParts.midday} />
-              <ComfortRow left="Afternoon (3pm–7pm)" right={stats.comfortDayParts.afternoon} />
-            </div>
+          <div className={group}>
+            <p className={groupLabel}>{UTCI_CLOCK_WINDOWS.day.label}</p>
+            <Row label="Annual" value={stats.comfort7am7pmAnnual} />
+            {(['spring', 'summer', 'fall', 'winter'] as const).map(season => (
+              <React.Fragment key={season}>
+                <Row
+                  label={<SeasonLabel label={formatAstronomicalSeasonLabel(season, hemisphereFromLatitude(siteLatitude))} />}
+                  title={formatAstronomicalSeasonLabel(season, hemisphereFromLatitude(siteLatitude))}
+                  value={stats.comfort7to19BySeason[season]}
+                />
+              </React.Fragment>
+            ))}
+          </div>
+
+          <div className={group}>
+            <p className={groupLabel}>Annual by time of day</p>
+            <Row label={<DetailLabel name="Morning" detail={UTCI_CLOCK_WINDOWS.morning.label} />} title={`Morning · ${UTCI_CLOCK_WINDOWS.morning.label}`} value={stats.comfortDayParts.morning} />
+            <Row label={<DetailLabel name="Midday" detail={UTCI_CLOCK_WINDOWS.midday.label} />} title={`Midday · ${UTCI_CLOCK_WINDOWS.midday.label}`} value={stats.comfortDayParts.midday} />
+            <Row label={<DetailLabel name="Afternoon" detail={UTCI_CLOCK_WINDOWS.afternoon.label} />} title={`Afternoon · ${UTCI_CLOCK_WINDOWS.afternoon.label}`} value={stats.comfortDayParts.afternoon} />
+            <p className={`px-0.5 text-[10px] font-light italic leading-snug ${mutedInk}`}>{UTCI_HOUR_WINDOW_NOTE}</p>
           </div>
         </div>
       </aside>

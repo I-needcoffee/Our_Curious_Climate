@@ -39,6 +39,27 @@ export const ASTRONOMICAL_SEASON_LABELS: Record<AstronomicalSeason, string> = {
   winter: 'Winter (Dec 21–Mar 20)',
 };
 
+const SEASON_TITLES: Record<AstronomicalSeason, string> = {
+  spring: 'Spring',
+  summer: 'Summer',
+  fall: 'Fall',
+  winter: 'Winter',
+};
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Season name plus the local date range. Southern summer is Dec 21–Mar 20, not the northern dates. */
+export function formatAstronomicalSeasonLabel(
+  season: AstronomicalSeason,
+  hemisphere: Hemisphere = 'northern'
+): string {
+  const nhSeason = hemisphere === 'southern' ? oppositeAstronomicalSeason(season) : season;
+  const b = ASTRONOMICAL_SEASON_BOUNDS_NH[nhSeason];
+  const start = `${MONTH_ABBR[b.startMonth - 1]} ${b.startDay}`;
+  const end = `${MONTH_ABBR[b.endMonth - 1]} ${b.endDay}`;
+  return `${SEASON_TITLES[season]} (${start}–${end})`;
+}
+
 const DAYS_IN_MONTH_NON_LEAP = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const DAYS_IN_MONTH_LEAP = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 

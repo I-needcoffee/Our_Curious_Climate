@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/** App toggles `html.dark`; keep `dark:` utilities in sync with that instead of the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/** Dashboard in export mode (`data-export-mode` on the dashboard root): slide-ready text sizes. */
+@custom-variant export (&:where([data-export-mode] *));
+
 @theme {
   --font-sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -32,16 +38,20 @@
   body {
     margin: 0;
     font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /** D3 chart text uses SVG defaults unless inherited — match the UI sans stack. */
   svg {
     font-family: inherit;
+    font-variant-numeric: tabular-nums;
   }
 
   /** Closed control rounding; popup list rounding is controlled by the OS for native selects. */
   select {
-    border-radius: 0.375rem;
+    border-radius: 9999px;
     border-width: 1px;
     border-style: solid;
     border-color: transparent;
@@ -49,10 +59,6 @@
 }
 
 @layer utilities {
-  /**
-   * Outer shell: padding + negative margin reserves space so the ring is not clipped.
-   * Pulse draws on ::after so the inner button keeps its own shadow/border.
-   */
   /** Reserves space so control box-shadows are not clipped by overflow parents. */
   .control-bleed-sm {
     --control-bleed: 6px;
@@ -60,6 +66,10 @@
     margin: calc(-1 * var(--control-bleed));
   }
 
+  /**
+   * Outer shell: padding + negative margin reserves space so the ring is not clipped.
+   * Pulse draws on ::after so the inner button keeps its own shadow.
+   */
   .discover-pulse-wrap {
     --discover-pulse-inset: 6px;
     position: relative;
@@ -102,122 +112,58 @@
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
-  
-  /* Hard-edge drop shadows (light: soft neutral rim; see .dark for theme — use html.dark from App) */
+
+  /*
+   * Soft outer glows define surfaces instead of outline strokes. `shadow-hard-*` are legacy
+   * aliases kept so existing call sites pick up the borderless look.
+   */
+  .glow-sm,
   .shadow-hard-sm {
     box-shadow:
-      0 0 0 1px rgba(226, 232, 240, 0.86),
-      0 0 10px 2px rgba(226, 232, 240, 0.34);
+      0 1px 2px rgba(15, 23, 42, 0.05),
+      0 0 10px rgba(15, 23, 42, 0.07);
   }
+  .glow-md,
   .shadow-hard-md {
     box-shadow:
-      0 0 0 1px rgba(226, 232, 240, 0.88),
-      0 0 11px 2px rgba(226, 232, 240, 0.36);
+      0 1px 3px rgba(15, 23, 42, 0.05),
+      0 0 18px rgba(15, 23, 42, 0.08);
   }
+  .glow-lg,
   .shadow-hard-lg {
     box-shadow:
-      0 0 0 1px rgba(226, 232, 240, 0.9),
-      0 0 12px 3px rgba(226, 232, 240, 0.38);
+      0 2px 6px rgba(15, 23, 42, 0.04),
+      0 0 26px rgba(15, 23, 42, 0.085);
   }
+  .glow-xl,
   .shadow-hard-xl {
     box-shadow:
-      0 0 0 1px rgba(226, 232, 240, 0.92),
-      0 0 13px 3px rgba(226, 232, 240, 0.4);
+      0 10px 30px rgba(15, 23, 42, 0.12),
+      0 0 48px rgba(15, 23, 42, 0.12);
   }
 
-  /* Dark: neutral edge + subtle depth only (no colored glow) */
+  .dark .glow-sm,
   .dark .shadow-hard-sm {
     box-shadow:
-      0 0 0 1px rgba(55, 65, 81, 0.85),
-      0 1px 2px rgba(0, 0, 0, 0.4);
+      0 1px 2px rgba(0, 0, 0, 0.35),
+      0 0 10px rgba(0, 0, 0, 0.35);
   }
+  .dark .glow-md,
   .dark .shadow-hard-md {
     box-shadow:
-      0 0 0 1px rgba(55, 65, 81, 0.88),
-      0 2px 4px rgba(0, 0, 0, 0.42);
+      0 1px 3px rgba(0, 0, 0, 0.38),
+      0 0 18px rgba(0, 0, 0, 0.4);
   }
+  .dark .glow-lg,
   .dark .shadow-hard-lg {
     box-shadow:
-      0 0 0 1px rgba(55, 65, 81, 0.9),
-      0 3px 6px rgba(0, 0, 0, 0.44);
+      0 2px 6px rgba(0, 0, 0, 0.4),
+      0 0 26px rgba(0, 0, 0, 0.45);
   }
+  .dark .glow-xl,
   .dark .shadow-hard-xl {
     box-shadow:
-      0 0 0 1px rgba(55, 65, 81, 0.92),
-      0 4px 8px rgba(0, 0, 0, 0.46);
+      0 10px 30px rgba(0, 0, 0, 0.5),
+      0 0 48px rgba(0, 0, 0, 0.5);
   }
-}
-
-/* ===== UI Refinement: Grid Alignment ===== */
-.hide-scrollbar::-webkit-scrollbar { display: none; }
-.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-/* Ensure chart cards in the same row have equal heights */
-.react-grid-layout > div {
-  contain: layout style;
-}
-
-/* Prevent comparison ScaledWrappers from causing resize cascades */
-.comparison-grid > div {
-  contain: layout;
-}
-
-/* Comparison mode chart scaling - no ResizeObserver, pure CSS */
-.comparison-chart-wrap {
-  width: 100%;
-  position: relative;
-}
-
-/* ===== Comparison Grid Card Styles ===== */
-/* Make buttons and text smaller in narrow comparison columns */
-.comparison-chart-wrap {
-  width: 100%;
-  overflow: hidden;
-}
-
-/* In comparison mode, reduce header padding and font sizes for compact layout */
-.comparison-chart-wrap .p-3 {
-  padding: 0.5rem;
-}
-
-/* Aggregation button group: make buttons smaller in comparison  */
-.comparison-chart-wrap button {
-  font-size: 10px !important;
-  padding: 2px 6px !important;
-}
-
-/* Aggregation pills container - prevent wrap, use compact spacing */
-.comparison-chart-wrap .gap-2 {
-  gap: 0.25rem;
-}
-
-/* Title text in comparison cards */
-.comparison-chart-wrap h3 {
-  font-size: 11px !important;
-}
-
-/* Variable selector in comparison cards */
-.comparison-chart-wrap select {
-  font-size: 10px !important;
-  max-width: 80px !important;
-}
-
-/* Legend in comparison cards */
-.comparison-chart-wrap .flex-shrink-0 {
-  margin-top: 4px;
-}
-
-/* Ensure SVG containers adapt to available width */
-.comparison-chart-wrap svg {
-  width: 100%;
-  height: auto;
-}
-
-/* Ensure consistent column heights in comparison grid */
-.comparison-grid {
-  align-items: stretch;
-}
-
-.comparison-grid > div > div {
-  flex: 1;
 }

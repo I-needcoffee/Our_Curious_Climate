@@ -8,7 +8,16 @@ import { EPWDataRow } from '../lib/epwParser';
 // @ts-ignore
 import tc from 'jsthermalcomfort';
 import { Sun, Wind, X, Settings2 } from 'lucide-react';
-import { InteractiveLegend, GradientDef, getLegendBarHeightPx, getLegendLabelBasePx, DEFAULT_LEGEND_FONT_SCALE } from './InteractiveLegend';
+import {
+  InteractiveLegend,
+  GradientDef,
+  LEGEND_BAR_CLASS,
+  LEGEND_FOOTNOTE_CLASS,
+  LEGEND_IN_BAR_LABEL_CLASS,
+  LEGEND_WRAP_CLASS,
+  legendContrastInk,
+  legendInkShadow,
+} from './InteractiveLegend';
 import { AggregationToolbar } from './AggregationToolbar';
 import type { ChartType, CompareUtciSharedControls } from '../App';
 import { UnitSystem } from '../App';
@@ -34,6 +43,12 @@ import {
   CHART_TOOLBAR_HEADER_PAD,
   CHART_TOOLBAR_ROW_CLASS,
   chartToolbarTitleClass,
+  chartToolbarChipButtonClass,
+  chartToolbarRoundButtonClass,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  comparePaneLabelClass,
+  chartToolbarRevealClassFor,
+  chartToolbarRemoveButtonClass,
 } from '../lib/chartToolbarLayout';
 import { ExportHeaderCaption } from './ExportHeaderCaption';
 import { CardModal } from './CardModal';
@@ -55,6 +70,8 @@ import {
   explorerHeatmapRowLayout,
   explorerInnerWidth,
   explorerBarChartHeightPx,
+  explorerBarPath,
+  explorerBarSitsOnBaseline,
   explorerHeatmapCellXPx,
   explorerHeatmapHeightPx,
   explorerHeatmapSpanXPx,
@@ -62,11 +79,17 @@ import {
   explorerMonthLabelCenterDays,
   explorerSvgHeightPx,
   EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS,
+  explorerSvgTypography,
+  fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
+import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { epwEquivalentHourKey, indexEpwByEquivalentHour } from '../lib/epwClockMatch';
+import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 import {
   getUtciCategoryForValue,
   getUtciComfortPeriodById,
   heatmapCellFocusDaySpans,
+  computeUtciForEpwRow,
   rowMatchesUtciComfortPeriod,
   summarizeUtciCellScenarios,
   UTCI_COLORS,
@@ -146,37 +169,26 @@ const utciCategoryScale = d3.scaleLinear<string>()
   .range(UTCI_COLOR_VALUES)
   .interpolate(d3.interpolateRgb);
 
-/** Matches `InteractiveLegend` default `fontScale` so UTCI footer legends share the same footprint */
-export const UTCI_LEGEND_FONT_SCALE = DEFAULT_LEGEND_FONT_SCALE;
-
 /** Same as `DataExplorer` bar fill opacity on colored rects. */
 const LEGEND_FILL_OPACITY = 0.6;
 
-const LEGEND_STRIP_SCALE = UTCI_LEGEND_FONT_SCALE;
+/** Comfort green deepened enough to read as text on white (the fill hex is too light for labels). */
+const COMFORT_LABEL_INK_LIGHT = '#2d8f16';
+
+const LEGEND_STRIP_CAPTION_CLASS =
+  'relative h-3 w-full text-[10px] font-semibold uppercase leading-none tracking-wide @lg:h-3.5 @lg:text-[11px]';
 
 export function UtciCategoryLegendStrip({ theme }: { theme: 'light' | 'dark' }) {
-  const pad = 3.25 * LEGEND_STRIP_SCALE;
-  const gap = 2 * LEGEND_STRIP_SCALE;
-  const titlePx = Math.round(9.5 * LEGEND_STRIP_SCALE);
-  const tickPx = Math.max(8, 8.5 * LEGEND_STRIP_SCALE);
-  const barH = getLegendBarHeightPx(LEGEND_STRIP_SCALE);
   const cats = Object.keys(UTCI_COLORS);
   const catColors = cats.map(k => UTCI_COLORS[k]);
   const comfortIdx = cats.indexOf('no thermal stress');
   const comfortCenterPct = ((comfortIdx + 0.5) / cats.length) * 100;
+  const endInk = theme === 'dark' ? 'text-gray-300' : 'text-gray-600';
 
   return (
-    <div
-      className={`flex flex-col w-full select-none ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}
-      style={{ padding: `${pad}px`, gap: `${gap}px` }}
-    >
-      {/* Title removed: shown in chart header */}
-      <div
-        className={`relative w-full overflow-hidden rounded-full border ${
-          theme === 'dark' ? 'border-gray-700 bg-[#111827]' : 'border-gray-200 bg-white'
-        }`}
-        style={{ height: `${barH}px` }}
-      >
+    <div className={`${LEGEND_WRAP_CLASS} ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
+      <div className={LEGEND_BAR_CLASS}>
+        <div className="absolute inset-0" style={{ backgroundColor: theme === 'dark' ? '#111827' : '#ffffff' }} />
         <div
           className="absolute inset-0"
           style={{
@@ -185,27 +197,18 @@ export function UtciCategoryLegendStrip({ theme }: { theme: 'light' | 'dark' }) 
           }}
         />
       </div>
-      <div className="relative w-full" style={{ minHeight: `${Math.max(tickPx, 10)}px`, fontSize: `${tickPx}px` }}>
+      <div className={LEGEND_STRIP_CAPTION_CLASS}>
+        <span className={`absolute left-1 top-0 max-w-[34%] truncate ${endInk}`}>Extreme cold</span>
         <span
-          className={`absolute left-0 top-0 max-w-[34%] truncate font-medium uppercase tracking-tight leading-none ${
-            theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-          }`}
-        >
-          Extreme cold
-        </span>
-        <span
-          className="absolute top-0 -translate-x-1/2 font-semibold uppercase tracking-tight leading-none whitespace-nowrap"
-          style={{ left: `${comfortCenterPct}%`, color: OUTDOOR_COMFORT_GREEN_HEX }}
+          className="absolute top-0 -translate-x-1/2 whitespace-nowrap font-bold"
+          style={{
+            left: `${comfortCenterPct}%`,
+            color: theme === 'dark' ? OUTDOOR_COMFORT_GREEN_HEX : COMFORT_LABEL_INK_LIGHT,
+          }}
         >
           Comfort
         </span>
-        <span
-          className={`absolute right-0 top-0 max-w-[34%] truncate text-right font-medium uppercase tracking-tight leading-none ${
-            theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-          }`}
-        >
-          Extreme heat
-        </span>
+        <span className={`absolute right-1 top-0 max-w-[34%] truncate text-right ${endInk}`}>Extreme heat</span>
       </div>
     </div>
   );
@@ -220,61 +223,28 @@ export function UtciComfortTimeLegendStrip({
   highColor?: string;
   leftColor?: string;
 }) {
-  const pad = 3.25 * LEGEND_STRIP_SCALE;
-  const gap = 2 * LEGEND_STRIP_SCALE;
-  const titlePx = Math.round(9.5 * LEGEND_STRIP_SCALE);
-  const barH = getLegendBarHeightPx(LEGEND_STRIP_SCALE);
-  const labelBasePx = getLegendLabelBasePx(barH, LEGEND_STRIP_SCALE);
-
-  const contrastText = (hex: string) => {
-    const c = d3.color(hex);
-    if (!c) return theme === 'dark' ? '#fff' : '#000';
-    const rgb = c.rgb();
-    const toLin = (v: number) => {
-      const s = v / 255;
-      return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-    };
-    const L = 0.2126 * toLin(rgb.r) + 0.7152 * toLin(rgb.g) + 0.0722 * toLin(rgb.b);
-    return L < 0.5 ? '#fff' : '#111827';
-  };
   const leftBg = leftColor ?? (theme === 'dark' ? '#1f2937' : '#ffffff');
   const rightBg = highColor;
 
   return (
-    <div
-      className={`flex flex-col w-full select-none ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}
-      style={{ padding: `${pad}px`, gap: `${gap}px` }}
-    >
-      {/* Title removed: shown in chart header */}
+    <div className={`${LEGEND_WRAP_CLASS} ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
       <div
-        className={`relative w-full overflow-hidden rounded-full border ${
-          theme === 'dark' ? 'border-gray-700 bg-gray-900/30' : 'border-gray-200 bg-white'
-        }`}
-        style={{
-          height: `${barH}px`,
-          background: `linear-gradient(to right, ${leftBg}, ${rightBg})`,
-        }}
+        className={LEGEND_BAR_CLASS}
+        style={{ background: `linear-gradient(to right, ${leftBg}, ${rightBg})` }}
       >
         {(['0%', '100%'] as const).map((label) => {
-          const len = Math.max(1, label.length);
-          const fitFactor = Math.min(1, 6 / len);
-          const labelPx = Math.max(8, Math.floor(labelBasePx * fitFactor));
           const isLeft = label === '0%';
-          const fg = contrastText(isLeft ? leftBg : rightBg);
-          const shadow =
-            fg === '#fff'
-              ? '0 1px 2px rgba(0,0,0,0.35)'
-              : '0 1px 2px rgba(255,255,255,0.35)';
+          const fg = legendContrastInk(isLeft ? leftBg : rightBg);
           return (
             <span
               key={label}
-              className="absolute top-1/2 -translate-y-1/2 tabular-nums font-normal leading-none"
+              className={`absolute top-1/2 -translate-y-1/2 ${LEGEND_IN_BAR_LABEL_CLASS}`}
               style={{
                 left: isLeft ? 8 : undefined,
                 right: !isLeft ? 8 : undefined,
-                fontSize: `${labelPx}px`,
+                fontSize: 'var(--legend-label)',
                 color: fg,
-                textShadow: shadow,
+                textShadow: legendInkShadow(fg),
               }}
             >
               {label}
@@ -370,7 +340,7 @@ export function UtciExplorer({
       return 'Compare lines: baseline vs comparison; shading shows the gap.';
     }
     if (colorMode === 'comfortTime') {
-      return 'Bar shows comfort-time share in each period (filtered).';
+      return 'Bars: comfort-time share per period (filtered).';
     }
     if (colorMode === 'categories') {
       return 'Strip: stress categories.';
@@ -383,9 +353,7 @@ export function UtciExplorer({
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = expandChromeStrip
-    ? 'pointer-events-auto max-h-[52px] overflow-visible opacity-100 pt-1 transition-[max-height,opacity] duration-200 ease-out'
-    : 'pointer-events-none max-h-0 overflow-hidden opacity-0 transition-[max-height,opacity] duration-200 ease-out group-hover:pointer-events-auto group-hover:max-h-[48px] group-hover:opacity-100 focus-within:pointer-events-auto focus-within:max-h-[48px] focus-within:opacity-100';
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
   const removeBtnRevealClass = isMobile
     ? 'pointer-events-auto absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-100'
     : 'pointer-events-none absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
@@ -447,18 +415,18 @@ export function UtciExplorer({
         aria-pressed={active}
         aria-label={title}
         onClick={toggle}
-        className={`inline-flex h-5 w-5 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+        className={`inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
           active
             ? kind === 'sun'
               ? exposureTheme === 'dark'
-                ? 'border-amber-600/70 bg-amber-950/50 hover:bg-amber-900/60'
-                : 'border-amber-400 bg-amber-50 hover:bg-amber-100'
+                ? 'bg-amber-950/50 hover:bg-amber-900/60'
+                : 'bg-amber-100 hover:bg-amber-200'
               : exposureTheme === 'dark'
-                ? 'border-sky-600/70 bg-sky-950/50 hover:bg-sky-900/60'
-                : 'border-sky-400 bg-sky-50 hover:bg-sky-100'
+                ? 'bg-sky-950/50 hover:bg-sky-900/60'
+                : 'bg-sky-100 hover:bg-sky-200'
             : exposureTheme === 'dark'
-              ? 'border-gray-600/50 bg-gray-800/40 hover:bg-gray-700/50'
-              : 'border-gray-200/80 bg-gray-50/80 hover:bg-gray-100'
+              ? 'bg-gray-800/40 hover:bg-gray-700/50'
+              : 'bg-gray-100 hover:bg-gray-200'
         }`}
       >
         <Icon
@@ -491,6 +459,7 @@ export function UtciExplorer({
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 400 });
+  const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
 
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -520,62 +489,24 @@ export function UtciExplorer({
   // Pre-calculate UTCI for all data points to avoid recalculating on every render/aggregation change
   const utciData: UtciDataRow[] = useMemo(() => {
     return data.map(d => {
-      const tdb = (d.dryBulbTemperature as number) || 0;
-      const rh = (d.relativeHumidity as number) || 50;
-      const windSpeed = (d.windSpeed as number) || 0;
-      const ghr = (d.globalHorizontalRadiation as number) || 0;
-
-      const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-      const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
-
-      // Numeric UTCI from jsthermalcomfort; categorize with our range bins (library
-      // stress_category uses nearest-threshold and mislabels ~9–17°C as slight cold).
-      let utciVal = tdb;
-      try {
-        const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, false);
-        if (result && Number.isFinite(result.utci)) {
-          utciVal = result.utci;
-        }
-      } catch (e) {
-        // Fallback: dry-bulb
-      }
-      const category = getUtciCategoryForValue(utciVal);
-
+      const computed = computeUtciForEpwRow(d, { includeSun, includeWind });
       return {
         ...d,
-        utci: utciVal as number,
-        utciCategory: category as string,
-        isComfortable: (category === 'no thermal stress' ? 1 : 0) as number
+        utci: computed?.utci ?? NaN,
+        utciCategory: computed?.category ?? '',
+        isComfortable: computed ? (computed.isComfortable ? 1 : 0) : NaN,
       };
     });
   }, [data, includeSun, includeWind]);
 
   const compareUtciData: UtciDataRow[] = useMemo(() => {
     return (compareData || []).map(d => {
-      const tdb = (d.dryBulbTemperature as number) || 0;
-      const rh = (d.relativeHumidity as number) || 50;
-      const windSpeed = (d.windSpeed as number) || 0;
-      const ghr = (d.globalHorizontalRadiation as number) || 0;
-
-      const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-      const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
-
-      let utciVal = tdb;
-      try {
-        const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, false);
-        if (result && Number.isFinite(result.utci)) {
-          utciVal = result.utci;
-        }
-      } catch (e) {
-        // Fallback: dry-bulb
-      }
-      const category = getUtciCategoryForValue(utciVal);
-
+      const computed = computeUtciForEpwRow(d, { includeSun, includeWind });
       return {
         ...d,
-        utci: utciVal as number,
-        utciCategory: category as string,
-        isComfortable: (category === 'no thermal stress' ? 1 : 0) as number
+        utci: computed?.utci ?? NaN,
+        utciCategory: computed?.category ?? '',
+        isComfortable: computed ? (computed.isComfortable ? 1 : 0) : NaN,
       };
     });
   }, [compareData, includeSun, includeWind]);
@@ -602,25 +533,17 @@ export function UtciExplorer({
       // Calculate max absolute difference for UTCI
       let maxDiff = 10; // Default
       try {
-        const diffs = data.map((d, i) => {
-          const cD = compareData[i];
-          if (!cD) return 0;
-          
-          const getUtci = (row: EPWDataRow) => {
-            const tdb = (row.dryBulbTemperature as number) || 0;
-            const rh = (row.relativeHumidity as number) || 50;
-            const windSpeed = (row.windSpeed as number) || 0;
-            const ghr = (row.globalHorizontalRadiation as number) || 0;
-            const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-            const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
-            try {
-              const result = tc.models.utci(tdb, tr, v, rh, 'SI', true, false);
-              return isNaN(result.utci) ? tdb : result.utci;
-            } catch (e) { return tdb; }
-          };
-
-          return getUtci(cD) - getUtci(d);
-        });
+        const compareByHour = indexEpwByEquivalentHour(compareData);
+        const utciOf = (row: EPWDataRow) =>
+          computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
+        const diffs: number[] = [];
+        for (const row of data) {
+          const compareRow = compareByHour.get(epwEquivalentHourKey(row));
+          const primary = utciOf(row);
+          const compare = compareRow ? utciOf(compareRow) : undefined;
+          if (primary == null || compare == null) continue;
+          diffs.push(compare - primary);
+        }
         const bound = symmetricDiffBound(diffs);
         maxDiff = bound > 0 ? bound : 1;
       } catch (e) {}
@@ -636,6 +559,7 @@ export function UtciExplorer({
 
   useEffect(() => {
     if (!svgRef.current || dimensions.width === 0) return;
+    const compareByHour = compareData ? indexEpwByEquivalentHour(compareData) : null;
 
     const renderUtci = (svgEl: any, currentData: any[], title: string | null, isCompare: boolean) => {
     if (!currentData || !currentData.length) return;
@@ -664,10 +588,10 @@ export function UtciExplorer({
     const width = EXPLORER_SVG_BASE_WIDTH;
     const margin = EXPLORER_SVG_MARGIN;
     const innerWidth = explorerInnerWidth();
-    const barChartHeight = explorerBarChartHeightPx();
+    const barChartHeight = explorerBarChartHeightPx(svgHeight);
     const monthAxisBand = EXPLORER_MONTH_AXIS_BAND_PX;
-    const heatmapBodyHeight = explorerHeatmapHeightPx();
-    const height = explorerSvgHeightPx();
+    const heatmapBodyHeight = explorerHeatmapHeightPx(svgHeight);
+    const height = explorerSvgHeightPx(svgHeight);
 
     const svg = d3.select(svgEl);
     svg.selectAll("*").remove();
@@ -732,24 +656,9 @@ export function UtciExplorer({
         );
         const compareValues = selectedRows
           .map(v => {
-            const idx = data.indexOf(v);
-            const cD = compareData[idx];
+            const cD = compareByHour?.get(epwEquivalentHourKey(v));
             if (!cD) return null;
-            const getUtci = (row: EPWDataRow) => {
-              const tdb = (row.dryBulbTemperature as number) || 0;
-              const rh = (row.relativeHumidity as number) || 50;
-              const windSpeed = (row.windSpeed as number) || 0;
-              const ghr = (row.globalHorizontalRadiation as number) || 0;
-              const v_wind = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-              const tr = includeSun ? tdb + 0.02 * ghr : tdb;
-              try {
-                const result = tc.models.utci(tdb, tr, v_wind, rh, 'SI', false, false);
-                return Number.isFinite(result.utci) ? result.utci : tdb;
-              } catch {
-                return tdb;
-              }
-            };
-            return getUtci(cD);
+            return computeUtciForEpwRow(cD, { includeSun, includeWind })?.utci ?? null;
           })
           .filter((v): v is number => v != null);
         const compareStat = aggregateCellStatistic(compareValues, heatmapCellStatistic);
@@ -949,6 +858,8 @@ export function UtciExplorer({
           cellTitle: formatEpwStationDateTime(d),
           tooltip: !pass
             ? `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`
+            : !Number.isFinite(d.utci)
+              ? `${formatEpwStationDateTime(d)}\nUTCI could not be calculated (outside the model range)`
             : colorMode === 'comfortTime'
               ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}`
               : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}`,
@@ -960,10 +871,13 @@ export function UtciExplorer({
       explorerHeatmapRowLayout(heatmapBodyHeight);
     const minDayCellWidth = innerWidth / 366;
     const overlayMinWidth = Math.max(12, minDayCellWidth * 1.1, cellInnerHeightPx * 0.75);
-    const heatmapHourAxisPx = Math.max(5, Math.min(9, cellInnerHeightPx * 0.33));
-    const heatmapMonthAxisPx = Math.max(7, Math.min(11, Math.min(innerWidth / 26, cellInnerHeightPx * 0.45)));
-    const overlayFontMonthPx = Math.max(6, Math.min(12, Math.min(cellInnerHeightPx * 0.4, innerWidth / 22)));
-    const overlayFontWeekPx = Math.max(5, Math.min(10, overlayFontMonthPx * 0.82));
+    const type = explorerSvgTypography(renderScale, cellInnerHeightPx);
+    const axisInk = chartAxisInk(heatmapTextColor, theme);
+    const utciCellFill = (d: any): string => {
+      if (!Number.isFinite(d.utci)) return emptyUtciFill;
+      if (colorMode === 'categories') return UTCI_COLORS[d.utciCategory] || '#cccccc';
+      return colorScale(colorMode === 'comfortTime' ? d.isComfortable : d.utci);
+    };
 
     const heatmapCellsG = heatmapG.append("g").attr("transform", `translate(0, ${monthAxisBand})`);
 
@@ -981,18 +895,9 @@ export function UtciExplorer({
         explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width
       )
       .attr("height", d => rowInnerHeight(d.y))
-      .attr("rx", 2) // Smaller corner radius
+      .attr("rx", 2)
       .attr("ry", 2)
-      .style("fill", d => {
-        if (!Number.isFinite(d.utci)) return emptyUtciFill;
-        if (colorMode === 'categories') {
-          return UTCI_COLORS[d.utciCategory] || '#cccccc';
-        } else {
-          return colorScale(colorMode === 'comfortTime' ? d.isComfortable : d.utci);
-        }
-      })
-      .style("stroke", aggregation === 'month' || aggregation === 'week' ? 'rgba(0,0,0,0.1)' : 'none')
-      .style("stroke-width", "1px")
+      .style("fill", utciCellFill)
       .style("opacity", d => heatmapCellOpacity(d.month, d.y, d.x0, d.x1))
       .style("cursor", d =>
         !showDifference && Array.isArray(d.cellRows) && d.cellRows.length > 0 ? 'pointer' : 'default'
@@ -1017,15 +922,15 @@ export function UtciExplorer({
       );
 
     // Overlay text for month and week aggregations if cells are large enough
-    if (aggregation === 'month' || aggregation === 'week') {
-      cells.append("text")
-        .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2 - 0.5)
-        .attr("y", d => rowInnerHeight(d.y) / 2 - 0.5)
+    if ((aggregation === 'month' || aggregation === 'week') && type.showCellValues) {
+      const cellLabels = cells.append("text")
+        .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2)
+        .attr("y", d => rowInnerHeight(d.y) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", heatmapTextColor)
-        .style("font-size", `${aggregation === 'month' ? overlayFontMonthPx : overlayFontWeekPx}px`)
-        .style("font-weight", "500")
+        .style("fill", heatmapCellInk(heatmapTextColor))
+        .style("font-size", `${type.cellValuePx}px`)
+        .style("font-weight", HEATMAP_CELL_FONT_WEIGHT)
         .style("pointer-events", "none")
         .style("opacity", d => heatmapCellOpacity(d.month, d.y, d.x0, d.x1))
         // Only show text if the cell is wide enough
@@ -1040,6 +945,12 @@ export function UtciExplorer({
             ? `${Math.round(d.isComfortable * 100)}%`
             : `${Math.round(convertUtci(d.utci))}`;
         });
+      fitHeatmapCellLabels(
+        cellLabels,
+        d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width,
+        type.cellValuePx,
+        renderScale
+      );
     }
 
     // Bounding box(es) for the selected region (supports month/hour wrap)
@@ -1092,15 +1003,15 @@ export function UtciExplorer({
       .attr("class", "heatmap-hour-labels")
       .attr("pointer-events", "none")
       .selectAll("text")
-      .data(d3.range(0, 24))
+      .data(d3.range(0, 24, type.hourStride))
       .join("text")
-      .attr("x", -4)
+      .attr("x", -5)
       .attr("y", h => hourRowCenter(h))
       .attr("dominant-baseline", "middle")
       .attr("text-anchor", "end")
-      .style("fill", heatmapTextColor)
+      .style("fill", axisInk)
       .style("font-weight", "500")
-      .style("font-size", `${heatmapHourAxisPx}px`)
+      .style("font-size", `${type.hourPx}px`)
       .text(h => formatHourRow(h));
 
     const isSelected = (d: UtciDataRow) => {
@@ -1255,14 +1166,10 @@ export function UtciExplorer({
               maxSelected: ratio,
             })
           );
-        group.append("rect")
-          .attr("x", xPos)
-          .attr("y", topY)
-          .attr("width", barW)
-          .attr("height", barH)
-          .style("fill", comfortFill)
-          .attr("rx", pillR)
-          .attr("ry", pillR);
+        const baselinePx = yScaleBar.range()[0];
+        group.append("path")
+          .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
+          .style("fill", comfortFill);
       } else {
         // Bar from min to max
         const val = d.valueSelected!;
@@ -1279,15 +1186,11 @@ export function UtciExplorer({
           minSelected: minVal,
           maxSelected: maxVal,
         });
-        group.append("rect")
-          .attr("x", xPos)
-          .attr("y", topY)
-          .attr("width", barW)
-          .attr("height", barH)
+        const baselinePx = yScaleBar.range()[0];
+        group.append("path")
+          .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
           .style("fill", chartBarFill ?? getFillColor(barFillVal, d.comfortRatioSelected!))
-          .style("opacity", 0.6)
-          .attr("rx", pillR)
-          .attr("ry", pillR);
+          .style("opacity", 0.6);
 
         // Average Indicator Circle
         group.append("circle")
@@ -1318,7 +1221,7 @@ export function UtciExplorer({
       .call(yAxisBar)
       .call(g => g.select(".domain").remove())
       .call(g => g.selectAll(".tick line").remove())
-      .call(g => g.selectAll(".tick text").style("fill", heatmapTextColor).style("font-weight", "500").style("font-size", `${heatmapMonthAxisPx}px`));
+      .call(g => g.selectAll(".tick text").style("fill", axisInk).style("font-weight", "500").style("font-size", `${type.axisPx}px`));
 
     // Zero line for UTCI values
     if (colorMode !== 'comfortTime') {
@@ -1348,9 +1251,9 @@ export function UtciExplorer({
       .attr("y", monthAxisBand / 2)
       .attr("dominant-baseline", "middle")
       .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
-      .style("font-weight", "500")
-      .style("font-size", `${heatmapMonthAxisPx}px`)
+      .style("fill", axisInk)
+      .style("font-weight", "600")
+      .style("font-size", `${type.monthPx}px`)
       .text(d => d.label);
 
     
@@ -1358,9 +1261,9 @@ export function UtciExplorer({
          g.append("text")
           .attr("x", -margin.left + 4)
           .attr("y", -margin.top + 16)
-          .style("font-size", "12px")
+          .style("font-size", `${type.axisPx}px`)
           .style("font-weight", "bold")
-          .style("fill", heatmapTextColor)
+          .style("fill", axisInk)
           .text(title);
     }
   };
@@ -1383,6 +1286,8 @@ export function UtciExplorer({
     gradients,
     filter,
     dimensions.width,
+    renderScale,
+    svgHeight,
     unitSystem,
     heatmapTextColor,
     theme,
@@ -1411,25 +1316,15 @@ export function UtciExplorer({
     );
 
     if (showDifference && compareData) {
+      const compareByHour = indexEpwByEquivalentHour(compareData);
+      const utciOf = (row: EPWDataRow) => computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
       const diffs = filteredData.map(d => {
-        const idx = data.indexOf(d);
-        const cD = compareData[idx];
+        const cD = compareByHour.get(epwEquivalentHourKey(d));
         if (!cD) return null;
-        
-        const getUtci = (row: EPWDataRow) => {
-          const tdb = (row.dryBulbTemperature as number) || 0;
-          const rh = (row.relativeHumidity as number) || 50;
-          const windSpeed = (row.windSpeed as number) || 0;
-          const ghr = (row.globalHorizontalRadiation as number) || 0;
-          const v_wind = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-          const tr = includeSun ? tdb + (0.02 * ghr) : tdb;
-          try {
-            const result = tc.models.utci(tdb, tr, v_wind, rh, 'SI', true, false);
-            return isNaN(result.utci) ? tdb : result.utci;
-          } catch (e) { return tdb; }
-        };
-
-        return getUtci(cD) - getUtci(d);
+        const primary = utciOf(d);
+        const compare = utciOf(cD);
+        if (primary == null || compare == null) return null;
+        return compare - primary;
       }).filter(v => v !== null) as number[];
 
       return {
@@ -1473,8 +1368,8 @@ export function UtciExplorer({
       
     >
       {(exportMode || !pairSuppressHeader) && (
-      <div className={`flex flex-col ${exportMode ? '' : 'border-b'} ${
-        exportMode ? 'bg-white' : (theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white')
+      <div className={`flex flex-col ${
+        exportMode ? 'bg-white' : (theme === 'dark' ? 'bg-gray-800' : 'bg-white')
       } ${CHART_TOOLBAR_HEADER_PAD}`}>
         <div className="flex min-w-0 flex-col overflow-visible">
           {exportMode ? (
@@ -1500,13 +1395,9 @@ export function UtciExplorer({
           ) : comparePane === 'secondary' ? (
             <>
               <div
-                className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                  theme === 'dark'
-                    ? 'border-orange-800/60 bg-orange-950/45 text-orange-100'
-                    : 'border-orange-200 bg-orange-50 text-orange-900'
-                }`}
+                className={comparePaneLabelClass(theme, 'baseline')}
               >
-                Comparison \u00B7 {paneCity ?? '\u2014'}
+                Comparison · {paneCity ?? '\u2014'}
               </div>
               <div className={chartToolbarRevealClass}>
                 <div className="pt-1">
@@ -1521,15 +1412,7 @@ export function UtciExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-blue-900/40 text-blue-400'
-                                : 'bg-blue-50 text-blue-600'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats, 'blue')}
                           title="Statistics"
                         >
                           Stats
@@ -1538,18 +1421,10 @@ export function UtciExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-blue-900/40 text-blue-400'
-                                : 'bg-blue-50 text-blue-600'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings, 'blue')}
                           title="Chart settings"
                         >
-                          <Settings2 className="h-3 w-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -1561,13 +1436,9 @@ export function UtciExplorer({
             <>
               {comparePane === 'primary' && paneCity && (
                 <div
-                  className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                    theme === 'dark'
-                      ? 'border-blue-800/60 bg-blue-950/45 text-blue-100'
-                      : 'border-blue-200 bg-blue-50 text-blue-900'
-                  }`}
+                  className={comparePaneLabelClass(theme, 'baseline')}
                 >
-                  Baseline \u00B7 {paneCity}
+                  Baseline · {paneCity}
                 </div>
               )}
               <div className={`${CHART_TOOLBAR_ROW_CLASS} w-full`}>
@@ -1587,7 +1458,9 @@ export function UtciExplorer({
                     className={chartToolbarTitleClass(theme)}
                     title={`Outdoor Comfort \u00B7 ${utciLegendTitle}`}
                   >
-                    Outdoor Comfort \u00B7 {utciLegendTitle}
+                    <span className="min-w-0 truncate">
+                      Outdoor Comfort<span className="hidden @sm:inline"> · {utciLegendTitle}</span>
+                    </span>
                   </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -1597,9 +1470,10 @@ export function UtciExplorer({
                     <button
                       type="button"
                       onClick={onRemove}
-                      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full p-0 shadow-hard-sm transition-colors ${theme === 'dark' ? 'text-gray-400 hover:bg-red-900/30 hover:text-red-400' : 'text-gray-400 hover:bg-red-50 hover:text-red-500'}`}
+                      className={chartToolbarRemoveButtonClass(theme)}
+                      title="Remove chart"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -1618,15 +1492,7 @@ export function UtciExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-blue-900/40 text-blue-400'
-                                : 'bg-blue-50 text-blue-600'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats, 'blue')}
                           title="Statistics"
                         >
                           Stats
@@ -1635,18 +1501,10 @@ export function UtciExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-blue-900/40 text-blue-400'
-                                : 'bg-blue-50 text-blue-600'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings, 'blue')}
                           title="Chart settings"
                         >
-                          <Settings2 className="h-3 w-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -1668,21 +1526,21 @@ export function UtciExplorer({
         maxWidthPx={520}
       >
         <div className="grid grid-cols-2 gap-2 mb-3">
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average UTCI</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {utciUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average UTCI</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {utciUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Comfort ratio</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Comfort ratio</div>
             <div className="text-base font-medium" style={{ color: OUTDOOR_COMFORT_GREEN_HEX }}>{(stats.comfortRatio * 100).toFixed(1)}%</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
             <div className={`text-xs font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {utciUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
           </div>
         </div>
 
@@ -1724,8 +1582,8 @@ export function UtciExplorer({
             <select
               value={colorMode}
               onChange={e => setColorMode(e.target.value as any)}
-              className={`w-full rounded-full border p-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
-                theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+              className={`w-full rounded-full border-0 px-3.5 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
+                theme === 'dark' ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
               }`}
             >
               <option value="comfortTime">Time in comfort zone</option>
@@ -1740,19 +1598,19 @@ export function UtciExplorer({
                 <button
                   type="button"
                   onClick={() => setShowGradientModal(true)}
-                  className="text-[10px] font-bold uppercase tracking-tight text-blue-500 hover:text-blue-600"
+                  className={`text-[11px] font-bold uppercase tracking-tight ${theme === 'dark' ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
                 >
                   + Create
                 </button>
               </div>
-              <div className={`flex overflow-x-auto rounded-lg border p-1.5 ${theme === 'dark' ? 'border-gray-600 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
+              <div className={`flex overflow-x-auto rounded-full p-1.5 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
                 {paletteGradients.map(g => (
                   <button
                     key={g.id}
                     type="button"
                     onClick={() => setGradientId(g.id)}
-                    className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full border-2 transition-all ${
-                      gradientId === g.id ? 'scale-110 border-blue-500 shadow-sm' : 'border-transparent hover:scale-105'
+                    className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full transition-all ${
+                      gradientId === g.id ? 'scale-110 shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_14px_rgba(59,130,246,0.6)]' : 'opacity-85 hover:scale-105 hover:opacity-100'
                     }`}
                     style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
                     title={g.name}
@@ -1795,16 +1653,14 @@ export function UtciExplorer({
               setGradientId={setGradientId}
               gradients={gradients}
               theme={theme}
-              fontScale={LEGEND_STRIP_SCALE}
+
               isDifference={true}
               footnote={utciLegendFootnote}
             />
           ) : colorMode === 'categories' ? (
             <>
               <UtciCategoryLegendStrip theme={theme} />
-              <p
-                className="m-0 mt-0.5 text-[9px] leading-snug font-normal text-gray-400 dark:text-gray-500"
-              >
+              <p className={LEGEND_FOOTNOTE_CLASS} title={utciLegendFootnote}>
                 {utciLegendFootnote}
               </p>
             </>
@@ -1822,15 +1678,13 @@ export function UtciExplorer({
               setGradientId={setGradientId}
               gradients={gradients}
               theme={theme}
-              fontScale={LEGEND_STRIP_SCALE}
+
               footnote={utciLegendFootnote}
             />
           ) : (
             <>
               <UtciComfortTimeLegendStrip theme={theme} />
-              <p
-                className="m-0 mt-0.5 text-[9px] leading-snug font-normal text-gray-400 dark:text-gray-500"
-              >
+              <p className={LEGEND_FOOTNOTE_CLASS} title={utciLegendFootnote}>
                 {utciLegendFootnote}
               </p>
             </>

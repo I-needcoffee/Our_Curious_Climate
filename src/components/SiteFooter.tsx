@@ -51,7 +51,7 @@ export function SiteFooter({
   onHeatmapCellStatisticChange?: (v: HeatmapCellStatistic) => void;
   dstDisplayEnabled?: boolean;
   onDstDisplayEnabledChange?: (v: boolean) => void;
-  /** When false, hide Low / Ave / High (no 12Ã—24 heatmaps on the dashboard). */
+  /** When false, hide Low / Ave / High (no 12×24 heatmaps on the dashboard). */
   showHeatmapCellToggle?: boolean;
   /** Export capture only: note DST in footer when the DST toggle is on. */
   exportNotesDst?: boolean;
@@ -93,11 +93,11 @@ export function SiteFooter({
   /** Light: white pill body; dark: low-contrast shell. */
   const pillShell =
     theme === 'dark'
-      ? 'border-white/15 bg-gray-950/90 text-gray-300 shadow-hard-sm backdrop-blur-sm'
-      : 'border-gray-200/90 bg-white/92 text-gray-700 shadow-hard-sm backdrop-blur-sm';
+      ? 'bg-gray-950/90 text-gray-300 glow-sm backdrop-blur-sm'
+      : 'bg-white/92 text-gray-700 glow-sm backdrop-blur-sm';
 
   /** One scale for all footer footnote & pill labels; weight varies per control (selected = bold). */
-  const footnoteText = 'text-[10px] sm:text-[11px] leading-snug';
+  const footnoteText = 'text-[11px] sm:text-xs leading-snug';
   const footerLinkClass =
     theme === 'dark'
       ? 'font-normal text-gray-300 underline decoration-gray-500/60 underline-offset-2 hover:text-white'
@@ -108,13 +108,13 @@ export function SiteFooter({
 
   const captionPlace =
     exportMode
-      ? 'text-[11px] font-medium leading-snug text-gray-900'
+      ? 'text-[13px] font-semibold leading-snug text-gray-900'
       : theme === 'dark'
         ? `${footnoteText} font-normal text-gray-100`
         : `${footnoteText} font-normal text-gray-900`;
   const captionFile =
     exportMode
-      ? 'font-mono text-[10px] font-normal leading-snug text-gray-500'
+      ? 'font-mono text-xs font-normal leading-snug text-gray-500'
       : theme === 'dark'
         ? `font-mono ${footnoteText} font-normal text-gray-400`
         : `font-mono ${footnoteText} font-normal text-gray-500`;
@@ -132,8 +132,8 @@ export function SiteFooter({
         }}
       >
         <div
-          className={`relative w-full max-w-md rounded-2xl border p-4 shadow-hard-xl sm:p-5 ${
-            theme === 'dark' ? 'border-gray-600 bg-gray-800 text-gray-100' : 'border-gray-200 bg-white'
+          className={`relative w-full max-w-md rounded-3xl p-5 glow-xl sm:p-6 ${
+            theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white'
           }`}
         >
           <button
@@ -162,7 +162,7 @@ export function SiteFooter({
               href={VENMO_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex flex-1 items-center justify-center rounded-full border border-gray-200 bg-[#008cff] px-4 py-2.5 text-sm font-bold text-white shadow-hard-sm transition-opacity hover:opacity-92"
+              className="inline-flex flex-1 items-center justify-center rounded-full bg-[#008cff] px-4 py-2.5 text-sm font-bold text-white glow-sm transition-opacity hover:opacity-92"
             >
               Venmo
             </a>
@@ -170,7 +170,7 @@ export function SiteFooter({
               href={PAYPAL_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex flex-1 items-center justify-center rounded-full border border-gray-200 bg-[#0070ba] px-4 py-2.5 text-sm font-bold text-white shadow-hard-sm transition-opacity hover:opacity-92"
+              className="inline-flex flex-1 items-center justify-center rounded-full bg-[#0070ba] px-4 py-2.5 text-sm font-bold text-white glow-sm transition-opacity hover:opacity-92"
             >
               PayPal
             </a>
@@ -193,8 +193,8 @@ export function SiteFooter({
         }}
       >
         <div
-          className={`relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border p-4 shadow-hard-xl sm:p-5 ${
-            theme === 'dark' ? 'border-gray-600 bg-gray-800 text-gray-100' : 'border-gray-200 bg-white'
+          className={`relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl p-5 glow-xl sm:p-6 ${
+            theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white'
           }`}
         >
           <button
@@ -237,12 +237,12 @@ export function SiteFooter({
                 </div>
               ))}
               {exportNotesDst ? (
-                <span className="text-[9px] font-normal leading-none text-gray-500">
+                <span className="text-[11px] font-medium leading-snug text-gray-500">
                   Clock display: DST adjustment on
                 </span>
               ) : null}
               {iemWindDatasetActive ? (
-                <span className="text-[8px] font-normal leading-snug text-gray-500">
+                <span className="text-[11px] font-normal leading-snug text-gray-500">
                   * Wind speed/direction from{' '}
                   <a href={IEM_HOME} target="_blank" rel="noopener noreferrer" className={exportLinkClass}>
                     Iowa Environmental Mesonet (IEM)
@@ -253,13 +253,13 @@ export function SiteFooter({
             </div>
           ) : exportNotesDst ? (
             <div className="flex min-h-5 min-w-0 flex-1 items-center text-left">
-              <span className="text-[9px] font-normal leading-none text-gray-500">
+              <span className="text-[11px] font-medium leading-snug text-gray-500">
                 Clock display: DST adjustment on
               </span>
             </div>
           ) : iemWindDatasetActive ? (
             <div className="flex min-h-5 min-w-0 flex-1 flex-col justify-center text-left">
-              <span className="text-[8px] font-normal leading-snug text-gray-500">
+              <span className="text-[11px] font-normal leading-snug text-gray-500">
                 * Wind speed/direction from{' '}
                 <a href={IEM_HOME} target="_blank" rel="noopener noreferrer" className={exportLinkClass}>
                   Iowa Environmental Mesonet (IEM)
@@ -268,7 +268,7 @@ export function SiteFooter({
               </span>
             </div>
           ) : null}
-          <div className="flex min-h-5 shrink-0 items-center whitespace-nowrap text-[11px] leading-none">
+          <div className="flex min-h-5 shrink-0 items-center whitespace-nowrap text-xs leading-none">
             <a
               href={CLIMATE_CANVAS}
               target="_blank"
@@ -288,19 +288,18 @@ export function SiteFooter({
     onUnitSystemChange && unitSystem !== undefined && onDstDisplayEnabledChange && dstDisplayEnabled !== undefined
   );
 
-  const pillH = 'h-6';
-  /** Slightly below inner row height (h-5) so the chip sits with equal top/bottom inset. */
-  const donateChipH = 'h-4.5';
+  const pillH = 'h-7';
+  /** Slightly below inner row height (h-6) so the chip sits with equal top/bottom inset. */
+  const donateChipH = 'h-5';
 
   /**
-   * Metric / Imperial: grey trough; selected = white, unselected = light grey.
-   * Dark: selected white cap, unselected mid grey (reads as â€œunselectedâ€ on dark track).
+   * Metric / Imperial: grey trough; selected = white cap with a soft glow, unselected = bare label on the trough.
    */
   const unitTrack =
     theme === 'dark'
-      ? `inline-flex ${pillH} min-w-0 max-w-[min(100vw-8rem,15rem)] items-stretch rounded-full border border-gray-600 bg-gray-800 p-0.5 shadow-none`
-      : `inline-flex ${pillH} min-w-0 max-w-[min(100vw-8rem,15rem)] items-stretch rounded-full border border-gray-200 bg-gray-100 p-0.5 shadow-none`;
-  const unitSegBase = `flex min-w-0 flex-1 items-center justify-center rounded-full px-1.5 ${footnoteText} font-normal transition-[color,background-color,box-shadow,font-weight] duration-200 sm:px-2.5`;
+      ? `inline-flex ${pillH} min-w-0 max-w-[min(100vw-8rem,16rem)] items-stretch gap-0.5 rounded-full bg-gray-800 p-0.5`
+      : `inline-flex ${pillH} min-w-0 max-w-[min(100vw-8rem,16rem)] items-stretch gap-0.5 rounded-full bg-gray-200/70 p-0.5`;
+  const unitSegBase = `flex min-w-0 flex-1 items-center justify-center rounded-full px-2 ${footnoteText} font-medium transition-[color,background-color,box-shadow,font-weight] duration-200 sm:px-3`;
 
   const metricLabel = isMobile ? 'Met' : 'Metric';
   const imperialLabel = isMobile ? 'Imp' : 'Imperial';
@@ -330,21 +329,23 @@ export function SiteFooter({
                   dismissOnboarding(ONBOARDING_KEYS.dstToggle);
                   onDstDisplayEnabledChange?.(!dstDisplayEnabled);
                 }}
-                className={`inline-flex ${pillH} max-w-[min(100vw-6rem,20rem)] min-w-0 items-stretch overflow-visible rounded-full border p-0 ${pillShell}`}
+                className={`inline-flex ${pillH} max-w-[min(100vw-6rem,20rem)] min-w-0 items-stretch overflow-visible rounded-full p-0 ${pillShell}`}
               >
-                <span className="flex shrink-0 items-center justify-center pl-2 pr-0.5 sm:pl-2" aria-hidden>
+                <span className="flex shrink-0 items-center justify-center pl-2.5 pr-0.5" aria-hidden>
                   <span
-                    className={`box-border h-3 w-3 shrink-0 rounded-full border sm:h-3.5 sm:w-3.5 ${
+                    className={`box-border h-3.5 w-3.5 shrink-0 rounded-full transition-colors ${
                       dstDisplayEnabled
-                        ? 'border-gray-600 bg-gray-600 dark:border-gray-500 dark:bg-gray-500'
+                        ? theme === 'dark'
+                          ? 'bg-gray-100'
+                          : 'bg-gray-800'
                         : theme === 'dark'
-                          ? 'border-gray-500 bg-white'
-                          : 'border-gray-400 bg-white'
+                          ? 'bg-gray-600'
+                          : 'bg-gray-200'
                     }`}
                   />
                 </span>
                 <span
-                  className={`flex min-w-0 flex-1 items-center truncate pl-1 pr-2 text-left sm:pr-2 ${footnoteText} font-normal ${
+                  className={`flex min-w-0 flex-1 items-center truncate pl-1.5 pr-3 text-left ${footnoteText} font-medium ${
                     theme === 'dark' ? 'text-gray-200' : 'text-gray-800'
                   }`}
                 >
@@ -369,11 +370,11 @@ export function SiteFooter({
                 className={`${unitSegBase} ${
                   unitSystem === 'metric'
                     ? theme === 'dark'
-                      ? 'bg-white text-gray-900 shadow-sm font-bold'
-                      : 'bg-white text-gray-900 shadow-sm font-bold'
+                      ? 'bg-white text-gray-900 glow-sm font-bold'
+                      : 'bg-white text-gray-900 glow-sm font-bold'
                     : theme === 'dark'
-                      ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                      : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                      ? 'text-gray-300 hover:text-white'
+                      : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 {metricLabel}
@@ -388,11 +389,11 @@ export function SiteFooter({
                 className={`${unitSegBase} ${
                   unitSystem === 'imperial'
                     ? theme === 'dark'
-                      ? 'bg-white text-gray-900 shadow-sm font-bold'
-                      : 'bg-white text-gray-900 shadow-sm font-bold'
+                      ? 'bg-white text-gray-900 glow-sm font-bold'
+                      : 'bg-white text-gray-900 glow-sm font-bold'
                     : theme === 'dark'
-                      ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                      : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                      ? 'text-gray-300 hover:text-white'
+                      : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 {imperialLabel}
@@ -413,11 +414,11 @@ export function SiteFooter({
                   className={`${unitSegBase} ${
                     heatmapCellStatistic === 'low'
                       ? theme === 'dark'
-                        ? 'bg-white text-gray-900 shadow-sm font-bold'
-                        : 'bg-white text-gray-900 shadow-sm font-bold'
+                        ? 'bg-white text-gray-900 glow-sm font-bold'
+                        : 'bg-white text-gray-900 glow-sm font-bold'
                       : theme === 'dark'
-                        ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                        : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                        ? 'text-gray-300 hover:text-white'
+                        : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   {isMobile ? 'Lo' : 'Low'}
@@ -429,11 +430,11 @@ export function SiteFooter({
                   className={`${unitSegBase} ${
                     heatmapCellStatistic === 'mean'
                       ? theme === 'dark'
-                        ? 'bg-white text-gray-900 shadow-sm font-bold'
-                        : 'bg-white text-gray-900 shadow-sm font-bold'
+                        ? 'bg-white text-gray-900 glow-sm font-bold'
+                        : 'bg-white text-gray-900 glow-sm font-bold'
                       : theme === 'dark'
-                        ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                        : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                        ? 'text-gray-300 hover:text-white'
+                        : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   {isMobile ? 'Av' : 'Ave'}
@@ -445,11 +446,11 @@ export function SiteFooter({
                   className={`${unitSegBase} ${
                     heatmapCellStatistic === 'high'
                       ? theme === 'dark'
-                        ? 'bg-white text-gray-900 shadow-sm font-bold'
-                        : 'bg-white text-gray-900 shadow-sm font-bold'
+                        ? 'bg-white text-gray-900 glow-sm font-bold'
+                        : 'bg-white text-gray-900 glow-sm font-bold'
                       : theme === 'dark'
-                        ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                        : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                        ? 'text-gray-300 hover:text-white'
+                        : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   {isMobile ? 'Hi' : 'High'}
@@ -460,18 +461,16 @@ export function SiteFooter({
               <>
                 <DiscoverPulseShell storageKey={ONBOARDING_KEYS.windDataSource} rounded="pill">
                 <div
-                  className={`inline-flex ${pillH} min-w-0 max-w-[min(100vw-6rem,22rem)] shrink-0 items-stretch overflow-visible rounded-full border ${
-                    theme === 'dark'
-                      ? 'border-gray-600 bg-gray-800 p-0.5 shadow-none'
-                      : 'border-gray-200 bg-gray-100 p-0.5 shadow-none'
+                  className={`inline-flex ${pillH} min-w-0 max-w-[min(100vw-6rem,24rem)] shrink-0 items-stretch gap-0.5 overflow-visible rounded-full p-0.5 ${
+                    theme === 'dark' ? 'bg-gray-800' : 'bg-gray-200/70'
                   }`}
                   title="Wind data: weather file (TMY) vs Iowa Environmental Mesonet station archive"
                   role="group"
                   aria-label="Wind data source"
                 >
                   <span
-                    className={`flex shrink-0 items-center border-r pl-2 pr-1.5 sm:pl-2.5 sm:pr-2 ${footnoteText} font-medium ${
-                      theme === 'dark' ? 'border-gray-600 text-gray-300' : 'border-gray-200 text-gray-700'
+                    className={`flex shrink-0 items-center pl-2.5 pr-1.5 ${footnoteText} font-semibold ${
+                      theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
                     }`}
                   >
                     {windDataLabel}
@@ -486,11 +485,11 @@ export function SiteFooter({
                     className={`${unitSegBase} ${
                       windFooter.source === 'epw'
                         ? theme === 'dark'
-                          ? 'bg-white text-gray-900 shadow-sm font-bold'
-                          : 'bg-white text-gray-900 shadow-sm font-bold'
+                          ? 'bg-white text-gray-900 glow-sm font-bold'
+                          : 'bg-white text-gray-900 glow-sm font-bold'
                         : theme === 'dark'
-                          ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                          : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                          ? 'text-gray-300 hover:text-white'
+                          : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
                     TMY
@@ -505,11 +504,11 @@ export function SiteFooter({
                     className={`${unitSegBase} ${
                       windFooter.source === 'iem'
                         ? theme === 'dark'
-                          ? 'bg-white text-gray-900 shadow-sm font-bold'
-                          : 'bg-white text-gray-900 shadow-sm font-bold'
+                          ? 'bg-white text-gray-900 glow-sm font-bold'
+                          : 'bg-white text-gray-900 glow-sm font-bold'
                         : theme === 'dark'
-                          ? 'bg-gray-600/80 text-gray-300 hover:text-white'
-                          : 'bg-gray-50 text-gray-500 hover:text-gray-800'
+                          ? 'text-gray-300 hover:text-white'
+                          : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
                     Station
@@ -575,28 +574,26 @@ export function SiteFooter({
             </div>
           </div>
         ) : null}
-        <div className="relative z-20 ml-auto flex h-6 min-w-0 max-w-[min(100vw-1rem,22rem)] items-center self-center leading-none">
+        <div className="relative z-20 ml-auto flex h-7 min-w-0 max-w-[min(100vw-1rem,24rem)] items-center self-center leading-none">
           <div
-            className={`box-border flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-full border p-0.5 ${pillShell}`}
+            className={`box-border flex h-7 min-w-0 max-w-full items-center overflow-hidden rounded-full p-0.5 ${pillShell}`}
           >
             <a
               href={CLIMATE_CANVAS}
               target="_blank"
               rel="noopener noreferrer"
-              className={`relative z-0 flex h-5 min-h-0 min-w-0 flex-1 items-center truncate rounded-l-full px-2 ${footnoteText} ${footerLinkClass} sm:px-2.5 ${
-                theme === 'dark' ? '' : 'bg-white'
-              }`}
+              className={`relative z-0 flex h-6 min-h-0 min-w-0 flex-1 items-center truncate rounded-l-full px-2.5 ${footnoteText} ${footerLinkClass} sm:px-3`}
             >
               Created with ClimateCanvas.app
             </a>
-            <div className="relative z-10 flex h-5 shrink-0 items-center justify-center pl-0.5 pr-0.5">
+            <div className="relative z-10 flex h-6 shrink-0 items-center justify-center pl-0.5 pr-0.5">
               <button
                 type="button"
                 onClick={() => setDonateModalOpen(true)}
-                className={`inline-flex ${donateChipH} min-h-0 max-w-full items-center justify-center border-l pl-1.5 pr-2 text-left ${footnoteText} font-normal transition-colors duration-200 sm:pl-1.5 sm:pr-2 ${
+                className={`inline-flex ${donateChipH} min-h-0 max-w-full items-center justify-center rounded-full px-2.5 text-left ${footnoteText} font-semibold transition-colors duration-200 ${
                   theme === 'dark'
-                    ? 'ml-0.5 rounded-l-full rounded-r-full border-white/10 bg-gray-800/50 text-gray-200 hover:bg-gray-800/70 hover:text-white'
-                    : 'ml-0.5 rounded-l-full rounded-r-full border-gray-200/90 bg-gray-100 text-gray-800 shadow-sm hover:bg-gray-200/90'
+                    ? 'bg-gray-800 text-gray-200 hover:bg-gray-700 hover:text-white'
+                    : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
                 }`}
               >
                 Donate

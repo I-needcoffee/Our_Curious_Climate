@@ -70,7 +70,7 @@ export function ChartToolbarLabeledMenu({
         onClick={() => setOpen(v => !v)}
       >
         {label}
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-3.5 @lg:w-3.5" strokeWidth={2.25} aria-hidden />
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70 @lg:h-4 @lg:w-4" strokeWidth={2.25} aria-hidden />
       </button>
 
       {open ? (
@@ -78,15 +78,15 @@ export function ChartToolbarLabeledMenu({
           id={menuId}
           ref={menuRef}
           role="menu"
-          className={`absolute left-0 top-full z-50 mt-1 max-h-52 min-w-[11rem] overflow-y-auto rounded-lg border shadow-hard-lg ${
-            dark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+          className={`absolute left-0 top-full z-50 mt-1.5 max-h-80 min-w-[14rem] overflow-y-auto rounded-2xl p-1.5 glow-xl ${
+            dark ? 'bg-gray-800' : 'bg-white'
           }`}
         >
           {Object.entries(groupedVariables).map(([category, vars]) => (
             <div key={category} role="presentation">
               <div
-                className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide ${
-                  dark ? 'text-gray-500' : 'text-gray-400'
+                className={`px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wider ${
+                  dark ? 'text-gray-400' : 'text-gray-500'
                 }`}
               >
                 {category}
@@ -103,7 +103,7 @@ export function ChartToolbarLabeledMenu({
                       onChange(v.id);
                       setOpen(false);
                     }}
-                    className={`w-full px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${
+                    className={`w-full rounded-full px-3 py-1.5 text-left text-[13px] font-medium transition-colors ${
                       active
                         ? dark
                           ? 'bg-gray-700 text-white'

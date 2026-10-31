@@ -143,25 +143,27 @@ export function WrappingRangeSlider({
   };
 
   const handleClass = (which: 'start' | 'end') =>
-    `absolute top-1/2 z-[2] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-grab appearance-none rounded-full border-2 bg-white p-0 ${
-      active === which ? 'z-[3] cursor-grabbing border-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.35)]' : 'border-blue-500'
+    `absolute top-1/2 z-[2] h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 cursor-grab appearance-none rounded-full bg-white p-0 ${
+      active === which
+        ? 'z-[3] cursor-grabbing shadow-[0_1px_3px_rgba(0,0,0,0.28)]'
+        : 'shadow-[0_1px_3px_rgba(0,0,0,0.22)]'
     }`;
 
   return (
     <div
       ref={railRef}
-      className="relative h-3.5 w-full touch-none select-none"
+      className="relative h-[18px] w-full touch-none select-none"
       onPointerDown={onRailPointerDown}
       role="group"
       aria-label={wrapping ? 'Wrapping range' : 'Range'}
     >
       <div
-        className={`absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full ${dark ? 'bg-gray-600' : 'bg-gray-200'}`}
+        className={`absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full ${dark ? 'bg-gray-600' : 'bg-gray-200'}`}
       />
       {segments.map((seg, i) => (
         <div
           key={i}
-          className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-blue-500"
+          className="pointer-events-none absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-gray-900 dark:bg-gray-100"
           style={{ left: `${seg.left}%`, width: `${seg.width}%` }}
         />
       ))}

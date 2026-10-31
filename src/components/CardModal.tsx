@@ -52,21 +52,19 @@ export function CardModal({
       aria-modal="true"
     >
       <div
-        className={`flex w-full flex-col overflow-hidden border shadow-hard-xl ${
-          theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-        }`}
+        className={`flex w-full flex-col overflow-hidden glow-xl ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}
         style={{
           maxWidth: `min(${maxWidthPx}px, calc(100vw - 24px))`,
           maxHeight:
             maxHeightPx != null
               ? `min(${maxHeightPx}px, calc(100vh - 48px))`
               : 'calc(100vh - 48px)',
-          borderRadius: 16,
+          borderRadius: 24,
         }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
-          <div className={`text-sm font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{title}</div>
+        <div className="flex shrink-0 items-center justify-between gap-2 px-4 pb-2 pt-3">
+          <div className={`text-base font-bold tracking-[-0.01em] ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{title}</div>
           <button
             type="button"
             onClick={onClose}

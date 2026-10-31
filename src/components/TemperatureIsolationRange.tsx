@@ -61,41 +61,31 @@ export function TemperatureIsolationRange({
 
   const step = span > 30 ? 1 : 0.5;
 
-  const trackStyle = [{ backgroundColor: dark ? '#9ca3af' : '#525252', height: compact ? '3px' : '4px' }];
-  const handleStyle = [
-    {
-      borderColor: dark ? '#9ca3af' : '#525252',
-      backgroundColor: 'white',
-      opacity: 1,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-      width: compact ? '12px' : '14px',
-      height: compact ? '12px' : '14px',
-      marginTop: compact ? '-4px' : '-5px',
-    },
-    {
-      borderColor: dark ? '#9ca3af' : '#525252',
-      backgroundColor: 'white',
-      opacity: 1,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-      width: compact ? '12px' : '14px',
-      height: compact ? '12px' : '14px',
-      marginTop: compact ? '-4px' : '-5px',
-    },
-  ];
+  const trackStyle = [{ backgroundColor: dark ? '#9ca3af' : '#525252', height: compact ? '4px' : '6px' }];
+  const knob = {
+    border: 'none',
+    backgroundColor: 'white',
+    opacity: 1,
+    boxShadow: '0 1px 3px rgba(0,0,0,0.25), 0 0 10px rgba(15,23,42,0.18)',
+    width: compact ? '14px' : '18px',
+    height: compact ? '14px' : '18px',
+    marginTop: compact ? '-5px' : '-6px',
+  };
+  const handleStyle = [knob, knob];
 
   const shellMuted = dark ? 'text-gray-400' : 'text-gray-500';
 
   return (
     <div className={`space-y-3 ${compact ? '' : ''}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className={`rounded-full border px-2 py-0.5 font-mono text-xs ${dark ? 'border-gray-600 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
+        <span className={`rounded-full px-2.5 py-1 font-mono text-xs font-semibold ${dark ? 'bg-gray-700 text-gray-100' : 'bg-white text-gray-800 glow-sm'}`}>
           {filter.temperatureMode === 'off'
             ? `Full file (${display(minC).toFixed(1)}\u2013${display(maxC).toFixed(1)}${unitSystem === 'imperial' ? UNIT_F : UNIT_C})`
             : `Isolating ${display(loC).toFixed(1)}\u2013${display(hiC).toFixed(1)}${unitSystem === 'imperial' ? UNIT_F : UNIT_C}`}
         </span>
         <button
           type="button"
-          className={`text-[11px] font-medium underline-offset-2 hover:underline ${dark ? 'text-gray-300' : 'text-gray-700'}`}
+          className={`text-xs font-semibold underline-offset-2 hover:underline ${dark ? 'text-gray-300' : 'text-gray-700'}`}
           onClick={() =>
             onChangeFilter({
               ...filter,
@@ -129,7 +119,7 @@ export function TemperatureIsolationRange({
           }}
           trackStyle={trackStyle}
           handleStyle={handleStyle}
-          railStyle={{ backgroundColor: dark ? '#374151' : '#f3f4f6', height: compact ? '3px' : '4px' }}
+          railStyle={{ backgroundColor: dark ? '#374151' : '#e5e7eb', height: compact ? '4px' : '6px', borderRadius: 9999 }}
         />
       </div>
 
@@ -154,7 +144,7 @@ export function TemperatureIsolationRange({
                   temperatureMode: syncMode(nextLo, hi),
                 });
               }}
-              className={`w-24 rounded-lg border px-2 py-1 font-mono text-sm outline-none ${dark ? 'border-gray-600 bg-gray-900/80 text-gray-100' : 'border-gray-200 bg-white'}`}
+              className={`w-24 rounded-full px-3 py-1.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${dark ? 'bg-gray-900/80 text-gray-100' : 'bg-white glow-sm'}`}
             />
             <span className="tabular-nums opacity-75">{unitSystem === 'imperial' ? UNIT_F : UNIT_C}</span>
           </div>
@@ -179,14 +169,14 @@ export function TemperatureIsolationRange({
                   temperatureMode: syncMode(low, nextHi),
                 });
               }}
-              className={`w-24 rounded-lg border px-2 py-1 font-mono text-sm outline-none ${dark ? 'border-gray-600 bg-gray-900/80 text-gray-100' : 'border-gray-200 bg-white'}`}
+              className={`w-24 rounded-full px-3 py-1.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${dark ? 'bg-gray-900/80 text-gray-100' : 'bg-white glow-sm'}`}
             />
             <span className="tabular-nums opacity-75">{unitSystem === 'imperial' ? UNIT_F : UNIT_C}</span>
           </div>
         </label>
       </div>
 
-      <p className={`text-[11px] leading-snug opacity-90 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+      <p className={`text-xs leading-relaxed ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
         Uses EPW dry-bulb temperature (stored in °C). Drag both handles or type limits to include only timesteps within
         this band across every chart.
       </p>

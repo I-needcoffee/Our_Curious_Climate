@@ -13,6 +13,7 @@ import {
   ASTRONOMICAL_SEASON_LABELS,
   astronomicalSeasonDaySegments,
   dateInAstronomicalSeason,
+  formatAstronomicalSeasonLabel,
   hemisphereFromLatitude,
   monthOverlapsAstronomicalSeason,
   type AstronomicalSeason,
@@ -60,6 +61,24 @@ export function formatUtciCategoryLabel(category: string): string {
   return category.replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** UTCI polynomial is only defined inside these bounds (jsthermalcomfort `limit_inputs`). */
+export function utciRowOutsideModelRange(
+  row: EPWDataRow,
+  opts: { includeSun?: boolean; includeWind?: boolean } = {}
+): boolean {
+  const includeSun = opts.includeSun ?? true;
+  const includeWind = opts.includeWind ?? true;
+  const tdb = row.dryBulbTemperature as number;
+  const rh = row.relativeHumidity as number;
+  const windSpeed = row.windSpeed as number;
+  const ghr = row.globalHorizontalRadiation as number;
+  if ([tdb, rh, windSpeed, ghr].some(v => v == null || Number.isNaN(v))) return false;
+  const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
+  const tr = includeSun ? tdb + 0.02 * Math.max(0, ghr) : tdb;
+  const dtr = tr - tdb;
+  return tdb < -50 || tdb > 50 || dtr < -30 || dtr > 70 || v > 17;
+}
+
 export function computeUtciForEpwRow(
   row: EPWDataRow,
   opts: { includeSun?: boolean; includeWind?: boolean } = {}
@@ -72,28 +91,27 @@ export function computeUtciForEpwRow(
   const windSpeed = row.windSpeed as number;
   const ghr = row.globalHorizontalRadiation as number;
   if ([tdb, rh, windSpeed, ghr].some(v => v == null || Number.isNaN(v))) return null;
+  if (utciRowOutsideModelRange(row, opts)) return null;
 
   const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
   const tr = includeSun ? tdb + 0.02 * Math.max(0, ghr) : tdb;
 
-  let utciVal = tdb;
   try {
     // Numeric UTCI only — never use library stress_category (nearest-threshold bug).
-    const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, false);
+    // limit_inputs drops hours the polynomial is not valid for instead of inventing a value.
+    const result = tc.models.utci(tdb, tr, v, rh, 'SI', false, true);
     const u = typeof result === 'number' ? result : result?.utci;
-    if (Number.isFinite(u)) {
-      utciVal = u as number;
-    }
+    if (!Number.isFinite(u)) return null;
+    const utciVal = u as number;
+    const category = getUtciCategoryForValue(utciVal);
+    return {
+      utci: utciVal,
+      category,
+      isComfortable: category === UTCI_COMFORT_CATEGORY,
+    };
   } catch {
-    // keep dry-bulb fallback
+    return null;
   }
-
-  const category = getUtciCategoryForValue(utciVal);
-  return {
-    utci: utciVal,
-    category,
-    isComfortable: category === UTCI_COMFORT_CATEGORY,
-  };
 }
 
 function monthInGlobalRange(month: number, f: GlobalFilterState): boolean {
@@ -175,6 +193,17 @@ export function utciExposureScenarioIndex(includeSun: boolean, includeWind: bool
   );
   return idx === -1 ? 0 : idx;
 }
+
+/** Inclusive clock hours. The name is the first and last hour, so 7am–6pm is hours 7 through 18 with no gaps between morning, midday, and afternoon. */
+export const UTCI_CLOCK_WINDOWS = {
+  day: { start: 7, end: 18, label: '7am–6pm' },
+  morning: { start: 7, end: 10, label: '7–10am' },
+  midday: { start: 11, end: 14, label: '11am–2pm' },
+  afternoon: { start: 15, end: 18, label: '3–6pm' },
+} as const;
+
+export const UTCI_HOUR_WINDOW_NOTE =
+  'Each name is the clock hour that starts then, through the last hour listed. 7am–6pm is hours 7–18. Morning is 7–10, midday 11–2, afternoon 3–6, with no hours left out between them.';
 
 export const UTCI_COMFORT_PERIOD_ROWS: UtciComfortPeriodDef[] = [
   { id: 'annual-24h', label: 'Annual (24 hour)', season: 'all', startHour: 0, endHour: 23 },
@@ -476,7 +505,14 @@ export function computeUtciComfortMatrix(
   filter: GlobalFilterState,
   siteLatitude?: number | null
 ): UtciComfortMatrix {
-  const periods = UTCI_COMFORT_PERIOD_ROWS.map(p => ({ id: p.id, label: p.label }));
+  const hemisphere = resolveHemisphere(siteLatitude);
+  const periods = UTCI_COMFORT_PERIOD_ROWS.map(p => ({
+    id: p.id,
+    label:
+      p.season === 'all'
+        ? p.label
+        : `${formatAstronomicalSeasonLabel(p.season, hemisphere)} ${p.label.slice(p.label.indexOf(')') + 1).trim()}`,
+  }));
 
   const cells = UTCI_COMFORT_PERIOD_ROWS.map(period =>
     UTCI_EXPOSURE_SCENARIOS.map(scenario => {

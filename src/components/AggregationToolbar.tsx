@@ -38,7 +38,7 @@ export function AggregationToolbar({
   onChange,
   theme,
   trailing,
-  compactWidthThreshold = 292,
+  compactWidthThreshold = 312,
   tutorialShellId,
   tutorialPeriodIdPrefix,
 }: AggregationToolbarProps) {
@@ -62,11 +62,11 @@ export function AggregationToolbar({
     <div
       id={shellId}
       ref={shellRef}
-      className="flex flex-nowrap items-center justify-between gap-1 w-full min-w-0"
+      className="flex w-full min-w-0 flex-nowrap items-center justify-between gap-1.5"
     >
       <div
-        className={`flex flex-nowrap shrink min-w-0 rounded-full p-0.5 gap-0.5 ${
-          dark ? 'bg-gray-700' : 'bg-gray-100'
+        className={`flex h-6 min-w-0 shrink flex-nowrap items-center gap-0.5 rounded-full p-0.5 ${
+          dark ? 'bg-gray-700/70' : 'bg-gray-100'
         }`}
       >
         {(['hour', 'day', 'week', 'month'] as const).map((agg) => (
@@ -76,16 +76,16 @@ export function AggregationToolbar({
             type="button"
             title={FULL[agg]}
             onClick={() => onChange(agg)}
-            className={`rounded-full shrink-0 font-semibold capitalize transition-colors whitespace-nowrap leading-none ${
-              compact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'
+            className={`inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-full text-[11px] font-semibold capitalize leading-none transition-colors ${
+              compact ? 'px-1.5' : 'px-2'
             } ${
               value === agg
                 ? dark
-                  ? 'bg-gray-600 text-gray-100 shadow-sm'
-                  : 'bg-white text-gray-900 shadow-sm'
+                  ? 'bg-gray-500 text-white glow-sm'
+                  : 'bg-white text-gray-900 glow-sm'
                 : dark
-                  ? 'text-gray-400 hover:text-gray-200'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'text-gray-300 hover:text-white'
+                  : 'text-gray-600 hover:text-gray-900'
             }`}
           >
             {compact ? SHORT[agg] : FULL[agg]}
@@ -93,7 +93,7 @@ export function AggregationToolbar({
         ))}
       </div>
       {trailing ? (
-        <div className="flex flex-nowrap items-center gap-0.5 shrink-0">{trailing}</div>
+        <div className="flex shrink-0 flex-nowrap items-center gap-1">{trailing}</div>
       ) : null}
     </div>
   );

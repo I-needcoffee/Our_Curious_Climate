@@ -5,7 +5,7 @@ import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import { EPWDataRow } from '../lib/epwParser';
 import { X, Settings2 } from 'lucide-react';
-import { GradientDef } from './InteractiveLegend';
+import { GradientDef, LEGEND_FOOTNOTE_CLASS } from './InteractiveLegend';
 import { AggregationToolbar } from './AggregationToolbar';
 import type { ChartType } from '../App';
 import { UnitSystem } from '../App';
@@ -31,6 +31,11 @@ import {
   CHART_TOOLBAR_HEADER_PAD,
   CHART_TOOLBAR_ROW_CLASS,
   chartToolbarTitleClass,
+  chartToolbarChipButtonClass,
+  chartToolbarRoundButtonClass,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  chartToolbarRevealClassFor,
+  chartToolbarRemoveButtonClass,
 } from '../lib/chartToolbarLayout';
 import { ExportHeaderCaption } from './ExportHeaderCaption';
 import { CardModal } from './CardModal';
@@ -50,6 +55,8 @@ import {
   explorerHeatmapRowLayout,
   explorerInnerWidth,
   explorerBarChartHeightPx,
+  explorerBarPath,
+  explorerBarSitsOnBaseline,
   explorerHeatmapCellXPx,
   explorerHeatmapHeightPx,
   explorerHeatmapSpanXPx,
@@ -57,7 +64,11 @@ import {
   explorerMonthLabelCenterDays,
   explorerSvgHeightPx,
   EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS,
+  explorerSvgTypography,
+  fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
+import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 import {
   DEFAULT_NV_CRITERIA,
   NaturalVentilationCriteria,
@@ -125,6 +136,7 @@ export function NaturalVentilationExplorer({
   const svgRef = useRef<SVGSVGElement>(null);
   const outerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 400 });
+  const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
 
   const [aggregation, setAggregation] = useState<'hour' | 'day' | 'week' | 'month'>('month');
   const [criteria, setCriteria] = useState<NaturalVentilationCriteria>(DEFAULT_NV_CRITERIA);
@@ -148,9 +160,7 @@ export function NaturalVentilationExplorer({
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = expandChromeStrip
-    ? 'pointer-events-auto max-h-[52px] overflow-visible opacity-100 pt-1 transition-[max-height,opacity] duration-200 ease-out'
-    : 'pointer-events-none max-h-0 overflow-hidden opacity-0 transition-[max-height,opacity] duration-200 ease-out group-hover:pointer-events-auto group-hover:max-h-[48px] group-hover:opacity-100 focus-within:pointer-events-auto focus-within:max-h-[48px] focus-within:opacity-100';
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
   const removeBtnRevealClass = isMobile
     ? 'pointer-events-auto absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-100'
     : 'pointer-events-none absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
@@ -264,10 +274,10 @@ export function NaturalVentilationExplorer({
     const width = EXPLORER_SVG_BASE_WIDTH;
     const margin = EXPLORER_SVG_MARGIN;
     const innerWidth = explorerInnerWidth();
-    const barChartHeight = explorerBarChartHeightPx();
+    const barChartHeight = explorerBarChartHeightPx(svgHeight);
     const monthAxisBand = EXPLORER_MONTH_AXIS_BAND_PX;
-    const heatmapBodyHeight = explorerHeatmapHeightPx();
-    const height = explorerSvgHeightPx();
+    const heatmapBodyHeight = explorerHeatmapHeightPx(svgHeight);
+    const height = explorerSvgHeightPx(svgHeight);
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
@@ -414,10 +424,13 @@ export function NaturalVentilationExplorer({
       explorerHeatmapRowLayout(heatmapBodyHeight);
     const minDayCellWidth = innerWidth / 366;
     const overlayMinWidth = Math.max(12, minDayCellWidth * 1.1, cellInnerHeightPx * 0.75);
-    const heatmapHourAxisPx = Math.max(5, Math.min(9, cellInnerHeightPx * 0.33));
-    const heatmapMonthAxisPx = Math.max(7, Math.min(11, Math.min(innerWidth / 26, cellInnerHeightPx * 0.45)));
-    const overlayFontMonthPx = Math.max(6, Math.min(12, Math.min(cellInnerHeightPx * 0.4, innerWidth / 22)));
-    const overlayFontWeekPx = Math.max(5, Math.min(10, overlayFontMonthPx * 0.82));
+    const type = explorerSvgTypography(renderScale, cellInnerHeightPx);
+    const axisInk = chartAxisInk(heatmapTextColor, theme);
+    const nvCellFill = (d: (typeof heatmapData)[number]): string => {
+      const metric = colorMode === 'suitableHours' ? d.suitable : d.tempC;
+      if (!Number.isFinite(metric)) return emptyFill;
+      return colorScale(colorMode === 'suitableHours' ? metric : convertTemp(metric));
+    };
 
     const heatmapCellsG = heatmapG.append('g').attr('transform', `translate(0, ${monthAxisBand})`);
 
@@ -437,27 +450,21 @@ export function NaturalVentilationExplorer({
       .attr('height', d => rowInnerHeight(d.y))
       .attr('rx', 2)
       .attr('ry', 2)
-      .style('fill', d => {
-        const metric = colorMode === 'suitableHours' ? d.suitable : d.tempC;
-        if (!Number.isFinite(metric)) return emptyFill;
-        return colorScale(colorMode === 'suitableHours' ? metric : convertTemp(metric));
-      })
-      .style('stroke', aggregation === 'month' || aggregation === 'week' ? 'rgba(0,0,0,0.1)' : 'none')
-      .style('stroke-width', '1px')
+      .style('fill', nvCellFill)
       .style('opacity', d => heatmapCellOpacity(d.month, d.y))
       .append('title')
       .text(d => d.tooltip);
 
-    if (aggregation === 'month' || aggregation === 'week') {
-      cells
+    if ((aggregation === 'month' || aggregation === 'week') && type.showCellValues) {
+      const cellLabels = cells
         .append('text')
-        .attr('x', d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2 - 0.5)
-        .attr('y', d => rowInnerHeight(d.y) / 2 - 0.5)
+        .attr('x', d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2)
+        .attr('y', d => rowInnerHeight(d.y) / 2)
         .attr('dy', '0.35em')
         .attr('text-anchor', 'middle')
-        .style('fill', heatmapTextColor)
-        .style('font-size', `${aggregation === 'month' ? overlayFontMonthPx : overlayFontWeekPx}px`)
-        .style('font-weight', '500')
+        .style('fill', heatmapCellInk(heatmapTextColor))
+        .style('font-size', `${type.cellValuePx}px`)
+        .style('font-weight', HEATMAP_CELL_FONT_WEIGHT)
         .style('pointer-events', 'none')
         .style('opacity', d => heatmapCellOpacity(d.month, d.y))
         .text(d => {
@@ -471,6 +478,12 @@ export function NaturalVentilationExplorer({
           if (!Number.isFinite(d.tempC)) return '';
           return `${Math.round(convertTemp(d.tempC))}`;
         });
+      fitHeatmapCellLabels(
+        cellLabels,
+        d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width,
+        type.cellValuePx,
+        renderScale
+      );
     }
 
     if (monthFilterIsPartial(filter) || hourFilterIsPartial(filter)) {
@@ -501,15 +514,15 @@ export function NaturalVentilationExplorer({
       .attr('class', 'heatmap-hour-labels')
       .attr('pointer-events', 'none')
       .selectAll('text')
-      .data(d3.range(0, 24))
+      .data(d3.range(0, 24, type.hourStride))
       .join('text')
-      .attr('x', -4)
+      .attr('x', -5)
       .attr('y', h => hourRowCenter(h))
       .attr('dominant-baseline', 'middle')
       .attr('text-anchor', 'end')
-      .style('fill', heatmapTextColor)
+      .style('fill', axisInk)
       .style('font-weight', '500')
-      .style('font-size', `${heatmapHourAxisPx}px`)
+      .style('font-size', `${type.hourPx}px`)
       .text(h => formatHourRow(h));
 
     const isSelected = (d: NvDataRow) => rowPassesGlobalFilters(d, filter);
@@ -684,15 +697,11 @@ export function NaturalVentilationExplorer({
               maxSelected: ratio,
             })
           );
+        const baselinePx = yScaleBar.range()[0];
         group
-          .append('rect')
-          .attr('x', xPos)
-          .attr('y', topY)
-          .attr('width', barW)
-          .attr('height', barH)
-          .style('fill', comfortFill)
-          .attr('rx', pillR)
-          .attr('ry', pillR);
+          .append('path')
+          .attr('d', explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
+          .style('fill', comfortFill);
       } else {
         const val = d.valueSelected!;
         const minVal = d.minSelected !== undefined && d.minSelected !== null ? d.minSelected : val;
@@ -707,16 +716,12 @@ export function NaturalVentilationExplorer({
           minSelected: minVal,
           maxSelected: maxVal,
         });
+        const baselinePx = yScaleBar.range()[0];
         group
-          .append('rect')
-          .attr('x', xPos)
-          .attr('y', topY)
-          .attr('width', barW)
-          .attr('height', barH)
+          .append('path')
+          .attr('d', explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
           .style('fill', chartBarFill ?? getFillColor(barFillVal, d.suitableRatioSelected ?? 0))
-          .style('opacity', 0.6)
-          .attr('rx', pillR)
-          .attr('ry', pillR);
+          .style('opacity', 0.6);
 
         group
           .append('circle')
@@ -751,9 +756,9 @@ export function NaturalVentilationExplorer({
       .call(g =>
         g
           .selectAll('.tick text')
-          .style('fill', heatmapTextColor)
+          .style('fill', axisInk)
           .style('font-weight', '500')
-          .style('font-size', `${heatmapMonthAxisPx}px`)
+          .style('font-size', `${type.axisPx}px`)
       );
 
     const monthCenters = explorerMonthLabelCenterDays();
@@ -773,9 +778,9 @@ export function NaturalVentilationExplorer({
       .attr('y', monthAxisBand / 2)
       .attr('dominant-baseline', 'middle')
       .attr('text-anchor', 'middle')
-      .style('fill', heatmapTextColor)
-      .style('font-weight', '500')
-      .style('font-size', `${heatmapMonthAxisPx}px`)
+      .style('fill', axisInk)
+      .style('font-weight', '600')
+      .style('font-size', `${type.monthPx}px`)
       .text(d => d.label);
   }, [
     nvData,
@@ -784,6 +789,8 @@ export function NaturalVentilationExplorer({
     colorMode,
     filter,
     dimensions.width,
+    renderScale,
+    svgHeight,
     unitSystem,
     heatmapTextColor,
     theme,
@@ -806,12 +813,12 @@ export function NaturalVentilationExplorer({
       }`}
     >
       <div
-        className={`flex flex-col ${exportMode ? '' : 'border-b'} ${
+        className={`flex flex-col ${
           exportMode
             ? 'bg-white'
             : theme === 'dark'
-              ? 'border-gray-700 bg-gray-800'
-              : 'border-gray-100 bg-white'
+              ? 'bg-gray-800'
+              : 'bg-white'
         } ${CHART_TOOLBAR_HEADER_PAD}`}
       >
         <div className="flex min-w-0 flex-col overflow-visible">
@@ -861,13 +868,10 @@ export function NaturalVentilationExplorer({
                     <button
                       type="button"
                       onClick={onRemove}
-                      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full p-0 shadow-hard-sm transition-colors ${
-                        theme === 'dark'
-                          ? 'text-gray-400 hover:bg-red-900/30 hover:text-red-400'
-                          : 'text-gray-400 hover:bg-red-50 hover:text-red-500'
-                      }`}
+                      className={chartToolbarRemoveButtonClass(theme)}
+                      title="Remove chart"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -887,15 +891,7 @@ export function NaturalVentilationExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-blue-900/40 text-blue-400'
-                                : 'bg-blue-50 text-blue-600'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats, 'blue')}
                           title="Statistics"
                         >
                           Stats
@@ -904,18 +900,10 @@ export function NaturalVentilationExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-blue-900/40 text-blue-400'
-                                : 'bg-blue-50 text-blue-600'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings, 'blue')}
                           title="Chart settings"
                         >
-                          <Settings2 className="h-3 w-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -937,17 +925,17 @@ export function NaturalVentilationExplorer({
       >
         <div className="mb-3 space-y-2">
           <div
-            className={`rounded-md p-3 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}
+            className={`rounded-xl p-3 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}
           >
             <div
-              className={`mb-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+              className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
               }`}
             >
               Suitable hours (filtered)
             </div>
             <div
-              className={`text-base font-medium tabular-nums ${
+              className={`text-lg font-semibold tabular-nums ${
                 theme === 'dark' ? 'text-white' : 'text-gray-900'
               }`}
             >
@@ -1021,10 +1009,10 @@ export function NaturalVentilationExplorer({
                 }
                 applyPreset(id);
               }}
-              className={`w-full rounded-full border p-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
+              className={`w-full rounded-full border-0 px-3.5 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
                 theme === 'dark'
-                  ? 'border-gray-600 bg-gray-700 text-white'
-                  : 'border-gray-300 bg-white text-gray-900'
+                  ? 'bg-gray-700 text-white'
+                  : 'bg-gray-100 text-gray-900'
               }`}
             >
               {NV_CRITERIA_PRESETS.map(p => (
@@ -1058,10 +1046,10 @@ export function NaturalVentilationExplorer({
                   type="number"
                   value={Math.round(cToDisplay(criteria.tempMinC) * 10) / 10}
                   onChange={e => updateCriteriaTempMin(parseFloat(e.target.value) || 0)}
-                  className={`w-16 rounded-md border px-2 py-1 text-sm ${
+                  className={`w-16 rounded-full border-0 px-3 py-1 text-sm ${
                     theme === 'dark'
-                      ? 'border-gray-600 bg-gray-700 text-white'
-                      : 'border-gray-300 bg-white text-gray-900'
+                      ? 'bg-gray-700 text-white'
+                      : 'bg-gray-100 text-gray-900'
                   }`}
                 />
               </div>
@@ -1088,10 +1076,10 @@ export function NaturalVentilationExplorer({
                   type="number"
                   value={Math.round(cToDisplay(criteria.tempMaxC) * 10) / 10}
                   onChange={e => updateCriteriaTempMax(parseFloat(e.target.value) || 0)}
-                  className={`w-16 rounded-md border px-2 py-1 text-sm ${
+                  className={`w-16 rounded-full border-0 px-3 py-1 text-sm ${
                     theme === 'dark'
-                      ? 'border-gray-600 bg-gray-700 text-white'
-                      : 'border-gray-300 bg-white text-gray-900'
+                      ? 'bg-gray-700 text-white'
+                      : 'bg-gray-100 text-gray-900'
                   }`}
                 />
               </div>
@@ -1118,10 +1106,10 @@ export function NaturalVentilationExplorer({
                   type="number"
                   value={criteria.maxRhPct}
                   onChange={e => updateCriteriaRh(parseFloat(e.target.value) || 0)}
-                  className={`w-16 rounded-md border px-2 py-1 text-sm ${
+                  className={`w-16 rounded-full border-0 px-3 py-1 text-sm ${
                     theme === 'dark'
-                      ? 'border-gray-600 bg-gray-700 text-white'
-                      : 'border-gray-300 bg-white text-gray-900'
+                      ? 'bg-gray-700 text-white'
+                      : 'bg-gray-100 text-gray-900'
                   }`}
                 />
               </div>
@@ -1139,10 +1127,10 @@ export function NaturalVentilationExplorer({
             <select
               value={colorMode}
               onChange={e => setColorMode(e.target.value as 'suitableHours' | 'temperature')}
-              className={`w-full rounded-full border p-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
+              className={`w-full rounded-full border-0 px-3.5 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
                 theme === 'dark'
-                  ? 'border-gray-600 bg-gray-700 text-white'
-                  : 'border-gray-300 bg-white text-gray-900'
+                  ? 'bg-gray-700 text-white'
+                  : 'bg-gray-100 text-gray-900'
               }`}
             >
               <option value="suitableHours">Suitable hours (%)</option>
@@ -1159,7 +1147,7 @@ export function NaturalVentilationExplorer({
             highColor={NATURAL_VENTILATION_SUITABLE_BLUE_HEX}
           />
           {legendFootnote ? (
-            <p className="m-0 mt-0.5 text-[9px] font-normal leading-snug text-gray-400 dark:text-gray-500">
+            <p className={LEGEND_FOOTNOTE_CLASS}>
               {legendFootnote}
             </p>
           ) : null}

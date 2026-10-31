@@ -21,16 +21,18 @@ import { convertUnit, convertValue, UNIT_C, UNIT_F } from '../lib/unitConversion
 import { utciGradientExtentFromRows } from '../lib/utciModel';
 import { GRADIENTS } from '../lib/constants';
 import { DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
+import { sequentialHeatmapColorFn } from '../lib/heatmapColorAdjust';
 import type { GradientDef } from './InteractiveLegend';
 import { InteractiveLegend } from './InteractiveLegend';
-import {
-  UtciCategoryLegendStrip,
-  UtciComfortTimeLegendStrip,
-  UTCI_LEGEND_FONT_SCALE,
-} from './UtciExplorer';
+import { UtciCategoryLegendStrip, UtciComfortTimeLegendStrip } from './UtciExplorer';
 import { ChartTypeMenu } from './ChartTypeMenu';
 import { AggregationToolbar } from './AggregationToolbar';
 import { VariableChartSelect } from './VariableChartSelect';
+import {
+  chartToolbarChipButtonClass,
+  chartToolbarRoundButtonClass,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+} from '../lib/chartToolbarLayout';
 
 interface ComparisonModeLayoutProps {
   files: ParsedEPW[];
@@ -96,11 +98,11 @@ function PillSelect({
   const base =
     tone === 'baseline'
       ? theme === 'dark'
-        ? 'border-gray-600 bg-gray-700/55 text-gray-100'
-        : 'border-gray-300 bg-gray-200/90 text-gray-900'
+        ? 'bg-gray-700 text-gray-100'
+        : 'bg-gray-100 text-gray-900'
       : theme === 'dark'
-        ? 'border-gray-700 bg-gray-950 text-gray-50'
-        : 'border-gray-800 bg-gray-950 text-white';
+        ? 'bg-gray-950 text-gray-50'
+        : 'bg-gray-900 text-white';
 
   const caret =
     tone === 'baseline'
@@ -150,10 +152,10 @@ function PillSelect({
 
   return (
     <label
-      className={`mx-auto flex w-full max-w-[min(100%,280px)] flex-col items-center justify-center gap-0.5 rounded-full border px-2 py-0.5 text-center shadow-sm ${base}`}
+      className={`mx-auto flex w-full max-w-[min(100%,320px)] flex-col items-center justify-center gap-1 rounded-full px-4 py-1.5 text-center glow-md ${base}`}
     >
       <span
-        className={`block w-full text-center text-[7px] font-bold uppercase leading-none tracking-wider ${
+        className={`block w-full text-center text-[10px] font-bold uppercase leading-none tracking-wider ${
           tone === 'baseline'
             ? theme === 'dark'
               ? 'text-gray-400'
@@ -168,7 +170,7 @@ function PillSelect({
       <div ref={rowRef} className="relative flex w-full min-w-0 items-center justify-center">
         <span
           ref={measureRef}
-          className={`pointer-events-none absolute left-0 top-0 -z-10 whitespace-nowrap opacity-0 text-[10px] font-semibold ${
+          className={`pointer-events-none absolute left-0 top-0 -z-10 whitespace-nowrap opacity-0 text-sm font-semibold ${
             tone === 'baseline'
               ? theme === 'dark'
                 ? 'text-gray-100'
@@ -184,7 +186,7 @@ function PillSelect({
         </span>
         <span
           ref={gapRef}
-          className={`pointer-events-none absolute left-0 top-0 -z-10 whitespace-pre opacity-0 text-[10px] font-semibold ${
+          className={`pointer-events-none absolute left-0 top-0 -z-10 whitespace-pre opacity-0 text-sm font-semibold ${
             tone === 'baseline'
               ? theme === 'dark'
                 ? 'text-gray-100'
@@ -205,7 +207,7 @@ function PillSelect({
           <select
             value={value}
             onChange={e => onChange(Number(e.target.value))}
-            className={`m-0 block h-auto min-h-0 w-full cursor-pointer appearance-none truncate rounded-none border-0 bg-transparent py-0 pl-0 pr-0 text-center text-[10px] font-semibold leading-none outline-none ring-0 focus:ring-0 ${
+            className={`m-0 block h-auto min-h-0 w-full cursor-pointer appearance-none truncate !rounded-none border-0 bg-transparent py-0 pl-0 pr-0 text-center text-sm font-semibold leading-none outline-none ring-0 focus:ring-0 ${
               tone === 'baseline'
                 ? theme === 'dark'
                   ? 'text-gray-100'
@@ -224,10 +226,10 @@ function PillSelect({
             ))}
           </select>
           <span
-            className={`pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 text-[8px] leading-none opacity-70 ${caret}`}
+            className={`pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 text-[11px] leading-none opacity-80 ${caret}`}
             aria-hidden
           >
-            â–¾
+            ▾
           </span>
         </div>
       </div>
@@ -248,12 +250,8 @@ function CompareCardShell({
 }) {
   return (
     <div
-      className={`flex min-h-0 flex-col overflow-hidden rounded-2xl border shadow-hard-lg ${className} ${
-        exportMode
-          ? 'border-gray-200 bg-white'
-          : theme === 'dark'
-            ? 'border-gray-700 bg-gray-800'
-            : 'border-gray-200 bg-white'
+      className={`@container flex min-h-0 flex-col overflow-hidden rounded-2xl ${className} ${
+        exportMode ? 'bg-white' : theme === 'dark' ? 'bg-gray-800 glow-lg' : 'bg-white glow-lg'
       }`}
     >
       {children}
@@ -282,8 +280,8 @@ function PairSharedToolbar({
   if (exportMode) return null;
   return (
     <div
-      className={`shrink-0 border-b px-1.5 py-1.5 ${
-        theme === 'dark' ? 'border-gray-700 bg-gray-800/95' : 'border-gray-200 bg-gray-50/90'
+      className={`m-1.5 mb-0 shrink-0 rounded-2xl px-2 py-1 ${
+        theme === 'dark' ? 'bg-gray-900/40' : 'bg-gray-50'
       }`}
     >
       {children}
@@ -547,6 +545,14 @@ export function ComparisonModeLayout({
       variableLegendDomain(baseline.variables, roseVar, unitSystem, false, baseline.data, undefined),
     [baseline.variables, baseline.data, roseVar, unitSystem]
   );
+  /** Same six speed classes the roses draw, so the shared legend is stepped like the single-card one. */
+  const rosePairBandFills = useMemo(() => {
+    const gradientDef = gradients.find(g => g.id === roseGrad) || gradients[0];
+    const { colorVarDef, cMin, cMax } = rosePairLegend;
+    const fill = sequentialHeatmapColorFn(gradientDef.colors, colorVarDef, cMin, cMax);
+    const bands = 6;
+    return Array.from({ length: bands }, (_, i) => fill(cMin + ((cMax - cMin) * (i + 0.5)) / bands));
+  }, [gradients, roseGrad, rosePairLegend]);
 
   const utciExtentC = useMemo(
     () => utciGradientExtentFromRows(baseline.data),
@@ -565,7 +571,7 @@ export function ComparisonModeLayout({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden lg:overflow-hidden lg:flex-row lg:gap-4">
-      <aside className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden lg:w-1/2 lg:min-w-0 lg:flex-none">
+      <aside className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden p-1.5 lg:w-1/2 lg:min-w-0 lg:flex-none">
         <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-0 flex-1">
           {renderChart(
             { id: 'diff-explorer', type: 'explorer' },
@@ -578,11 +584,9 @@ export function ComparisonModeLayout({
         </CompareCardShell>
       </aside>
 
-      <section className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-3 overflow-visible pb-2 pr-0.5 lg:w-1/2 lg:flex-none lg:overflow-y-auto lg:overflow-x-hidden">
+      <section className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-3 overflow-visible px-1.5 pb-2 lg:w-1/2 lg:flex-none lg:overflow-y-auto lg:overflow-x-hidden">
         <div
-          className={`z-10 -mx-0.5 mb-0.5 grid shrink-0 grid-cols-2 gap-2 px-0.5 pb-1 pt-0.5 sm:gap-3 lg:sticky lg:top-0 ${
-            theme === 'dark' ? 'border-b border-gray-800/50 bg-transparent' : 'border-b border-gray-200/60 bg-transparent'
-          }`}
+          className="z-10 -mx-0.5 mb-0.5 grid shrink-0 grid-cols-2 gap-2 px-0.5 pb-1.5 pt-1 sm:gap-3 lg:sticky lg:top-0"
         >
           <div className="flex min-w-0 justify-center">
             <PillSelect
@@ -605,7 +609,7 @@ export function ComparisonModeLayout({
             />
           </div>
         </div>
-        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[280px] sm:min-h-[300px]">
+        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[340px] shrink-0 sm:min-h-[400px]">
           <PairSharedToolbar theme={theme} exportMode={exportMode}>
             <div className="flex min-h-0 min-w-0 flex-col gap-2">
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -661,33 +665,17 @@ export function ComparisonModeLayout({
                       <button
                         type="button"
                         onClick={() => setSunStats(v => !v)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                          sunStats
-                            ? theme === 'dark'
-                              ? 'bg-gray-700/90 text-gray-200'
-                              : 'bg-gray-100 text-gray-800'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarChipButtonClass(theme, sunStats)}
                       >
                         Stats
                       </button>
                       <button
                         type="button"
                         onClick={() => setSunSettings(v => !v)}
-                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                          sunSettings
-                            ? theme === 'dark'
-                              ? 'bg-gray-700/90 text-gray-200'
-                              : 'bg-gray-100 text-gray-800'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarRoundButtonClass(theme, sunSettings)}
                         title="Chart settings"
                       >
-                        <Settings2 className="h-3 w-3" />
+                        <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                       </button>
                     </>
                   }
@@ -709,7 +697,7 @@ export function ComparisonModeLayout({
           )}
         </CompareCardShell>
 
-        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[300px] sm:min-h-[360px]">
+        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[360px] shrink-0 sm:min-h-[420px]">
           <PairSharedToolbar theme={theme} exportMode={exportMode}>
             <div className="flex min-h-0 min-w-0 flex-col gap-2">
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -748,33 +736,17 @@ export function ComparisonModeLayout({
                     <button
                       type="button"
                       onClick={() => setExpStats(v => !v)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                          expStats
-                            ? theme === 'dark'
-                              ? 'bg-gray-700/90 text-gray-200'
-                              : 'bg-gray-100 text-gray-800'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarChipButtonClass(theme, expStats)}
                       >
                         Stats
                       </button>
                       <button
                         type="button"
                         onClick={() => setExpSettings(v => !v)}
-                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                          expSettings
-                            ? theme === 'dark'
-                              ? 'bg-gray-700/90 text-gray-200'
-                              : 'bg-gray-100 text-gray-800'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarRoundButtonClass(theme, expSettings)}
                         title="Chart settings"
                       >
-                        <Settings2 className="h-3 w-3" />
+                        <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                       </button>
                     </>
                   }
@@ -782,10 +754,10 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
               <div
                 ref={explorerLegendTrack.leftPaneRef}
-                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]"
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
               >
                 {renderChart(
                   { id: 'cmp-explorer-l', type: 'explorer', variable: 'dryBulbTemperature' },
@@ -803,7 +775,7 @@ export function ComparisonModeLayout({
                   }
                 )}
               </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]">
                 {renderChart(
                   { id: 'cmp-explorer-r', type: 'explorer', variable: 'dryBulbTemperature' },
                   compare,
@@ -822,8 +794,8 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
-                theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+              className={`mx-auto w-full max-w-full shrink-0 px-2.5 pt-1 pb-2 ${
+                theme === 'dark' ? 'bg-gray-800' : 'bg-white'
               }`}
               style={
                 explorerLegendTrack.legendTrackPx != null
@@ -847,7 +819,7 @@ export function ComparisonModeLayout({
           </div>
         </CompareCardShell>
 
-        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[300px] sm:min-h-[360px]">
+        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[360px] shrink-0 sm:min-h-[420px]">
           <PairSharedToolbar theme={theme} exportMode={exportMode}>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <ChartTypeMenu
@@ -859,7 +831,7 @@ export function ComparisonModeLayout({
                 display="icon"
               />
               <span
-                className={`text-[10px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
+                className={`text-[11px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
               >
                 Outdoor Comfort (UTCI)
               </span>
@@ -873,33 +845,17 @@ export function ComparisonModeLayout({
                       <button
                         type="button"
                         onClick={() => setUtciStats(v => !v)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                          utciStats
-                            ? theme === 'dark'
-                              ? 'bg-blue-900/40 text-blue-400'
-                              : 'bg-blue-50 text-blue-600'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarChipButtonClass(theme, utciStats, 'blue')}
                       >
                         Stats
                       </button>
                       <button
                         type="button"
                         onClick={() => setUtciSettings(v => !v)}
-                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                          utciSettings
-                            ? theme === 'dark'
-                              ? 'bg-blue-900/40 text-blue-400'
-                              : 'bg-blue-50 text-blue-600'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarRoundButtonClass(theme, utciSettings, 'blue')}
                         title="Chart settings"
                       >
-                        <Settings2 className="h-3 w-3" />
+                        <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                       </button>
                     </>
                   }
@@ -908,10 +864,10 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
               <div
                 ref={utciLegendTrack.leftPaneRef}
-                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]"
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
               >
                 {renderChart({ id: 'cmp-utci-l', type: 'utci' }, baseline, undefined, false, false, {
                   comparePane: 'primary',
@@ -922,7 +878,7 @@ export function ComparisonModeLayout({
                   utciShared,
                 })}
               </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]">
                 {renderChart({ id: 'cmp-utci-r', type: 'utci' }, compare, undefined, false, false, {
                   comparePane: 'secondary',
                   paneCity: compare.metadata.city,
@@ -934,8 +890,8 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
-                theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+              className={`mx-auto w-full max-w-full shrink-0 px-2.5 pt-1 pb-2 ${
+                theme === 'dark' ? 'bg-gray-800' : 'bg-white'
               }`}
               style={
                 utciLegendTrack.legendTrackPx != null ? { width: utciLegendTrack.legendTrackPx } : undefined
@@ -957,7 +913,6 @@ export function ComparisonModeLayout({
                   setGradientId={setUtciGrad}
                   gradients={gradients}
                   theme={theme}
-                  fontScale={UTCI_LEGEND_FONT_SCALE}
                 />
               ) : (
                 <UtciComfortTimeLegendStrip theme={theme} />
@@ -966,7 +921,7 @@ export function ComparisonModeLayout({
           </div>
         </CompareCardShell>
 
-        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[300px] sm:min-h-[360px]">
+        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[360px] shrink-0 sm:min-h-[420px]">
           <PairSharedToolbar theme={theme} exportMode={exportMode}>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <ChartTypeMenu
@@ -978,7 +933,7 @@ export function ComparisonModeLayout({
                 display="icon"
               />
               <span
-                className={`text-[10px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
+                className={`text-[11px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
               >
                 Wind Explorer
               </span>
@@ -1009,33 +964,17 @@ export function ComparisonModeLayout({
                       <button
                         type="button"
                         onClick={() => setWindStats(v => !v)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                          windStats
-                            ? theme === 'dark'
-                              ? 'bg-gray-700/90 text-gray-200'
-                              : 'bg-gray-100 text-gray-800'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarChipButtonClass(theme, windStats)}
                       >
                         Stats
                       </button>
                       <button
                         type="button"
                         onClick={() => setWindSettings(v => !v)}
-                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                          windSettings
-                            ? theme === 'dark'
-                              ? 'bg-gray-700/90 text-gray-200'
-                              : 'bg-gray-100 text-gray-800'
-                            : theme === 'dark'
-                              ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                              : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                        }`}
+                        className={chartToolbarRoundButtonClass(theme, windSettings)}
                         title="Chart settings"
                       >
-                        <Settings2 className="h-3 w-3" />
+                        <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                       </button>
                     </>
                   }
@@ -1044,10 +983,10 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
               <div
                 ref={windLegendTrack.leftPaneRef}
-                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]"
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
               >
                 {renderChart({ id: 'cmp-wind-l', type: 'wind' }, baseline, undefined, false, false, {
                   comparePane: 'primary',
@@ -1058,7 +997,7 @@ export function ComparisonModeLayout({
                   windShared,
                 })}
               </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]">
                 {renderChart({ id: 'cmp-wind-r', type: 'wind' }, compare, undefined, false, false, {
                   comparePane: 'secondary',
                   paneCity: compare.metadata.city,
@@ -1070,8 +1009,8 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
-                theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+              className={`mx-auto w-full max-w-full shrink-0 px-2.5 pt-1 pb-2 ${
+                theme === 'dark' ? 'bg-gray-800' : 'bg-white'
               }`}
               style={
                 windLegendTrack.legendTrackPx != null ? { width: windLegendTrack.legendTrackPx } : undefined
@@ -1093,7 +1032,7 @@ export function ComparisonModeLayout({
           </div>
         </CompareCardShell>
 
-        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[300px] sm:min-h-[360px]">
+        <CompareCardShell theme={theme} exportMode={exportMode} className="min-h-[360px] shrink-0 sm:min-h-[420px]">
           <PairSharedToolbar theme={theme} exportMode={exportMode}>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <ChartTypeMenu
@@ -1105,7 +1044,7 @@ export function ComparisonModeLayout({
                 display="icon"
               />
               <span
-                className={`text-[10px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
+                className={`text-[11px] font-semibold uppercase tracking-wide ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}
               >
                 Wind Rose
               </span>
@@ -1126,15 +1065,13 @@ export function ComparisonModeLayout({
                   </optgroup>
                 ))}
               </VariableChartSelect>
-              <label className={`flex items-center gap-1 text-[10px] font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
+              <label className={`flex items-center gap-1.5 text-xs font-semibold ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
                 <span className="whitespace-nowrap">Bins</span>
                 <select
                   value={roseBins}
                   onChange={e => setRoseBins(Number(e.target.value))}
-                  className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                    theme === 'dark'
-                      ? 'border-gray-600 bg-gray-700 text-gray-100'
-                      : 'border-gray-200 bg-white text-gray-800'
+                  className={`h-7 rounded-full px-2.5 text-xs font-semibold glow-sm ${
+                    theme === 'dark' ? 'bg-gray-700 text-gray-100' : 'bg-white text-gray-800'
                   }`}
                 >
                   <option value={8}>8</option>
@@ -1146,26 +1083,18 @@ export function ComparisonModeLayout({
               <button
                 type="button"
                 onClick={() => setRoseSettings(v => !v)}
-                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                  roseSettings
-                    ? theme === 'dark'
-                      ? 'bg-blue-900/40 text-blue-400'
-                      : 'bg-blue-50 text-blue-600'
-                    : theme === 'dark'
-                      ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                      : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                }`}
+                className={chartToolbarRoundButtonClass(theme, roseSettings, 'blue')}
                 title="Chart settings"
               >
-                <Settings2 className="h-3 w-3" />
+                <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
               </button>
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden divide-x divide-gray-200 dark:divide-gray-700">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
               <div
                 ref={roseLegendTrack.leftPaneRef}
-                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]"
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
               >
                 {renderChart({ id: 'cmp-rose-l', type: 'windrose' }, baseline, undefined, false, false, {
                   comparePane: 'primary',
@@ -1176,7 +1105,7 @@ export function ComparisonModeLayout({
                   windRoseShared,
                 })}
               </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[280px]">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]">
                 {renderChart({ id: 'cmp-rose-r', type: 'windrose' }, compare, undefined, false, false, {
                   comparePane: 'secondary',
                   paneCity: compare.metadata.city,
@@ -1188,8 +1117,8 @@ export function ComparisonModeLayout({
               </div>
             </div>
             <div
-              className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
-                theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+              className={`mx-auto w-full max-w-full shrink-0 px-2.5 pt-1 pb-2 ${
+                theme === 'dark' ? 'bg-gray-800' : 'bg-white'
               }`}
               style={
                 roseLegendTrack.legendTrackPx != null ? { width: roseLegendTrack.legendTrackPx } : undefined
@@ -1206,6 +1135,7 @@ export function ComparisonModeLayout({
                 setGradientId={setRoseGrad}
                 gradients={gradients}
                 theme={theme}
+                stepFills={rosePairBandFills}
               />
             </div>
           </div>

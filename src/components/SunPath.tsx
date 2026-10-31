@@ -21,7 +21,16 @@ import {
   CHART_TOOLBAR_EXPORT_STACKED_ROW_CLASS,
   CHART_TOOLBAR_HEADER_PAD,
   CHART_TOOLBAR_ROW_CLASS,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  chartToolbarChipButtonClass,
+  chartToolbarRemoveButtonClass,
+  chartToolbarRevealClassFor,
+  chartToolbarRoundButtonClass,
 } from '../lib/chartToolbarLayout';
+import { EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS } from '../lib/explorerChartSvgLayout';
+import { CHART_TEXT_AUTO, chartAxisInk } from '../lib/chartInk';
+import { epwEquivalentHourKey, indexEpwByEquivalentHour, isFiniteNumber } from '../lib/epwClockMatch';
+import { ringLabelGapPx, ringLabelPlacement, ringLabelReserve } from '../lib/ringLabels';
 import { ExportHeaderCaption, exportCaptionLinesWithUnit, exportCaptionShort } from './ExportHeaderCaption';
 import { CardModal } from './CardModal';
 import { VariableChartSelect } from './VariableChartSelect';
@@ -50,7 +59,7 @@ function meanEpwColumn(rows: EPWDataRow[], col: string): number {
     const v = r[col] as unknown;
     if (typeof v === 'number' && !Number.isNaN(v)) vals.push(v);
   }
-  return vals.length ? (d3.mean(vals) ?? 0) : 0;
+  return vals.length ? (d3.mean(vals) ?? NaN) : NaN;
 }
 
 interface SunPathProps {
@@ -227,9 +236,7 @@ export function SunPath({
   const isMobile = useIsMobileMaxSm();
   /** Mobile cannot hover; tutorial mode also pins the strip. */
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = expandChromeStrip
-    ? 'overflow-hidden transition-[max-height,opacity] duration-200 ease-out max-h-[52px] opacity-100 pointer-events-auto'
-    : 'overflow-hidden transition-[max-height,opacity] duration-200 ease-out max-h-0 opacity-0 pointer-events-none group-hover:max-h-[48px] group-hover:opacity-100 group-hover:pointer-events-auto focus-within:max-h-[48px] focus-within:opacity-100 focus-within:pointer-events-auto';
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
   const removeBtnRevealClass = isMobile
     ? 'absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-100 pointer-events-auto'
     : 'absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity duration-200 ease-out group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto';
@@ -346,12 +353,14 @@ const filteredCompareData = (compareData || []).filter(d => {
     const unit = convertUnit(def.unit);
 
     if (showDifference && compareData) {
-      const diffs = data.map((d, i) => {
-        const primaryVal = d[colorVar] as number;
-        const compareVal = compareData[i]?.[colorVar] as number;
-        if (primaryVal === null || compareVal === null) return 0;
-        return compareVal - primaryVal;
-      });
+      const compareByHour = indexEpwByEquivalentHour(compareData);
+      const diffs: number[] = [];
+      for (const row of data) {
+        const primaryVal = row[colorVar] as unknown;
+        const compareVal = compareByHour.get(epwEquivalentHourKey(row))?.[colorVar] as unknown;
+        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) continue;
+        diffs.push(compareVal - primaryVal);
+      }
       const bound = symmetricDiffBound(diffs);
       const half = bound > 0 ? bound : 1;
       min = convertValue(-half, def.unit, true);
@@ -380,13 +389,11 @@ const filteredCompareData = (compareData || []).filter(d => {
 
   const stats = (() => {
     if (showDifference && compareData) {
+      const compareByHour = indexEpwByEquivalentHour(compareData);
       const diffs = filteredData.map(d => {
-        const idx = data.findIndex(r => r.date.getTime() === d.date.getTime());
         const primaryVal = d[colorVar] as number;
-        const compareVal = idx >= 0 ? (compareData[idx]?.[colorVar] as number) : undefined;
-        if (primaryVal === null || primaryVal === undefined || compareVal === null || compareVal === undefined) {
-          return null;
-        }
+        const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
+        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return null;
         return compareVal - primaryVal;
       }).filter(v => v !== null) as number[];
 
@@ -413,6 +420,8 @@ const filteredCompareData = (compareData || []).filter(d => {
     const { w: pw, h: ph } = slotSize.primary;
     if (pw === 0 || ph === 0) return;
 
+    const compareByHour = compareData ? indexEpwByEquivalentHour(compareData) : null;
+
     const renderChart = (
       svgEl: SVGSVGElement,
       currentData: any[],
@@ -437,22 +446,42 @@ const filteredCompareData = (compareData || []).filter(d => {
     const rMaxPxPoints = Math.max(rMinPx + 0.2, rPxTweak * rMaxUser * sizeScale);
 
     const rMaxPxLayout = Math.min(28 * sizeScale, Math.max(4 * sizeScale, rPxTweak * rMaxUser * sizeScale));
-    const labelRim = 15 * sizeScale;
-    const titleReserve = title ? 22 * sizeScale : 0;
-    const sideReserve = 8 * sizeScale;
+
+    /**
+     * viewBox == slot px, so these are rendered sizes. The dial is the subject: its labels track it
+     * between a legibility floor and a cap, with the cardinal points as the only emphasised text.
+     */
+    const dial = Math.min(width, height);
+    const clampPx = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+    const azimuthLabelCompassPx = clampPx(dial * 0.04, 9, 13);
+    const azimuthLabelDegPx = clampPx(dial * 0.03, 7.5, 10.5);
+    const altitudeLabelPx = clampPx(dial * 0.03, 7, 10);
+    const chartTitlePx = clampPx(dial * 0.032, 9, 12.5);
+    /** Rim labels share one placement rule with the wind rose (see `ringLabels.ts`). */
+    const ringGap = ringLabelGapPx(dial);
+    const rim = ringLabelReserve(
+      ringGap,
+      Math.max(azimuthLabelDegPx * 2.3, azimuthLabelCompassPx * 0.95),
+      azimuthLabelCompassPx
+    );
+    const titleReserve = title ? chartTitlePx * 1.8 : 0;
+    const sideReserve = 4 * sizeScale;
     const rawRadius = Math.min(
-      width / 2 - sideReserve - labelRim - rMaxPxLayout * 0.35,
-      height / 2 - labelRim - rMaxPxLayout * 0.35 - titleReserve / 2
+      width / 2 - sideReserve - rim.x - rMaxPxLayout * 0.35,
+      height / 2 - rim.y - rMaxPxLayout * 0.35 - titleReserve / 2
     );
     const maxRadius = Math.min(width, height) / 2 - 4 * sizeScale;
     const radius = Math.max(24 * sizeScale, Math.min(rawRadius, maxRadius));
-
-    /** Rim labels scale with the plotted disk (`radius`), not only slot min-edge / refChartDim — avoids oversized type on compact cards. */
-    const azimuthLabelCompassPx = Math.max(6.5, Math.min(13, radius * 0.072));
-    const azimuthLabelDegPx = Math.max(6, Math.min(10.5, radius * 0.056));
-    const altitudeLabelPx = Math.max(6, Math.min(10, radius * 0.048));
-    const pathKeyLabelPx = Math.max(6, Math.min(9.5, radius * 0.045));
-    const chartTitlePx = Math.max(9, Math.min(12.5, Math.min(width, height) * 0.032));
+    /** Small dials thin out labels rather than shrinking them below the legibility floors above. */
+    const altitudeRingGap = radius / 6;
+    const altitudeLabelStep =
+      altitudeRingGap >= altitudeLabelPx * 1.5 ? 15 : altitudeRingGap * 2 >= altitudeLabelPx * 1.5 ? 30 : 0;
+    const showAzimuthDegrees = (2 * Math.PI * (radius + ringGap)) / 12 >= azimuthLabelDegPx * 3.2;
+    const axisInk = chartAxisInk(heatmapTextColor, theme);
+    /** Grid annotations (altitude rings, azimuth degrees) sit a step behind the cardinal points. */
+    const gridInk =
+      heatmapTextColor === CHART_TEXT_AUTO ? (theme === 'dark' ? '#9ca3af' : '#6b7280') : axisInk;
+    const labelHalo = exportMode || theme !== 'dark' ? '#ffffff' : '#1f2937';
 
     const svg = d3.select(svgEl);
     svg.selectAll("*").remove();
@@ -476,18 +505,21 @@ const filteredCompareData = (compareData || []).filter(d => {
         const azimuth = (pos.azimuth * 180 / Math.PI + 180) % 360; // Convert to 0=N, 90=E
         const t = d.date.getTime();
         const primaryRow = (data.find(r => r.date.getTime() === t) as EPWDataRow | undefined) ?? (data[i] as EPWDataRow | undefined);
-        const compareRow =
-          compareData &&
-          ((compareData.find(c => c.date.getTime() === t) as EPWDataRow | undefined) ?? (compareData[i] as EPWDataRow | undefined));
+        const compareRow = compareByHour?.get(epwEquivalentHourKey(d));
         
         let val: number;
         let rVal: number;
         if (showDifference && compareData && primaryRow && compareRow) {
           const primaryVal = primaryRow[colorVar] as number;
           const compareVal = compareRow[colorVar] as number;
-          val = convertValue(compareVal - primaryVal, colorVarDef.unit, true);
+          if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) {
+            val = NaN;
+          } else {
+            val = convertValue(compareVal - primaryVal, colorVarDef.unit, true);
+          }
         } else {
-          val = convertValue(d[colorVar] as number, colorVarDef.unit);
+          const raw = d[colorVar] as number;
+          val = isFiniteNumber(raw) ? convertValue(raw, colorVarDef.unit) : NaN;
         }
         {
           // Difference mode: radii follow the **primary** file; otherwise the row on this chart.
@@ -528,13 +560,13 @@ const filteredCompareData = (compareData || []).filter(d => {
             if (showDifference && compareData) {
               const primaryAvg = meanEpwColumn(byDate, colorVar);
               const compareValues = byDate
-                .map(v => {
-                  const idx = data.findIndex(r => r.date.getTime() === v.date.getTime());
-                  return idx >= 0 ? (compareData[idx]?.[colorVar] as number) : null;
-                })
-                .filter((x): x is number => x !== null && !Number.isNaN(x));
-              const compareAvg = d3.mean(compareValues) || 0;
-              val = convertValue(compareAvg - primaryAvg, colorVarDef.unit, true);
+                .map(v => compareByHour?.get(epwEquivalentHourKey(v))?.[colorVar] as number)
+                .filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+              const compareAvg = d3.mean(compareValues);
+              val =
+                Number.isFinite(primaryAvg) && compareAvg != null && Number.isFinite(compareAvg)
+                  ? convertValue(compareAvg - primaryAvg, colorVarDef.unit, true)
+                  : NaN;
               rVal = meanEpwColumn(byDate, radiusVar);
             } else {
               val = convertValue(meanEpwColumn(byDate, colorVar), colorVarDef.unit);
@@ -654,15 +686,19 @@ const filteredCompareData = (compareData || []).filter(d => {
 
     // Altitude labels
     g.selectAll(".altitude-label")
-      .data(altitudes.filter(d => d > 0))
+      .data(altitudes.filter(d => d > 0 && altitudeLabelStep > 0 && d % altitudeLabelStep === 0))
       .join("text")
       .attr("class", "altitude-label")
       .attr("y", d => -rScale(d))
       .attr("dy", "0.35em")
       .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
+      .style("fill", gridInk)
       .style("font-size", `${altitudeLabelPx}px`)
       .style("font-weight", "500")
+      .style("paint-order", "stroke")
+      .style("stroke", labelHalo)
+      .style("stroke-width", "2.5px")
+      .style("stroke-linejoin", "round")
       .text(d => `${d}°`);
 
     // Azimuth lines
@@ -679,23 +715,25 @@ const filteredCompareData = (compareData || []).filter(d => {
 
     // Azimuth labels
     const compass = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
-    const azimuthLabelOutset = Math.max(4, Math.min(13, radius * 0.058));
+    const azimuthLabelRadius = rScale(0) + ringGap;
     g.selectAll(".azimuth-label")
-      .data(azimuths)
+      .data(azimuths.filter(d => showAzimuthDegrees || d in compass))
       .join("text")
       .attr("class", "azimuth-label")
-      .attr("x", d => (rScale(0) + azimuthLabelOutset) * Math.sin(aScale(d)))
-      .attr("y", d => -(rScale(0) + azimuthLabelOutset) * Math.cos(aScale(d)))
-      .attr("dy", "0.35em")
-      .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
-      .style("font-weight", d => (compass[d as keyof typeof compass] ? "600" : "500"))
+      .attr("x", d => azimuthLabelRadius * Math.sin(aScale(d)))
+      .attr("y", d => -azimuthLabelRadius * Math.cos(aScale(d)))
+      .attr("dy", d => ringLabelPlacement(aScale(d)).dy)
+      .attr("text-anchor", d => ringLabelPlacement(aScale(d)).anchor)
+      .style("fill", d => (compass[d as keyof typeof compass] ? axisInk : gridInk))
+      .style("font-weight", d => (compass[d as keyof typeof compass] ? "700" : "500"))
       .style("font-size", d =>
         compass[d as keyof typeof compass] ? `${azimuthLabelCompassPx}px` : `${azimuthLabelDegPx}px`
       )
       .text(d => compass[d as keyof typeof compass] || `${d}°`);
 
     // 3. Draw Sun Path Lines (Solstices and Equinoxes)
+    // The arcs are not labelled on the dial: the legend footnote names them (highest = summer
+    // solstice, lowest = winter solstice) so no text sits on top of the sun positions.
     const year = currentData[0]?.date.getFullYear() || new Date().getFullYear();
     const keyDates = [
       { name: 'Summer Solstice', date: new Date(year, 5, 21) }, // June 21
@@ -747,29 +785,11 @@ const filteredCompareData = (compareData || []).filter(d => {
           .attr("d", lineGenerator)
           .style("fill", "none")
           .style("stroke", theme === 'dark' ? '#6b7280' : '#4b5563')
-          .style("stroke-width", '3px')
+          .style("stroke-width", `${Math.max(1.5, Math.min(3, radius * 0.012))}px`)
           .style("opacity", 0.8)
-          .style("pointer-events", "none");
-      }
-
-      const allPoints = segments.flat();
-      if (allPoints.length > 0) {
-        const highestPoint = allPoints.reduce((prev, cur) => (prev.altitude > cur.altitude ? prev : cur));
-        if (highestPoint.altitude > 0) {
-          g.append("text")
-            .attr("x", rScale(highestPoint.altitude) * Math.sin(aScale(highestPoint.azimuth)))
-            .attr(
-              "y",
-              -rScale(highestPoint.altitude) * Math.cos(aScale(highestPoint.azimuth)) -
-                Math.max(5, radius * 0.052)
-            )
-            .attr("text-anchor", "middle")
-            .style("fill", heatmapTextColor)
-            .style("font-size", `${pathKeyLabelPx}px`)
-            .style("font-weight", "bold")
-            .style("pointer-events", "none")
-            .text(kd.name);
-        }
+          .style("pointer-events", "visibleStroke")
+          .append("title")
+          .text(kd.name);
       }
     });
 
@@ -804,8 +824,6 @@ const filteredCompareData = (compareData || []).filter(d => {
         return `${prefix}${formatEpwStationDateTime(d)}\nAlt: ${d.altitude.toFixed(1)}°\nAz: ${d.azimuth.toFixed(1)}°\n${colorVarDef.name}${showDifference ? ' Diff' : ''}: ${val.toFixed(1)} ${cUnit}`;
       });
 
-
-    
     if (title) {
          const titleMargin = 12 * sizeScale;
          g.append("text")
@@ -813,7 +831,7 @@ const filteredCompareData = (compareData || []).filter(d => {
           .attr("y", -height / 2 + 14 * sizeScale)
           .style("font-size", `${chartTitlePx}px`)
           .style("font-weight", "bold")
-          .style("fill", heatmapTextColor)
+          .style("fill", axisInk)
           .text(title);
     }
   };
@@ -827,7 +845,7 @@ const filteredCompareData = (compareData || []).filter(d => {
   } else {
       renderChart(svgRef.current, data, null, false, pw, ph);
   }
-  }, [metadata, compareMetadata, data, compareData, showDifference, stackedComparison, pairComparisonHorizontal, variables, colorVar, radiusVar, gradientId, radiusMin, radiusMax, aggregation, gradients, filter, slotSize.primary.w, slotSize.primary.h, slotSize.compare.w, slotSize.compare.h, unitSystem, theme, heatmapTextColor, tempFilterEnabled, tempFilterType, helpfulThreshold, harmfulThreshold, colorVarDef, radiusValueExtent]);
+  }, [metadata, compareMetadata, data, compareData, showDifference, stackedComparison, pairComparisonHorizontal, variables, colorVar, radiusVar, gradientId, radiusMin, radiusMax, aggregation, gradients, filter, slotSize.primary.w, slotSize.primary.h, slotSize.compare.w, slotSize.compare.h, unitSystem, theme, exportMode, heatmapTextColor, tempFilterEnabled, tempFilterType, helpfulThreshold, harmfulThreshold, colorVarDef, radiusValueExtent]);
 
   /** Compare page: two-pane sun path — legend under both charts, centered (matches other compare cards). */
   const sunComparePairLegendInFooter = Boolean(
@@ -843,6 +861,7 @@ const filteredCompareData = (compareData || []).filter(d => {
       gradients={gradients}
       theme={theme}
       isDifference={showDifference}
+      footnote="Arcs, high to low: summer solstice, equinox, winter solstice."
     />
   );
 
@@ -855,8 +874,8 @@ const filteredCompareData = (compareData || []).filter(d => {
       
     >
       {(exportMode || !pairSuppressHeader) && (
-      <div className={`flex flex-col ${exportMode ? '' : 'border-b'} ${
-        exportMode ? 'bg-white' : (theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white')
+      <div className={`flex flex-col ${
+        exportMode ? 'bg-white' : (theme === 'dark' ? 'bg-gray-800' : 'bg-white')
       } ${CHART_TOOLBAR_HEADER_PAD}`}>
         <div className="flex flex-col min-w-0">
           {exportMode ? (
@@ -926,9 +945,10 @@ const filteredCompareData = (compareData || []).filter(d => {
                     <button
                       type="button"
                       onClick={onRemove}
-                      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full shadow-hard-sm transition-colors ${theme === 'dark' ? 'text-gray-400 hover:bg-red-900/30 hover:text-red-400' : 'text-gray-400 hover:bg-red-50 hover:text-red-500'}`}
+                      className={chartToolbarRemoveButtonClass(theme)}
+                      title="Remove chart"
                     >
-                      <X className="h-3 w-3" />
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -946,11 +966,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                         type="button"
                         id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                         onClick={() => setShowStats(!showStats)}
-                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                          showStats
-                            ? (theme === 'dark' ? 'bg-gray-700/90 text-gray-200' : 'bg-gray-100 text-gray-800')
-                            : (theme === 'dark' ? 'bg-gray-800 text-gray-400 hover:text-gray-200' : 'bg-gray-50 text-gray-500 hover:text-gray-800')
-                        }`}
+                        className={chartToolbarChipButtonClass(theme, showStats)}
                         title="Statistics"
                       >
                         Stats
@@ -959,14 +975,10 @@ const filteredCompareData = (compareData || []).filter(d => {
                         type="button"
                         id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                         onClick={() => setShowSettings(!showSettings)}
-                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                          showSettings
-                            ? (theme === 'dark' ? 'bg-gray-700/90 text-gray-200' : 'bg-gray-100 text-gray-800')
-                            : (theme === 'dark' ? 'bg-gray-800 text-gray-400 hover:text-gray-200' : 'bg-gray-50 text-gray-500 hover:text-gray-800')
-                        }`}
+                        className={chartToolbarRoundButtonClass(theme, showSettings)}
                         title="Chart settings"
                       >
-                        <Settings2 className="w-3 h-3" />
+                        <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                       </button>
                     </>
                   }
@@ -981,7 +993,7 @@ const filteredCompareData = (compareData || []).filter(d => {
 
       {!sunComparePairLegendInFooter && (
         <div
-          className="w-full min-w-0 flex-shrink-0 px-2 pt-1.5 pb-0.5"
+          className={`${EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS} min-w-0`}
           style={legendTrackPx != null ? { width: legendTrackPx } : undefined}
         >
           {interactiveLegendNode}
@@ -996,21 +1008,21 @@ const filteredCompareData = (compareData || []).filter(d => {
         anchorRef={outerRef as any}
       >
         <div className="grid grid-cols-2 gap-2">
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
           </div>
         </div>
       </CardModal>
@@ -1029,7 +1041,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                 <select
                   value={colorVar}
                   onChange={(e) => setColorVar(e.target.value)}
-                  className={`w-full text-sm rounded-lg focus:ring-gray-500 focus:border-gray-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                  className={`w-full text-sm rounded-full focus:ring-2 focus:ring-gray-400 block px-3.5 py-2.5 transition-all outline-none border-0 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                 >
                   {Object.entries(groupedVariables).map(([category, vars]) => (
                     <optgroup key={category} label={category}>
@@ -1047,7 +1059,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                 <select
                   value={radiusVar}
                   onChange={(e) => setRadiusVar(e.target.value)}
-                  className={`w-full text-sm rounded-lg focus:ring-gray-500 focus:border-gray-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                  className={`w-full text-sm rounded-full focus:ring-2 focus:ring-gray-400 block px-3.5 py-2.5 transition-all outline-none border-0 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                 >
                   {Object.entries(groupedVariables).map(([category, vars]) => (
                     <optgroup key={category} label={category}>
@@ -1069,7 +1081,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                     onChange={(e) => setRadiusMin(e.target.value)}
                     min={1}
                     step={1}
-                    className={`block w-1/2 rounded-full border p-2.5 text-sm outline-none transition-all focus:border-gray-500 focus:ring-gray-500 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                    className={`block w-1/2 rounded-full border-0 px-3.5 py-2.5 text-sm outline-none transition-all focus:ring-2 focus:ring-gray-400 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                     placeholder="1"
                     title="Minimum point radius (logical units, step 1)"
                   />
@@ -1079,7 +1091,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                     onChange={(e) => setRadiusMax(e.target.value)}
                     min={1}
                     step={1}
-                    className={`block w-1/2 rounded-full border p-2.5 text-sm outline-none transition-all focus:border-gray-500 focus:ring-gray-500 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                    className={`block w-1/2 rounded-full border-0 px-3.5 py-2.5 text-sm outline-none transition-all focus:ring-2 focus:ring-gray-400 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                     placeholder="12"
                     title="Maximum point radius (logical units, step 1)"
                   />
@@ -1090,18 +1102,18 @@ const filteredCompareData = (compareData || []).filter(d => {
                   <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
                   <button 
                     onClick={() => setShowGradientModal(true)}
-                    className="text-[10px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
+                    className="text-[11px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
                   >
                     + Create
                   </button>
                 </div>
-                <div className={`flex overflow-x-auto rounded-full border p-1.5 ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+                <div className={`flex overflow-x-auto rounded-full p-1.5 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
                   {paletteGradients.map(g => (
                     <button
                       key={g.id}
                       onClick={() => setGradientId(g.id)}
-                      className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full border-2 transition-all shadow-hard-sm ${
-                        gradientId === g.id ? 'border-gray-700 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
+                      className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full transition-all ${
+                        gradientId === g.id ? 'scale-110 shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_14px_rgba(59,130,246,0.6)]' : 'opacity-85 hover:scale-105 hover:opacity-100'
                       }`}
                       style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
                       title={g.name}
@@ -1110,7 +1122,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                 </div>
               </div>
 
-              <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="space-y-2 pt-3">
                 <div className="flex items-center justify-between">
                   <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                     Temperature Filter
@@ -1122,7 +1134,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                       checked={tempFilterEnabled}
                       onChange={e => setTempFilterEnabled(e.target.checked)}
                     />
-                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-gray-700"></div>
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:shadow-[0_1px_3px_rgba(0,0,0,0.25)] after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-gray-700"></div>
                   </label>
                 </div>
                 
@@ -1131,7 +1143,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                     <select
                       value={tempFilterType}
                       onChange={e => setTempFilterType(e.target.value as any)}
-                      className={`block flex-1 rounded-full border p-2.5 text-sm outline-none transition-all focus:border-gray-500 focus:ring-gray-500 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                      className={`block flex-1 rounded-full border-0 px-3.5 py-2.5 text-sm outline-none transition-all focus:ring-2 focus:ring-gray-400 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                     >
                       <option value="helpful">Helpful (Below)</option>
                       <option value="harmful">Harmful (Above)</option>
@@ -1147,7 +1159,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                             setHarmfulThreshold(Number(e.target.value));
                           }
                         }}
-                        className={`w-full text-sm rounded-lg focus:ring-gray-500 focus:border-gray-500 block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                        className={`w-full text-sm rounded-full focus:ring-2 focus:ring-gray-400 block px-3.5 py-2.5 transition-all outline-none border-0 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                       />
                       <span className={`absolute right-3 top-2.5 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                         {unitSystem === 'imperial' ? '°F' : '°C'}
@@ -1192,8 +1204,8 @@ const filteredCompareData = (compareData || []).filter(d => {
 
       {sunComparePairLegendInFooter && (
         <div
-          className={`mx-auto w-full max-w-full shrink-0 border-t px-1 pt-1.5 pb-1 ${
-            theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+          className={`mx-auto w-full max-w-full shrink-0 px-2.5 pt-1 pb-2 ${
+            theme === 'dark' ? 'bg-gray-800' : 'bg-white'
           }`}
           style={legendTrackPx != null ? { width: legendTrackPx } : undefined}
         >

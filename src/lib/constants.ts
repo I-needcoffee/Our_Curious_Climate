@@ -73,11 +73,11 @@ export const GRADIENTS = [
       '#ef4444', // red
     ],
   },
-  /** Cloud cover (`Cloud Cover_js.html`): white → mid grey for 0–100% cover. */
+  /** Cloud cover: clear is pure white, overcast is a dark gray so the steps stay visible in the legend. */
   {
     id: 'cloud-cover-gray',
     name: 'Sky cover (clear→overcast)',
-    colors: ['#ffffff', '#969696'],
+    colors: ['#ffffff', '#4b5563'],
   },
   { id: 'turbo', name: 'Turbo', colors: ['#30123B', '#4686FB', '#1AE4B6', '#A4FC3C', '#FABA39', '#E4460A', '#7A0403'] },
   { id: 'magma', name: 'Magma', colors: ['#000004', '#3B0F70', '#8C2981', '#DE4968', '#FE9F6D', '#FCFDBF'] },

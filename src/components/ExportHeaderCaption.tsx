@@ -18,21 +18,35 @@ export function exportCaptionLinesWithUnit(
   };
 }
 
-/** Export subtitle: full variable name when header is ≥240px wide; compact line uses category unless it is generic (then the variable name). */
+const EXPORT_TITLE_CLASS =
+  'text-sm font-bold leading-tight text-gray-900 @sm:text-[15px] @2xl:text-base';
+const EXPORT_SUBTITLE_CLASS = 'text-xs font-semibold leading-tight text-gray-600 @2xl:text-[13px]';
+
+/**
+ * Slide-ready export card title. The first line is the bold card title; any further lines are
+ * quieter subtitles. Wide cards (`@md`) show the full variable name, compact cards the category.
+ */
 export function ExportHeaderCaption({
   lines,
 }: {
   lines: readonly { short: string; long: string }[];
 }) {
   return (
-    <div className="min-w-0 flex-1 text-left leading-tight">
+    <div className="min-w-0 flex-1 text-left">
       {lines.map((line, i) => (
         <p
           key={i}
-          className={`text-[10px] font-medium leading-none text-gray-700 truncate min-w-0${i > 0 ? ' mt-0.5' : ''}`}
+          className={`min-w-0 truncate ${i === 0 ? EXPORT_TITLE_CLASS : EXPORT_SUBTITLE_CLASS}`}
           title={line.long !== line.short ? line.long : undefined}
         >
-          {line.short}
+          {line.long !== line.short ? (
+            <>
+              <span className="@md:hidden">{line.short}</span>
+              <span className="hidden @md:inline">{line.long}</span>
+            </>
+          ) : (
+            line.short
+          )}
         </p>
       ))}
     </div>

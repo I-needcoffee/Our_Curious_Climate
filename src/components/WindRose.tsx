@@ -17,6 +17,10 @@ import {
   CHART_TOOLBAR_HEADER_PAD,
   CHART_TOOLBAR_ROW_CLASS,
   chartToolbarTitleClass,
+  chartToolbarRoundButtonClass,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  comparePaneLabelClass,
+  chartToolbarRemoveButtonClass,
 } from '../lib/chartToolbarLayout';
 import { ExportHeaderCaption, exportCaptionLinesWithUnit } from './ExportHeaderCaption';
 import { CardModal } from './CardModal';
@@ -44,6 +48,12 @@ import {
   resolveWindRowDryBulbC,
 } from '../lib/iem/mergeEpwWind';
 import { IemWindChartLoadingOverlay } from './IemWindSetupModal';
+import { svgTextUnits } from '../lib/explorerChartSvgLayout';
+import { chartAxisInk } from '../lib/chartInk';
+import { epwEquivalentHourKey, indexEpwByEquivalentHour, isFiniteNumber } from '../lib/epwClockMatch';
+import { ringLabelGapPx, ringLabelPlacement, ringLabelReserve } from '../lib/ringLabels';
+import { EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS } from '../lib/explorerChartSvgLayout';
+import { useSvgRenderScale } from '../hooks/useSvgRenderScale';
 
 interface WindRoseProps {
   data: EPWDataRow[];
@@ -73,8 +83,12 @@ interface WindRoseProps {
 }
 
 const COMPASS_POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-/** Quiet gaps between compass labels: SE–SSE and NW–NNW. */
+/** Quiet gaps between compass labels: SE–SSE and NW–NNW. Used for hour-scale ticks on the rings. */
 const RING_LABEL_BEARINGS_DEG = [146.25, 326.25];
+
+/** Square: the SVG is just the rose and its rim labels; the legend sits in the card header. */
+const WIND_ROSE_VIEWBOX_W = 350;
+const WIND_ROSE_VIEWBOX_H = 350;
 
 type HourMonthRange = IsolationRange;
 
@@ -229,6 +243,12 @@ export function WindRose({
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 400 });
+  const renderScale = useSvgRenderScale(roseRef, WIND_ROSE_VIEWBOX_W, WIND_ROSE_VIEWBOX_H);
+  /** Header legend inputs derived during the SVG render (bucket fills + outer-ring note). */
+  const [legendState, setLegendState] = useState<{ note: string; bandFills: string[] }>({
+    note: '',
+    bandFills: [],
+  });
 
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -418,12 +438,14 @@ export function WindRose({
     const unit = convertUnit(def.unit);
 
     if (showDifference && compareData) {
-      const diffs = data.map((d, i) => {
-        const primaryVal = d[colorVar] as number;
-        const compareVal = compareData[i]?.[colorVar] as number;
-        if (primaryVal === null || compareVal === null) return 0;
-        return compareVal - primaryVal;
-      });
+      const compareByHour = indexEpwByEquivalentHour(compareData);
+      const diffs: number[] = [];
+      for (const row of data) {
+        const primaryVal = row[colorVar] as unknown;
+        const compareVal = compareByHour.get(epwEquivalentHourKey(row))?.[colorVar] as unknown;
+        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) continue;
+        diffs.push(compareVal - primaryVal);
+      }
       const bound = symmetricDiffBound(diffs);
       const half = bound > 0 ? bound : 1;
       min = convertValue(-half, def.unit, true);
@@ -436,7 +458,7 @@ export function WindRose({
 
   const iemWindFallbackOnly =
     iemControls.source === 'iem' && iemSamples.kind === 'iem' && iemSamples.fallbackNote ? (
-      <p className="mt-1 text-[10px] italic text-amber-800/90 dark:text-amber-200/80">{iemSamples.fallbackNote}</p>
+      <p className="mt-1 text-[11px] italic text-amber-800/90 dark:text-amber-200/80">{iemSamples.fallbackNote}</p>
     ) : null;
 
   useEffect(() => {
@@ -452,14 +474,23 @@ export function WindRose({
     }
 
     // --- Wind Rose ---
-    const roseWidth = 350;
-    const roseHeight = 420;
-    const roseBottomReserve = 82;
-    const compassLabelPad = 12;
-    const overflowPad = 24;
-    const plotHalf = Math.min(roseWidth, roseHeight - roseBottomReserve) / 2;
-    const roseRadius = plotHalf - compassLabelPad - overflowPad;
-    const overflowRadiusMax = roseRadius + overflowPad;
+    const roseWidth = WIND_ROSE_VIEWBOX_W;
+    const roseHeight = WIND_ROSE_VIEWBOX_H;
+    const units = (px: number) => svgTextUnits(px, renderScale);
+    const axisInk = chartAxisInk(heatmapTextColor, theme);
+    /** Compass ring: cardinal points lead, the sixteen-wind names step down in size and ink. */
+    const cardinalPx = units(11);
+    const intercardinalPx = units(9.5);
+    const secondaryPx = units(8.5);
+    const ringLabelPx = units(8);
+    const gridInk = theme === 'dark' ? '#9ca3af' : '#6b7280';
+    /** Rim labels share one placement rule with the sun path (see `ringLabels.ts`); gap is in viewBox units. */
+    const dialPx = Math.min(roseWidth, roseHeight) * renderScale;
+    const ringGap = ringLabelGapPx(dialPx) / Math.max(renderScale, 0.01);
+    const rim = ringLabelReserve(ringGap, secondaryPx * 2.3, cardinalPx);
+    const roseRadius = Math.min(roseWidth / 2 - rim.x, roseHeight / 2 - rim.y);
+    /** Over-scale bins are compressed to the ring and flagged with a chevron drawn inside the wedge tip. */
+    const overflowRadiusMax = roseRadius;
 
     const roseSvg = d3.select(roseRef.current);
     roseSvg.selectAll("*").remove();
@@ -467,10 +498,7 @@ export function WindRose({
     const roseG = roseSvg
       .attr("viewBox", `0 0 ${roseWidth} ${roseHeight}`)
       .append("g")
-      .attr(
-        "transform",
-        `translate(${roseWidth / 2}, ${(roseHeight - roseBottomReserve) / 2})`
-      );
+      .attr("transform", `translate(${roseWidth / 2}, ${roseHeight / 2})`);
 
     // Group wind by direction
     const binSize = 360 / numBins;
@@ -487,16 +515,18 @@ export function WindRose({
       totalCount: 0
     }));
 
+    const compareByHour = showDifference && compareData ? indexEpwByEquivalentHour(compareData) : null;
+
     filteredData.forEach(d => {
       const dir = d.windDirection as number;
       const speed = d.windSpeed as number;
       
       let val: number;
-      if (showDifference && compareData) {
-        const idx = data.indexOf(d);
-        const primaryVal = d[colorVar] as number;
-        const compareVal = compareData[idx]?.[colorVar] as number;
-        if (primaryVal === null || compareVal === null) return;
+      if (showDifference && compareByHour) {
+        const compareRow = compareByHour.get(epwEquivalentHourKey(d));
+        const primaryVal = d[colorVar] as unknown;
+        const compareVal = compareRow?.[colorVar] as unknown;
+        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return;
         val = convertValue(compareVal - primaryVal, colorVarDef.unit, true);
       } else {
         val = convertValue(d[colorVar] as number, colorVarDef.unit);
@@ -531,10 +561,10 @@ export function WindRose({
     const anyOverflow = bins.some(b => b.totalCount > scaleMax + 0.5);
     const hoursScaleNote =
       scaleMaxOverride == null
-        ? `Hours · outer circle ${Math.round(annualMaxHours)} (annual max, any direction)`
+        ? `Rings = hours with wind · outer ring ${Math.round(annualMaxHours)} h (annual peak) · calm excluded`
         : anyOverflow
-          ? `Hours · outer circle ${Math.round(scaleMaxHours)} · bars past the circle exceed this scale`
-          : `Hours · outer circle ${Math.round(scaleMaxHours)} (annual max ${Math.round(annualMaxHours)})`;
+          ? `Outer ring ${Math.round(scaleMaxHours)} h · arrows exceed scale · calm excluded`
+          : `Outer ring ${Math.round(scaleMaxHours)} h (annual peak ${Math.round(annualMaxHours)} h) · calm excluded`;
 
     // Draw grid circles (always include the outer scale max)
     const ticks = roseScaleTicks(scaleMax);
@@ -551,7 +581,7 @@ export function WindRose({
     const ringLabelItems = ticks.flatMap(tick =>
       RING_LABEL_BEARINGS_DEG.map(bearing => ({ tick, bearing }))
     );
-    const ringFill = roseRingColor(theme);
+    const ringFill = theme === 'dark' ? '#9ca3af' : '#6b7280';
     const ringHalo = roseCardFill(theme);
     roseG
       .selectAll(".rose-grid-label")
@@ -570,12 +600,11 @@ export function WindRose({
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "central")
       .style("fill", ringFill)
-      .style("font-size", "7.5px")
-      .style("font-weight", d => (d.tick === scaleMax ? "600" : "500"))
-      .style("letter-spacing", "0.02em")
+      .style("font-size", `${ringLabelPx}px`)
+      .style("font-weight", d => (d.tick === scaleMax ? "700" : "600"))
       .style("paint-order", "stroke")
       .style("stroke", ringHalo)
-      .style("stroke-width", "2.5px")
+      .style("stroke-width", `${Math.max(2, ringLabelPx * 0.3)}px`)
       .style("stroke-linejoin", "round")
       .text(d => `${Math.round(d.tick)}`);
 
@@ -638,6 +667,7 @@ export function WindRose({
         const midVal = (d.extent[0] + d.extent[1]) / 2;
         return colorScale(midVal);
       })
+      .style("opacity", 0.6)
       .style("stroke", "#ffffff")
       .style("stroke-width", "0.5px")
       .append("title")
@@ -656,9 +686,9 @@ export function WindRose({
       .attr("class", "rose-overflow")
       .attr("d", d => {
         const ang = (d.angle * Math.PI) / 180;
-        const r = overflowRadiusMax;
-        const tipR = r + 8;
-        const half = 4.6;
+        const tipR = overflowRadiusMax - 1.5;
+        const r = tipR - 7;
+        const half = 4.2;
         const tipX = tipR * Math.sin(ang);
         const tipY = -tipR * Math.cos(ang);
         const bx = r * Math.sin(ang);
@@ -669,7 +699,7 @@ export function WindRose({
         const p2y = by - half * Math.sin(ang);
         return `M${p1x},${p1y}L${tipX},${tipY}L${p2x},${p2y}Z`;
       })
-      .style("fill", heatmapTextColor)
+      .style("fill", axisInk)
       .style("stroke", roseCardFill(theme))
       .style("stroke-width", "1.2px")
       .style("opacity", 0.9)
@@ -680,69 +710,40 @@ export function WindRose({
       .data(d3.range(16))
       .join("text")
       .attr("class", "rose-label")
-      .attr("x", d => (overflowRadiusMax + 10) * Math.sin(d * (360/16) * Math.PI / 180))
-      .attr("y", d => -(overflowRadiusMax + 10) * Math.cos(d * (360/16) * Math.PI / 180))
-      .attr("dy", "0.35em")
-      .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
-      .style("font-size", d => d % 2 === 0 ? `10px` : `8px`)
-      .style("font-weight", d => d % 4 === 0 ? "bold" : "normal")
+      .attr("x", d => (roseRadius + ringGap) * Math.sin(d * (360/16) * Math.PI / 180))
+      .attr("y", d => -(roseRadius + ringGap) * Math.cos(d * (360/16) * Math.PI / 180))
+      .attr("dy", d => ringLabelPlacement((d * (360 / 16) * Math.PI) / 180).dy)
+      .attr("text-anchor", d => ringLabelPlacement((d * (360 / 16) * Math.PI) / 180).anchor)
+      .style("fill", d => (d % 2 === 0 ? axisInk : gridInk))
+      .style("font-size", d => `${d % 4 === 0 ? cardinalPx : d % 2 === 0 ? intercardinalPx : secondaryPx}px`)
+      .style("font-weight", d => (d % 4 === 0 ? "700" : d % 2 === 0 ? "600" : "500"))
       .text(d => COMPASS_POINTS[d]);
 
-    // --- Wind Rose Legend ---
-    const legendItemWidth = 50;
-    const totalLegendWidth = numBuckets * legendItemWidth;
-    const legendG = roseSvg.append("g")
-      .attr("transform", `translate(${(roseWidth - totalLegendWidth) / 2}, ${roseHeight - 54})`);
+    // The speed-class legend lives in the card header as a stepped pill bar (same component as
+    // every other card) so the whole SVG belongs to the rose; publish what it needs.
+    setLegendState({
+      note: hoursScaleNote,
+      bandFills: d3.range(numBuckets).map(i => {
+        const extent = bucketScale.invertExtent(i);
+        return colorScale((extent[0] + extent[1]) / 2);
+      }),
+    });
+  }, [filteredData, data, compareData, showDifference, variables, colorVar, colorVarDef, gradientId, gradients, filter, dimensions.width, renderScale, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours]);
 
-    const legendItems = d3.range(numBuckets);
-    const itemHeight = 16;
-
-    legendG.append("text")
-      .attr("x", totalLegendWidth / 2)
-      .attr("y", 0)
-      .attr("text-anchor", "middle")
-      .style("font-size", `10px`)
-      .style("font-weight", "bold")
-      .style("fill", heatmapTextColor)
-      .text(`Wind Speed (${cUnit})`);
-
-    legendG.selectAll(".rose-legend-item")
-      .data(legendItems)
-      .join("g")
-      .attr("transform", (d, i) => `translate(${i * legendItemWidth}, 10)`)
-      .each(function(d) {
-        const itemG = d3.select(this);
-        const extent = bucketScale.invertExtent(d);
-        if (!extent[0] && extent[0] !== 0) return;
-        
-        const midVal = (extent[0] + extent[1]) / 2;
-
-        itemG.append("rect")
-          .attr("width", 14)
-          .attr("height", itemHeight)
-          .attr("rx", 2)
-          .style("fill", colorScale(midVal));
-
-        itemG.append("text")
-          .attr("x", 18)
-          .attr("y", itemHeight / 2)
-          .attr("dy", "0.35em")
-          .style("font-size", `8.5px`)
-          .style("fill", heatmapTextColor)
-          .text(`${extent[0].toFixed(1)}-${extent[1].toFixed(1)}`);
-      });
-
-    legendG.append("text")
-      .attr("x", totalLegendWidth / 2)
-      .attr("y", 40)
-      .attr("text-anchor", "middle")
-      .style("font-size", "8.5px")
-      .style("fill", heatmapTextColor)
-      .style("opacity", 0.8)
-      .text(hoursScaleNote);
-
-  }, [filteredData, data, compareData, showDifference, variables, colorVar, gradientId, gradients, filter, dimensions.width, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours]);
+  const selectedPill = theme === 'dark' ? 'bg-gray-100 text-gray-900' : 'bg-gray-900 text-white';
+  const idlePill = 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600';
+  const valueInk = theme === 'dark' ? 'text-gray-100' : 'text-gray-800';
+  const linkInk = theme === 'dark' ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900';
+  const sliderTrack = theme === 'dark' ? '#e5e7eb' : '#111827';
+  const sliderRail = theme === 'dark' ? '#4b5563' : '#e5e7eb';
+  const sliderHandle = {
+    borderColor: sliderTrack,
+    backgroundColor: '#fff',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+    opacity: 1,
+    width: 18,
+    height: 18,
+  };
 
   return (
     <div 
@@ -752,8 +753,8 @@ export function WindRose({
       }`}
     >
       {(exportMode || !pairSuppressHeader) && (
-      <div className={`flex flex-col ${exportMode ? '' : 'border-b'} ${
-        exportMode ? 'bg-white' : (theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white')
+      <div className={`flex flex-col ${
+        exportMode ? 'bg-white' : (theme === 'dark' ? 'bg-gray-800' : 'bg-white')
       } ${CHART_TOOLBAR_HEADER_PAD}`}>
         {exportMode ? (
           <>
@@ -773,31 +774,17 @@ export function WindRose({
           </>
         ) : comparePane === 'secondary' ? (
           <>
-            <div
-              className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                theme === 'dark'
-                  ? 'border-orange-800/60 bg-orange-950/45 text-orange-100'
-                  : 'border-orange-200 bg-orange-50 text-orange-900'
-              }`}
-            >
+            <div className={comparePaneLabelClass(theme, 'comparison')}>
               Comparison · {paneCity ?? '—'}
             </div>
-            <div className="flex min-h-[24px] items-center justify-end gap-1">
+            <div className="flex min-h-7 items-center justify-end gap-1">
               <button
                 type="button"
                 onClick={() => setShowSettings(!showSettings)}
-                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                  showSettings
-                    ? theme === 'dark'
-                      ? 'bg-blue-900/40 text-blue-400'
-                      : 'bg-blue-50 text-blue-600'
-                    : theme === 'dark'
-                      ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                      : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                }`}
+                className={chartToolbarRoundButtonClass(theme, showSettings, 'blue')}
                 title="Chart settings"
               >
-                <Settings2 className="h-3 w-3" />
+                <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
               </button>
             </div>
               {iemWindFallbackOnly}
@@ -806,11 +793,7 @@ export function WindRose({
           <>
             {comparePane === 'primary' && paneCity && (
               <div
-                className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                  theme === 'dark'
-                    ? 'border-blue-800/60 bg-blue-950/45 text-blue-100'
-                    : 'border-blue-200 bg-blue-50 text-blue-900'
-                }`}
+                className={comparePaneLabelClass(theme, 'baseline')}
               >
                 Baseline · {paneCity}
               </div>
@@ -820,10 +803,10 @@ export function WindRose({
                 className={`${CHART_TOOLBAR_CONTROLS_CLASS} transition-[padding] duration-200 ease-out ${
                   showSettings
                     ? onRemove
-                      ? 'pr-[4.75rem]'
+                      ? 'pr-[4.25rem]'
                       : 'pr-9'
                     : onRemove
-                      ? 'pr-0 group-hover:pr-[4.75rem] focus-within:pr-[4.75rem]'
+                      ? 'pr-0 group-hover:pr-[4.25rem] focus-within:pr-[4.25rem]'
                       : 'pr-0 group-hover:pr-9 focus-within:pr-9'
                 }`}
               >
@@ -856,26 +839,19 @@ export function WindRose({
                   type="button"
                   id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                   onClick={() => setShowSettings(!showSettings)}
-                  className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                    showSettings
-                      ? theme === 'dark'
-                        ? 'bg-blue-900/40 text-blue-400'
-                        : 'bg-blue-50 text-blue-600'
-                      : theme === 'dark'
-                        ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                        : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                  }`}
+                  className={chartToolbarRoundButtonClass(theme, showSettings, 'blue')}
                   title="Chart settings"
                 >
-                  <Settings2 className="h-3 w-3" />
+                  <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                 </button>
                 {onRemove && (
                   <button
                     type="button"
                     onClick={onRemove}
-                    className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${theme === 'dark' ? 'text-gray-400 hover:bg-red-900/20 hover:text-red-400' : 'text-gray-400 hover:bg-red-50 hover:text-red-500'}`}
+                    className={chartToolbarRemoveButtonClass(theme)}
+                    title="Remove chart"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <X className="h-4 w-4" />
                   </button>
                 )}
               </div>
@@ -884,6 +860,22 @@ export function WindRose({
           </>
         )}
       </div>
+      )}
+
+      {!pairSuppressFooterLegend && legendState.bandFills.length > 0 && (
+        <div className={`${EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS} min-w-0`}>
+          <InteractiveLegend
+            domId={tutorialLegendDomId}
+            variable={{ ...colorVarDef, min: cMin, max: cMax, unit: cUnit }}
+            gradientId={gradientId}
+            setGradientId={setGradientId}
+            gradients={gradients}
+            theme={theme}
+            isDifference={showDifference}
+            stepFills={legendState.bandFills}
+            footnote={legendState.note}
+          />
+        </div>
       )}
 
       <CardModal
@@ -901,7 +893,7 @@ export function WindRose({
                   <select
                     value={numBins}
                     onChange={(e) => setNumBins(parseInt(e.target.value))}
-                    className={`w-full text-sm rounded-lg block p-2.5 transition-all outline-none border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-50 border-gray-200 text-gray-900 hover:bg-white'}`}
+                    className={`w-full text-sm rounded-full block px-3.5 py-2.5 transition-all outline-none border-0 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
                   >
                     <option value={8}>8 Directions (Basic)</option>
                     <option value={16}>16 Directions (Standard)</option>
@@ -910,14 +902,14 @@ export function WindRose({
                   </select>
                 </div>
 
-                <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                <div className="space-y-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-900/40">
                   <div className="flex items-center justify-between">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Temperature Filter</label>
                     <input 
                       type="checkbox" 
                       checked={tempFilterEnabled} 
                       onChange={e => setTempFilterEnabled(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-400"
                     />
                   </div>
                   {tempFilterEnabled && (
@@ -925,13 +917,13 @@ export function WindRose({
                       <div className="flex gap-2">
                         <button 
                           onClick={() => setTempFilterType('above')}
-                          className={`flex-1 rounded-full border px-2 py-1 text-[10px] font-bold transition-all ${tempFilterType === 'above' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-transparent border-gray-300 text-gray-500'}`}
+                          className={`flex-1 rounded-full px-3 py-1 text-xs font-bold transition-all ${tempFilterType === 'above' ? selectedPill : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                         >
                           ABOVE
                         </button>
                         <button 
                           onClick={() => setTempFilterType('below')}
-                          className={`flex-1 rounded-full border px-2 py-1 text-[10px] font-bold transition-all ${tempFilterType === 'below' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-transparent border-gray-300 text-gray-500'}`}
+                          className={`flex-1 rounded-full px-3 py-1 text-xs font-bold transition-all ${tempFilterType === 'below' ? selectedPill : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                         >
                           BELOW
                         </button>
@@ -942,27 +934,28 @@ export function WindRose({
                           max={unitSystem === 'imperial' ? 120 : 50} 
                           value={tempThreshold} 
                           onChange={(v) => setTempThreshold(v as number)}
-                          trackStyle={{ backgroundColor: '#3b82f6' }}
-                          handleStyle={{ borderColor: '#3b82f6', backgroundColor: '#fff' }}
+                          trackStyle={{ backgroundColor: sliderTrack }}
+                          railStyle={{ backgroundColor: sliderRail }}
+                          handleStyle={{ ...sliderHandle }}
                         />
                         <div className="flex justify-between mt-1">
-                          <span className="text-[10px] text-gray-400">{unitSystem === 'imperial' ? '0°F' : '-20°C'}</span>
-                          <span className="text-xs font-bold text-blue-500">{tempThreshold}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
-                          <span className="text-[10px] text-gray-400">{unitSystem === 'imperial' ? '120°F' : '50°C'}</span>
+                          <span className="text-[11px] text-gray-400">{unitSystem === 'imperial' ? '0°F' : '-20°C'}</span>
+                          <span className={`text-xs font-bold ${valueInk}`}>{tempThreshold}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
+                          <span className="text-[11px] text-gray-400">{unitSystem === 'imperial' ? '120°F' : '50°C'}</span>
                         </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                <div className="space-y-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-900/40">
                   <div className="flex items-center justify-between">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Wind Speed Filter</label>
                     <input 
                       type="checkbox" 
                       checked={speedFilterEnabled} 
                       onChange={e => setSpeedFilterEnabled(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-400"
                     />
                   </div>
                   {speedFilterEnabled && (
@@ -970,13 +963,13 @@ export function WindRose({
                       <div className="flex gap-2">
                         <button 
                           onClick={() => setSpeedFilterType('above')}
-                          className={`flex-1 rounded-full border px-2 py-1 text-[10px] font-bold transition-all ${speedFilterType === 'above' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-transparent border-gray-300 text-gray-500'}`}
+                          className={`flex-1 rounded-full px-3 py-1 text-xs font-bold transition-all ${speedFilterType === 'above' ? selectedPill : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                         >
                           ABOVE
                         </button>
                         <button 
                           onClick={() => setSpeedFilterType('below')}
-                          className={`flex-1 rounded-full border px-2 py-1 text-[10px] font-bold transition-all ${speedFilterType === 'below' ? 'bg-blue-600 border-blue-600 text-white' : 'bg-transparent border-gray-300 text-gray-500'}`}
+                          className={`flex-1 rounded-full px-3 py-1 text-xs font-bold transition-all ${speedFilterType === 'below' ? selectedPill : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
                         >
                           BELOW
                         </button>
@@ -987,29 +980,30 @@ export function WindRose({
                           max={unitSystem === 'imperial' ? 45 : 20} 
                           value={speedThreshold} 
                           onChange={(v) => setSpeedThreshold(v as number)}
-                          trackStyle={{ backgroundColor: '#3b82f6' }}
-                          handleStyle={{ borderColor: '#3b82f6', backgroundColor: '#fff' }}
+                          trackStyle={{ backgroundColor: sliderTrack }}
+                          railStyle={{ backgroundColor: sliderRail }}
+                          handleStyle={{ ...sliderHandle }}
                         />
                         <div className="flex justify-between mt-1">
-                          <span className="text-[10px] text-gray-400">0</span>
-                          <span className="text-xs font-bold text-blue-500">{speedThreshold}{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
-                          <span className="text-[10px] text-gray-400">{unitSystem === 'imperial' ? '45' : '20'}</span>
+                          <span className="text-[11px] text-gray-400">0</span>
+                          <span className={`text-xs font-bold ${valueInk}`}>{speedThreshold}{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
+                          <span className="text-[11px] text-gray-400">{unitSystem === 'imperial' ? '45' : '20'}</span>
                         </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                <div className="space-y-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-900/40">
                   <div className="flex items-center justify-between gap-2">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                       Time of day
                     </label>
-                    <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <span className={`text-[11px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                       {formatHourIsolationRange(hourRange)}
                     </span>
                   </div>
-                  <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                  <p className={`text-[11px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     Isolates this rose only. {HOUR_WRAP_HINT}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -1021,10 +1015,10 @@ export function WindRose({
                           type="button"
                           title={preset.hint}
                           onClick={() => setHourRange(preset.range)}
-                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
+                          className={`rounded-full px-3 py-1 text-xs font-bold transition-all ${
                             selected
-                              ? 'border-blue-600 bg-blue-600 text-white'
-                              : 'border-gray-300 bg-transparent text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700'
+                              ? selectedPill
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
                           }`}
                         >
                           {preset.label}
@@ -1043,16 +1037,16 @@ export function WindRose({
                       endAriaLabel="End hour"
                     />
                     <div className="mt-1 flex justify-between">
-                      <span className="text-[10px] text-gray-400">12am</span>
-                      <span className="text-[10px] text-gray-400">12pm</span>
-                      <span className="text-[10px] text-gray-400">11pm</span>
+                      <span className="text-[11px] text-gray-400">12am</span>
+                      <span className="text-[11px] text-gray-400">12pm</span>
+                      <span className="text-[11px] text-gray-400">11pm</span>
                     </div>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                       Months
                     </label>
-                    <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <span className={`text-[11px] font-semibold ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                       {formatMonthIsolationRange(monthRange)}
                     </span>
                   </div>
@@ -1064,10 +1058,10 @@ export function WindRose({
                           key={preset.id}
                           type="button"
                           onClick={() => setMonthRange(preset.range)}
-                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all ${
+                          className={`rounded-full px-3 py-1 text-xs font-bold transition-all ${
                             selected
-                              ? 'border-blue-600 bg-blue-600 text-white'
-                              : 'border-gray-300 bg-transparent text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700'
+                              ? selectedPill
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
                           }`}
                         >
                           {preset.label}
@@ -1075,7 +1069,7 @@ export function WindRose({
                       );
                     })}
                   </div>
-                  <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                  <p className={`text-[11px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     {MONTH_WRAP_HINT}
                   </p>
                   <div className="px-2">
@@ -1089,14 +1083,14 @@ export function WindRose({
                       endAriaLabel="End month"
                     />
                     <div className="mt-1 flex justify-between">
-                      <span className="text-[10px] text-gray-400">Jan</span>
-                      <span className="text-[10px] text-gray-400">Jun</span>
-                      <span className="text-[10px] text-gray-400">Dec</span>
+                      <span className="text-[11px] text-gray-400">Jan</span>
+                      <span className="text-[11px] text-gray-400">Jun</span>
+                      <span className="text-[11px] text-gray-400">Dec</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-3 p-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600">
+                <div className="space-y-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-900/40">
                   <div className="flex items-center justify-between gap-2">
                     <label className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                       Outer circle (hours)
@@ -1105,17 +1099,17 @@ export function WindRose({
                       <button
                         type="button"
                         onClick={() => setScaleMaxOverride(null)}
-                        className="text-[10px] font-bold uppercase tracking-tight text-blue-500 hover:text-blue-600"
+                        className={`text-[11px] font-bold uppercase tracking-tight ${linkInk}`}
                       >
                         Reset auto
                       </button>
                     ) : (
-                      <span className={`text-[10px] font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                      <span className={`text-[11px] font-semibold ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
                         Auto
                       </span>
                     )}
                   </div>
-                  <p className={`text-[10px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
+                  <p className={`text-[11px] leading-snug ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                     Auto uses the busiest direction over the full year ({Math.round(annualMaxHours)} hrs), so day/night and
                     season views stay comparable. If you set a lower max, bars continue past the circle; a mark shows
                     directions that still exceed it.
@@ -1126,13 +1120,14 @@ export function WindRose({
                       max={Math.max(Math.round(annualMaxHours * 2), 50)}
                       value={Math.round(scaleMaxHours)}
                       onChange={v => setScaleMaxOverride(v as number)}
-                      trackStyle={{ backgroundColor: '#3b82f6' }}
-                      handleStyle={{ borderColor: '#3b82f6', backgroundColor: '#fff' }}
+                      trackStyle={{ backgroundColor: sliderTrack }}
+                          railStyle={{ backgroundColor: sliderRail }}
+                      handleStyle={{ ...sliderHandle }}
                     />
                     <div className="mt-1 flex justify-between">
-                      <span className="text-[10px] text-gray-400">1</span>
-                      <span className="text-xs font-bold text-blue-500">{Math.round(scaleMaxHours)} hrs</span>
-                      <span className="text-[10px] text-gray-400">
+                      <span className="text-[11px] text-gray-400">1</span>
+                      <span className={`text-xs font-bold ${valueInk}`}>{Math.round(scaleMaxHours)} hrs</span>
+                      <span className="text-[11px] text-gray-400">
                         {Math.max(Math.round(annualMaxHours * 2), 50)}
                       </span>
                     </div>
@@ -1146,18 +1141,18 @@ export function WindRose({
                     <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
                     <button 
                       onClick={() => setShowGradientModal(true)}
-                      className="text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-tight"
+                      className={`text-[11px] font-bold uppercase tracking-tight ${linkInk}`}
                     >
                       + Create
                     </button>
                   </div>
-                  <div className={`flex p-1.5 rounded-lg overflow-x-auto border ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+                  <div className={`flex p-1.5 rounded-full overflow-x-auto ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
                     {paletteGradients.map(g => (
                       <button
                         key={g.id}
                         onClick={() => setGradientId(g.id)}
-                        className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full border-2 transition-all shadow-hard-sm ${
-                          gradientId === g.id ? 'border-blue-500 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
+                        className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full transition-all ${
+                          gradientId === g.id ? 'scale-110 shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_14px_rgba(59,130,246,0.6)]' : 'opacity-85 hover:scale-105 hover:opacity-100'
                         }`}
                         style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
                         title={g.name}

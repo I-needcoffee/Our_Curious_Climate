@@ -5,7 +5,7 @@ import {
   type ExportFrameSize,
 } from '../lib/exportCapture';
 
-const INNER_H = 'h-7';
+const INNER_H = 'h-8';
 
 export function ExportModeToolbar({
   theme,
@@ -28,20 +28,18 @@ export function ExportModeToolbar({
 }) {
   const dark = theme === 'dark';
 
-  const outerShell = dark
-    ? 'border-gray-600 bg-gray-800'
-    : 'border-gray-200 bg-white shadow-hard-sm';
+  const outerShell = dark ? 'bg-gray-800 glow-md' : 'bg-white glow-md';
 
   const innerTrack = dark
     ? 'rounded-full bg-gray-700 p-0.5'
     : 'rounded-full bg-gray-100 p-0.5';
 
   const segBase =
-    'rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wide transition-[color,background-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-2.5 sm:text-[10px]';
+    'rounded-full px-2.5 text-[11px] font-bold uppercase tracking-wide transition-[color,background-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3 sm:text-xs';
 
   const segSelected = dark
-    ? 'bg-gray-600 text-white shadow-sm'
-    : 'bg-white text-gray-900 shadow-sm';
+    ? 'bg-gray-500 text-white glow-sm'
+    : 'bg-white text-gray-900 glow-sm';
 
   const segUnselected = dark
     ? 'text-gray-400 hover:text-gray-200'
@@ -58,29 +56,29 @@ export function ExportModeToolbar({
       role="group"
       aria-label="Export"
       data-export-ui
-      className={`flex shrink-0 items-center gap-1 rounded-full border p-1 ${outerShell}`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full p-1 ${outerShell}`}
     >
       <div
-        className={`inline-flex ${INNER_H} min-w-0 max-w-[10.5rem] items-stretch sm:max-w-[12.5rem] ${innerTrack}`}
+        className={`inline-flex ${INNER_H} min-w-0 max-w-[12rem] items-stretch sm:max-w-[14rem] ${innerTrack}`}
         title="Choose export aspect ratio"
       >
         <label
-          className={`relative flex min-w-0 flex-1 cursor-pointer items-center gap-0.5 rounded-full pl-1.5 pr-1 sm:gap-1 sm:pl-2 sm:pr-1.5 ${
+          className={`relative flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-full pl-2.5 pr-2 sm:gap-1.5 ${
             exporting ? 'cursor-wait opacity-60' : ''
           }`}
         >
           <span
-            className={`shrink-0 text-[9px] font-semibold leading-none sm:text-[10px] ${aspectHint}`}
+            className={`shrink-0 text-[11px] font-semibold leading-none sm:text-xs ${aspectHint}`}
           >
             Aspect
           </span>
           <span
-            className={`min-w-0 flex-1 truncate text-left text-[9px] font-bold leading-none sm:text-[10px] ${aspectValue}`}
+            className={`min-w-0 flex-1 truncate text-left text-[11px] font-bold leading-none sm:text-xs ${aspectValue}`}
           >
             {currentFrame}
           </span>
           <ChevronDown
-            className={`h-3 w-3 shrink-0 opacity-70 ${aspectHint}`}
+            className={`h-3.5 w-3.5 shrink-0 opacity-70 ${aspectHint}`}
             strokeWidth={2.25}
             aria-hidden
           />
@@ -123,7 +121,7 @@ export function ExportModeToolbar({
         type="button"
         disabled={exporting}
         onClick={onExport}
-        className={`inline-flex ${INNER_H} shrink-0 items-center justify-center rounded-full px-3 text-[10px] font-bold uppercase tracking-wider shadow-hard-sm transition-[color,background-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 ${
+        className={`inline-flex ${INNER_H} shrink-0 items-center justify-center rounded-full px-4 text-xs font-bold uppercase tracking-wider glow-sm transition-[color,background-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 ${
           dark
             ? 'bg-gray-500 text-white hover:bg-gray-400'
             : 'bg-gray-700 text-white hover:bg-gray-600'
@@ -137,7 +135,7 @@ export function ExportModeToolbar({
         type="button"
         onClick={onClose}
         disabled={exporting}
-        className={`inline-flex ${INNER_H} w-7 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:opacity-60 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 ${
+        className={`inline-flex ${INNER_H} w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 disabled:opacity-60 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 ${
           dark
             ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-100'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'

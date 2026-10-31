@@ -33,11 +33,11 @@ export const GLOBAL_HOUR_PRESETS: {
   range: IsolationRange;
 }[] = [
   { id: 'all', label: 'All hours', hint: '12am–11pm', range: [0, 23] },
-  { id: 'day', label: 'Day', hint: '7am–7pm', range: [7, 19] },
+  { id: 'day', label: 'Day', hint: '7am–6pm', range: [7, 18] },
   { id: 'night', label: 'Night', hint: '8pm–7am', range: [20, 6] },
-  { id: 'morning', label: 'Morning', hint: '7am–11am', range: [7, 11] },
-  { id: 'midday', label: 'Midday', hint: '11am–3pm', range: [11, 15] },
-  { id: 'afternoon', label: 'Afternoon', hint: '4pm–7pm', range: [16, 19] },
+  { id: 'morning', label: 'Morning', hint: '7am–10am', range: [7, 10] },
+  { id: 'midday', label: 'Midday', hint: '11am–2pm', range: [11, 14] },
+  { id: 'afternoon', label: 'Afternoon', hint: '3pm–6pm', range: [15, 18] },
 ];
 
 /** Compact Wind Rose hour chips. */
@@ -48,7 +48,7 @@ export const WIND_ROSE_HOUR_PRESETS: {
   range: IsolationRange;
 }[] = [
   { id: 'all', label: 'All hours', hint: '12am–11pm', range: [0, 23] },
-  { id: 'day', label: 'Day', hint: '7am–7pm', range: [7, 19] },
+  { id: 'day', label: 'Day', hint: '7am–6pm', range: [7, 18] },
   { id: 'night', label: 'Night', hint: '8pm–7am', range: [20, 6] },
 ];
 

@@ -13,6 +13,7 @@ import {
 } from '../lib/explorerBarGradient';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
 import { dataExplorerDiffValuesForAggregation } from '../lib/dataExplorerDiffAggregation';
+import { epwEquivalentHourKey, indexEpwByEquivalentHour, isFiniteNumber } from '../lib/epwClockMatch';
 import { symmetricDiffBound } from '../lib/symmetricDiffDomain';
 import {
   isSolarNightEpwStation,
@@ -46,6 +47,12 @@ import {
   CHART_TOOLBAR_EXPORT_ROW_CLASS,
   CHART_TOOLBAR_HEADER_PAD,
   CHART_TOOLBAR_ROW_CLASS,
+  chartToolbarChipButtonClass,
+  chartToolbarRoundButtonClass,
+  CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  comparePaneLabelClass,
+  chartToolbarRevealClassFor,
+  chartToolbarRemoveButtonClass,
 } from '../lib/chartToolbarLayout';
 import { CardModal } from './CardModal';
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
@@ -67,6 +74,8 @@ import {
   explorerHeatmapRowLayout,
   explorerInnerWidth,
   explorerBarChartHeightPx,
+  explorerBarPath,
+  explorerBarSitsOnBaseline,
   explorerHeatmapCellXPx,
   explorerHeatmapHeightPx,
   explorerHeatmapSpanXPx,
@@ -74,7 +83,11 @@ import {
   explorerMonthLabelCenterDays,
   explorerSvgHeightPx,
   EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS,
+  explorerSvgTypography,
+  fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
+import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 
 interface WindExplorerProps {
   data: EPWDataRow[];
@@ -114,37 +127,32 @@ function getCompassDirection(degrees: number): string {
   return COMPASS_POINTS[(val % 16)];
 }
 
-function averageWindVector(values: EPWDataRow[], compareData?: EPWDataRow[], data?: EPWDataRow[], showDifference?: boolean): { speed: number, direction: number } {
+function averageWindVector(values: EPWDataRow[], compareData?: EPWDataRow[], _data?: EPWDataRow[], showDifference?: boolean): { speed: number, direction: number } {
   let sumU = 0;
   let sumV = 0;
   let count = 0;
+  const compareByHour = showDifference && compareData ? indexEpwByEquivalentHour(compareData) : null;
 
   values.forEach(d => {
     const speed = d.windSpeed as number;
     const dir = d.windDirection as number;
-    if (speed !== undefined && dir !== undefined) {
-      if (showDifference && compareData && data) {
-        const idx = data.indexOf(d);
-        const cD = compareData[idx];
-        if (cD) {
-          const cSpeed = cD.windSpeed as number;
-          const cDir = cD.windDirection as number;
-          if (cSpeed !== undefined && cDir !== undefined) {
-            const rad = dir * Math.PI / 180;
-            const cRad = cDir * Math.PI / 180;
-            // Vector difference
-            sumU += (-speed * Math.sin(rad)) - (-cSpeed * Math.sin(cRad));
-            sumV += (-speed * Math.cos(rad)) - (-cSpeed * Math.cos(cRad));
-            count++;
-          }
-        }
-      } else {
-        const rad = dir * Math.PI / 180;
-        sumU += -speed * Math.sin(rad);
-        sumV += -speed * Math.cos(rad);
-        count++;
-      }
+    if (!isFiniteNumber(speed) || !isFiniteNumber(dir)) return;
+    if (showDifference && compareByHour) {
+      const cD = compareByHour.get(epwEquivalentHourKey(d));
+      const cSpeed = cD?.windSpeed as number;
+      const cDir = cD?.windDirection as number;
+      if (!isFiniteNumber(cSpeed) || !isFiniteNumber(cDir)) return;
+      const rad = dir * Math.PI / 180;
+      const cRad = cDir * Math.PI / 180;
+      sumU += (-speed * Math.sin(rad)) - (-cSpeed * Math.sin(cRad));
+      sumV += (-speed * Math.cos(rad)) - (-cSpeed * Math.cos(cRad));
+      count++;
+      return;
     }
+    const rad = dir * Math.PI / 180;
+    sumU += -speed * Math.sin(rad);
+    sumV += -speed * Math.cos(rad);
+    count++;
   });
 
   if (count === 0) return { speed: 0, direction: 0 };
@@ -246,9 +254,7 @@ export function WindExplorer({
   );
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = expandChromeStrip
-    ? 'pointer-events-auto max-h-[52px] overflow-visible opacity-100 pt-1 transition-[max-height,opacity] duration-200 ease-out'
-    : 'pointer-events-none max-h-0 overflow-hidden opacity-0 transition-[max-height,opacity] duration-200 ease-out group-hover:pointer-events-auto group-hover:max-h-[48px] group-hover:opacity-100 focus-within:pointer-events-auto focus-within:max-h-[48px] focus-within:opacity-100';
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
   const removeBtnRevealClass = isMobile
     ? 'pointer-events-auto opacity-100'
     : 'pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
@@ -257,6 +263,7 @@ export function WindExplorer({
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 400 });
+  const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
 
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -467,7 +474,7 @@ export function WindExplorer({
 
   const iemWindFallbackOnly =
     iemControls.source === 'iem' && primWindResolved.iemFallbackNote ? (
-      <p className="mt-1 text-[10px] italic text-amber-800/90 dark:text-amber-200/80">{primWindResolved.iemFallbackNote}</p>
+      <p className="mt-1 text-[11px] italic text-amber-800/90 dark:text-amber-200/80">{primWindResolved.iemFallbackNote}</p>
     ) : null;
 
   useEffect(() => {
@@ -477,15 +484,17 @@ export function WindExplorer({
     }
 
     const rows: EPWDataRow[] = filteredData as EPWDataRow[];
+    const compareByHour = compareData ? indexEpwByEquivalentHour(compareData) : null;
+    const compareRowFor = (row: EPWDataRow) => compareByHour?.get(epwEquivalentHourKey(row));
 
     // --- Main Chart (1224 + Bar) ---
     const width = EXPLORER_SVG_BASE_WIDTH;
     const margin = EXPLORER_SVG_MARGIN;
     const innerWidth = explorerInnerWidth();
-    const barChartHeight = explorerBarChartHeightPx();
+    const barChartHeight = explorerBarChartHeightPx(svgHeight);
     const monthAxisBand = EXPLORER_MONTH_AXIS_BAND_PX;
-    const heatmapBodyHeight = explorerHeatmapHeightPx();
-    const height = explorerSvgHeightPx();
+    const heatmapBodyHeight = explorerHeatmapHeightPx(svgHeight);
+    const height = explorerSvgHeightPx(svgHeight);
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
@@ -546,7 +555,7 @@ export function WindExplorer({
           if (showDifference && compareData) {
             const p = aggVarSeries(values);
             const cmpVals = values
-              .map(v => compareData[data.indexOf(v)]?.[colorVar] as number)
+              .map(v => compareRowFor(v)?.[colorVar] as number)
               .filter((x): x is number => x != null && typeof x === 'number' && !Number.isNaN(x));
             const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic);
             val = convertValue(c - p, colorVarDef.unit, true);
@@ -585,7 +594,7 @@ export function WindExplorer({
           if (showDifference && compareData) {
             const p = aggVarSeries(values);
             const cmpVals = values
-              .map(v => compareData[data.indexOf(v)]?.[colorVar] as number)
+              .map(v => compareRowFor(v)?.[colorVar] as number)
               .filter((x): x is number => x != null && typeof x === 'number' && !Number.isNaN(x));
             const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic);
             val = convertValue(c - p, colorVarDef.unit, true);
@@ -617,9 +626,8 @@ export function WindExplorer({
     } else {
       // day or hour
       heatmapData = rows.map(d => {
-        const i = data.indexOf(d);
         const pv = aggregateCellStatistic([d[colorVar] as number], heatmapCellStatistic);
-        const cmpRaw = compareData?.[i]?.[colorVar];
+        const cmpRaw = compareRowFor(d)?.[colorVar];
         const cv = aggregateCellStatistic(
           cmpRaw != null && typeof cmpRaw === 'number' ? [cmpRaw as number] : [],
           heatmapCellStatistic
@@ -654,10 +662,8 @@ export function WindExplorer({
       explorerHeatmapRowLayout(heatmapBodyHeight);
     const minDayCellWidth = innerWidth / 366;
     const overlayMinWidth = Math.max(12, minDayCellWidth * 1.1, cellInnerHeightPx * 0.75);
-    const heatmapHourAxisPx = Math.max(5, Math.min(9, cellInnerHeightPx * 0.33));
-    const heatmapMonthAxisPx = Math.max(7, Math.min(11, Math.min(innerWidth / 26, cellInnerHeightPx * 0.45)));
-    const overlayFontMonthPx = Math.max(6, Math.min(12, Math.min(cellInnerHeightPx * 0.4, innerWidth / 22)));
-    const overlayFontWeekPx = Math.max(5, Math.min(10, overlayFontMonthPx * 0.82));
+    const type = explorerSvgTypography(renderScale, cellInnerHeightPx);
+    const axisInk = chartAxisInk(heatmapTextColor, theme);
 
     const heatmapCellsG = heatmapG.append("g").attr("transform", `translate(0, ${monthAxisBand})`);
 
@@ -681,11 +687,9 @@ export function WindExplorer({
         explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width
       )
       .attr("height", d => rowInnerHeight(d.y))
-      .attr("rx", 2) // Smaller corner radius
+      .attr("rx", 2)
       .attr("ry", 2)
       .style("fill", d => colorScale(d.value))
-      .style("stroke", (aggregation === 'month' || aggregation === 'week') ? "rgba(0,0,0,0.1)" : "none")
-      .style("stroke-width", "1px")
       .append("title")
       .text(d => d.tooltip);
 
@@ -713,15 +717,15 @@ export function WindExplorer({
     }
 
     // Overlay text for wind direction
-    if (aggregation === 'month' || aggregation === 'week') {
-      cells.append("text")
-        .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2 - 0.5)
-        .attr("y", d => rowInnerHeight(d.y) / 2 - 0.5)
+    if ((aggregation === 'month' || aggregation === 'week') && type.showCellValues) {
+      const cellLabels = cells.append("text")
+        .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2)
+        .attr("y", d => rowInnerHeight(d.y) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", heatmapTextColor)
-        .style("font-size", `${aggregation === 'month' ? overlayFontMonthPx : overlayFontWeekPx}px`)
-        .style("font-weight", "500")
+        .style("fill", heatmapCellInk(heatmapTextColor))
+        .style("font-size", `${type.cellValuePx}px`)
+        .style("font-weight", HEATMAP_CELL_FONT_WEIGHT)
         .style("pointer-events", "none")
         .style("opacity", 1)
         .text(d =>
@@ -729,6 +733,12 @@ export function WindExplorer({
             ? getCompassDirection(d.direction)
             : ""
         );
+      fitHeatmapCellLabels(
+        cellLabels,
+        d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width,
+        type.cellValuePx,
+        renderScale
+      );
     }
 
     // Bounding box(es) for the selected region (supports month/hour wrap)
@@ -744,7 +754,7 @@ export function WindExplorer({
             .attr('width', span.width)
             .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
             .attr('fill', 'none')
-            .attr('stroke', heatmapTextColor)
+            .attr('stroke', axisInk)
             .attr('stroke-width', 3)
             .attr('rx', 2)
             .attr('ry', 2)
@@ -758,15 +768,15 @@ export function WindExplorer({
       .attr("class", "heatmap-hour-labels")
       .attr("pointer-events", "none")
       .selectAll("text")
-      .data(d3.range(0, 24))
+      .data(d3.range(0, 24, type.hourStride))
       .join("text")
-      .attr("x", -4)
+      .attr("x", -5)
       .attr("y", h => hourRowCenter(h))
       .attr("dominant-baseline", "middle")
       .attr("text-anchor", "end")
-      .style("fill", heatmapTextColor)
+      .style("fill", axisInk)
       .style("font-weight", "500")
-      .style("font-size", `${heatmapHourAxisPx}px`)
+      .style("font-size", `${type.hourPx}px`)
       .text(h => formatHourRow(h));
 
     // Aggregate data for bar chart
@@ -876,12 +886,10 @@ export function WindExplorer({
       const topY = Math.min(yMaxPx, yMinPx);
       const barH = Math.max(1, Math.abs(yMinPx - yMaxPx));
       const pillR = Math.min(barW / 2, barH / 2);
+      const baselinePx = yScaleBar.range()[0];
 
-      group.append("rect")
-        .attr("x", xPos)
-        .attr("y", topY)
-        .attr("width", barW)
-        .attr("height", barH)
+      group.append("path")
+        .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
         .style(
           "fill",
           chartBarFill ??
@@ -891,9 +899,7 @@ export function WindExplorer({
               maxSelected: maxVal,
             })
         )
-        .style("opacity", 0.6)
-        .attr("rx", pillR)
-        .attr("ry", pillR);
+        .style("opacity", 0.6);
 
       const pv = d.valueSelected;
       const minPv = minVal;
@@ -930,7 +936,7 @@ export function WindExplorer({
       .call(yAxisBar)
       .call(g => g.select(".domain").remove())
       .call(g => g.selectAll(".tick line").remove())
-      .call(g => g.selectAll(".tick text").style("fill", heatmapTextColor).style("font-weight", "500").style("font-size", `${heatmapMonthAxisPx}px`));
+      .call(g => g.selectAll(".tick text").style("fill", axisInk).style("font-weight", "500").style("font-size", `${type.axisPx}px`));
 
     const monthCenters = explorerMonthLabelCenterDays();
     heatmapG.append("g")
@@ -948,23 +954,23 @@ export function WindExplorer({
       .attr("y", monthAxisBand / 2)
       .attr("dominant-baseline", "middle")
       .attr("text-anchor", "middle")
-      .style("fill", heatmapTextColor)
-      .style("font-weight", "500")
-      .style("font-size", `${heatmapMonthAxisPx}px`)
+      .style("fill", axisInk)
+      .style("font-weight", "600")
+      .style("font-size", `${type.monthPx}px`)
       .text(d => d.label);
 
     // --- Wind Rose ---
     // Removed from WindExplorer
 
-  }, [data, compareData, showDifference, filteredData, variables, colorVar, gradientId, aggregation, gradients, filter, dimensions.width, unitSystem, heatmapTextColor, theme, metadata, heatmapCellStatistic, barGradientSvgId, barChartFillMode]);
+  }, [data, compareData, showDifference, filteredData, variables, colorVar, gradientId, aggregation, gradients, filter, dimensions.width, renderScale, svgHeight, unitSystem, heatmapTextColor, theme, metadata, heatmapCellStatistic, barGradientSvgId, barChartFillMode]);
 
   const stats = (() => {
     if (showDifference && compareData) {
+      const compareByHour = indexEpwByEquivalentHour(compareData);
       const diffs = filteredData.map(d => {
-        const idx = data.indexOf(d);
         const primaryVal = d[colorVar] as number;
-        const compareVal = compareData[idx]?.[colorVar] as number;
-        if (primaryVal === null || compareVal === null) return null;
+        const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
+        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return null;
         return compareVal - primaryVal;
       }).filter(v => v !== null) as number[];
 
@@ -995,8 +1001,8 @@ export function WindExplorer({
       
     >
       {(exportMode || !pairSuppressHeader) && (
-      <div className={`flex flex-col ${exportMode ? '' : 'border-b'} ${
-        exportMode ? 'bg-white' : (theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-100 bg-white')
+      <div className={`flex flex-col ${
+        exportMode ? 'bg-white' : (theme === 'dark' ? 'bg-gray-800' : 'bg-white')
       } ${CHART_TOOLBAR_HEADER_PAD}`}>
         <div className="flex flex-col min-w-0">
           {exportMode ? (
@@ -1018,11 +1024,7 @@ export function WindExplorer({
           ) : comparePane === 'secondary' ? (
             <>
               <div
-                className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                  theme === 'dark'
-                    ? 'border-orange-800/60 bg-orange-950/45 text-orange-100'
-                    : 'border-orange-200 bg-orange-50 text-orange-900'
-                }`}
+                className={comparePaneLabelClass(theme, 'baseline')}
               >
                 Comparison · {paneCity ?? '—'}
               </div>
@@ -1039,15 +1041,7 @@ export function WindExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats)}
                           title="Statistics"
                         >
                           Stats
@@ -1056,18 +1050,10 @@ export function WindExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings)}
                           title="Chart settings"
                         >
-                          <Settings2 className="h-3 w-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -1080,11 +1066,7 @@ export function WindExplorer({
             <>
               {comparePane === 'primary' && paneCity && (
                 <div
-                  className={`mb-1.5 rounded-lg border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                    theme === 'dark'
-                      ? 'border-blue-800/60 bg-blue-950/45 text-blue-100'
-                      : 'border-blue-200 bg-blue-50 text-blue-900'
-                  }`}
+                  className={comparePaneLabelClass(theme, 'baseline')}
                 >
                   Baseline · {paneCity}
                 </div>
@@ -1126,23 +1108,24 @@ export function WindExplorer({
                     <button
                       type="button"
                       onClick={onRemove}
-                      className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-hard-sm transition-all active:scale-95 ${
+                      className={
                         showDifference
-                          ? theme === 'dark'
-                            ? 'border border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/40'
-                            : 'border border-red-100 bg-red-50 text-red-600 hover:bg-red-100'
-                          : theme === 'dark'
-                            ? 'text-gray-400 hover:bg-red-900/20 hover:text-red-400'
-                            : 'text-gray-400 hover:bg-red-50 hover:text-red-500'
-                      }`}
+                          ? `inline-flex h-7 items-center gap-1 rounded-full px-3 text-xs font-semibold transition-colors active:scale-95 ${
+                              theme === 'dark'
+                                ? 'bg-red-900/30 text-red-300 hover:bg-red-900/50'
+                                : 'bg-red-50 text-red-600 hover:bg-red-100'
+                            }`
+                          : chartToolbarRemoveButtonClass(theme)
+                      }
+                      title={showDifference ? 'Hide difference' : 'Remove chart'}
                     >
                       {showDifference ? (
                         <>
-                          <X className="w-3 h-3" />
+                          <X className="h-3.5 w-3.5" />
                           <span>Hide</span>
                         </>
                       ) : (
-                        <X className="w-3.5 h-3.5" />
+                        <X className="h-4 w-4" />
                       )}
                     </button>
                   </div>
@@ -1161,15 +1144,7 @@ export function WindExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-stats' : undefined}
                           onClick={() => setShowStats(!showStats)}
-                          className={`rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-                            showStats
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarChipButtonClass(theme, showStats)}
                           title="Statistics"
                         >
                           Stats
@@ -1178,18 +1153,10 @@ export function WindExplorer({
                           type="button"
                           id={tutorialChromeAnchors ? 'tutorial-card-settings' : undefined}
                           onClick={() => setShowSettings(!showSettings)}
-                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-                            showSettings
-                              ? theme === 'dark'
-                                ? 'bg-gray-700/90 text-gray-200'
-                                : 'bg-gray-100 text-gray-800'
-                              : theme === 'dark'
-                                ? 'bg-gray-800 text-gray-400 hover:text-gray-200'
-                                : 'bg-gray-50 text-gray-500 hover:text-gray-800'
-                          }`}
+                          className={chartToolbarRoundButtonClass(theme, showSettings)}
                           title="Chart settings"
                         >
-                          <Settings2 className="h-3 w-3" />
+                          <Settings2 className={CHART_TOOLBAR_SETTINGS_GLYPH_CLASS} />
                         </button>
                       </>
                     }
@@ -1211,21 +1178,21 @@ export function WindExplorer({
         anchorRef={outerRef as any}
       >
         <div className="grid grid-cols-2 gap-2">
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
           </div>
-          <div className={`p-2 rounded-md ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
-            <div className={`text-base font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
+          <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
+            <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.count}</div>
           </div>
         </div>
       </CardModal>
@@ -1243,18 +1210,18 @@ export function WindExplorer({
                   <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
                   <button 
                     onClick={() => setShowGradientModal(true)}
-                    className="text-[10px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
+                    className="text-[11px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
                   >
                     + Create
                   </button>
                 </div>
-                <div className={`flex overflow-x-auto rounded-full border p-1.5 ${theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
+                <div className={`flex overflow-x-auto rounded-full p-1.5 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
                   {paletteGradients.map(g => (
                     <button
                       key={g.id}
                       onClick={() => setGradientId(g.id)}
-                      className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full border-2 transition-all shadow-hard-sm ${
-                        gradientId === g.id ? 'border-gray-700 scale-110 shadow-sm' : 'border-transparent hover:scale-105'
+                      className={`mx-1 h-8 w-8 flex-shrink-0 rounded-full transition-all ${
+                        gradientId === g.id ? 'scale-110 shadow-[0_0_0_2px_rgba(255,255,255,0.9),0_0_14px_rgba(59,130,246,0.6)]' : 'opacity-85 hover:scale-105 hover:opacity-100'
                       }`}
                       style={{ background: `linear-gradient(to right, ${g.colors.join(', ')})` }}
                       title={g.name}
@@ -1268,25 +1235,25 @@ export function WindExplorer({
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       onClick={() => applyPreset('summer')}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors ${theme === 'dark' ? 'bg-orange-900/30 text-orange-400 border-orange-800 hover:bg-orange-900/50' : 'bg-orange-50 text-orange-700 border-orange-100 hover:bg-orange-100'}`}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${theme === 'dark' ? 'bg-orange-900/30 text-orange-400 hover:bg-orange-900/50' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}`}
                     >
                       Summer Cooling
                     </button>
                     <button
                       onClick={() => applyPreset('winter')}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors ${theme === 'dark' ? 'bg-gray-800/80 text-gray-200 border-gray-600 hover:bg-gray-800' : 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200'}`}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${theme === 'dark' ? 'bg-gray-800/80 text-gray-200 hover:bg-gray-800' : 'bg-gray-100 text-gray-800 hover:bg-gray-200'}`}
                     >
                       Winter Chill
                     </button>
                     <button
                       onClick={() => applyPreset('pedestrian')}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors ${theme === 'dark' ? 'bg-green-900/30 text-green-400 border-green-800 hover:bg-green-900/50' : 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100'}`}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${theme === 'dark' ? 'bg-green-900/30 text-green-400 hover:bg-green-900/50' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}
                     >
                       Pedestrian
                     </button>
                     <button
                       onClick={() => applyPreset('sitting')}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors ${theme === 'dark' ? 'bg-teal-900/30 text-teal-400 border-teal-800 hover:bg-teal-900/50' : 'bg-teal-50 text-teal-700 border-teal-100 hover:bg-teal-100'}`}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${theme === 'dark' ? 'bg-teal-900/30 text-teal-400 hover:bg-teal-900/50' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'}`}
                     >
                       Sitting
                     </button>
@@ -1309,7 +1276,7 @@ export function WindExplorer({
                     <select
                       value={tempFilterType}
                       onChange={(e) => setTempFilterType(e.target.value as 'above' | 'below')}
-                      className={`block rounded-full border p-1.5 text-xs transition-all ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-200 focus:ring-gray-500 focus:border-gray-700 hover:bg-gray-700' : 'bg-gray-50 border-gray-200 text-gray-900 focus:ring-gray-500 focus:border-gray-700 hover:bg-white'}`}
+                      className={`block rounded-full border-0 px-3 py-1.5 text-xs transition-all ${theme === 'dark' ? 'bg-gray-700 text-gray-100 focus:ring-gray-500 hover:bg-gray-600' : 'bg-gray-100 text-gray-900 focus:ring-gray-400 hover:bg-gray-200'}`}
                     >
                       <option value="above">Above</option>
                       <option value="below">Below</option>
@@ -1319,9 +1286,9 @@ export function WindExplorer({
                         type="number"
                         value={tempThreshold}
                         onChange={(e) => setTempThreshold(Number(e.target.value))}
-                        className={`block w-full rounded-full border p-1.5 pr-6 text-xs transition-all ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-200 focus:ring-gray-500 focus:border-gray-700 hover:bg-gray-700' : 'bg-gray-50 border-gray-200 text-gray-900 focus:ring-gray-500 focus:border-gray-700 hover:bg-white'}`}
+                        className={`block w-full rounded-full border-0 py-1.5 pl-3 pr-6 text-xs transition-all ${theme === 'dark' ? 'bg-gray-700 text-gray-100 focus:ring-gray-500 hover:bg-gray-600' : 'bg-gray-100 text-gray-900 focus:ring-gray-400 hover:bg-gray-200'}`}
                       />
-                      <span className={`absolute right-2 top-1.5 text-[10px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>{unitSystem === 'imperial' ? '°F' : '°C'}</span>
+                      <span className={`absolute right-2 top-1.5 text-[11px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>{unitSystem === 'imperial' ? '°F' : '°C'}</span>
                     </div>
                   </div>
                 )}
@@ -1342,7 +1309,7 @@ export function WindExplorer({
                     <select
                       value={speedFilterType}
                       onChange={(e) => setSpeedFilterType(e.target.value as 'above' | 'below')}
-                      className={`block rounded-full border p-1.5 text-xs transition-all ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-200 focus:ring-gray-500 focus:border-gray-700 hover:bg-gray-700' : 'bg-gray-50 border-gray-200 text-gray-900 focus:ring-gray-500 focus:border-gray-700 hover:bg-white'}`}
+                      className={`block rounded-full border-0 px-3 py-1.5 text-xs transition-all ${theme === 'dark' ? 'bg-gray-700 text-gray-100 focus:ring-gray-500 hover:bg-gray-600' : 'bg-gray-100 text-gray-900 focus:ring-gray-400 hover:bg-gray-200'}`}
                     >
                       <option value="above">Above</option>
                       <option value="below">Below</option>
@@ -1352,9 +1319,9 @@ export function WindExplorer({
                         type="number"
                         value={speedThreshold}
                         onChange={(e) => setSpeedThreshold(Number(e.target.value))}
-                        className={`block w-full rounded-full border p-1.5 pr-10 text-xs transition-all ${theme === 'dark' ? 'bg-gray-800 border-gray-700 text-gray-200 focus:ring-gray-500 focus:border-gray-700 hover:bg-gray-700' : 'bg-gray-50 border-gray-200 text-gray-900 focus:ring-gray-500 focus:border-gray-700 hover:bg-white'}`}
+                        className={`block w-full rounded-full border-0 py-1.5 pl-3 pr-10 text-xs transition-all ${theme === 'dark' ? 'bg-gray-700 text-gray-100 focus:ring-gray-500 hover:bg-gray-600' : 'bg-gray-100 text-gray-900 focus:ring-gray-400 hover:bg-gray-200'}`}
                       />
-                      <span className={`absolute right-2 top-1.5 text-[10px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
+                      <span className={`absolute right-2 top-1.5 text-[11px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
                     </div>
                   </div>
                 )}
