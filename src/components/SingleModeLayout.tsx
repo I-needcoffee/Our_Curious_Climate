@@ -23,6 +23,8 @@ interface SingleModeLayoutProps {
   tutorialFilter?: GlobalFilterState;
   tutorialUnitSystem?: UnitSystem;
   tutorialSiteLatitude?: number | null;
+  tutorialSiteLng?: number | null;
+  tutorialSiteTimeZone?: number | null;
 }
 
 function getSlotsPerPage(mode: LayoutMode) {
@@ -46,6 +48,8 @@ export function SingleModeLayout({
   tutorialFilter,
   tutorialUnitSystem,
   tutorialSiteLatitude = null,
+  tutorialSiteLng = null,
+  tutorialSiteTimeZone = null,
 }: SingleModeLayoutProps) {
   const tutorialColRef = useRef<HTMLDivElement>(null);
   /** Chart + guide grid only (excludes `TutorialCardChromeHints`) so ResizeObserver does not watch the hints strip. */
@@ -262,6 +266,8 @@ export function SingleModeLayout({
                         filter={tutorialFilter ?? DEFAULT_GLOBAL_FILTER}
                         unitSystem={tutorialUnitSystem ?? 'metric'}
                         siteLatitude={tutorialSiteLatitude}
+                        siteLng={tutorialSiteLng}
+                        siteTimeZone={tutorialSiteTimeZone}
                       />
                     </>
                   );

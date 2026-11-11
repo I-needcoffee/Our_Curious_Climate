@@ -10,6 +10,25 @@ import {
 } from './globalFilter';
 import { OUTDOOR_COMFORT_GREEN_HEX, OUTDOOR_COMFORT_GREEN_RGB } from './constants';
 import {
+  groundMeanRadiantTemperatureC,
+  stationMeanRadiantTemperatureC,
+  LADYBUG_GROUND,
+  type GroundSite,
+  type GroundSurface,
+} from './groundComfort';
+
+export type { GroundSite, GroundSurface };
+
+/** Shared radiant context. Station uses the UTCI authors’ weather-file procedure. */
+export type UtciEnvironment = {
+  /** Station ignores ground reflectance. Reflectance uses ASHRAE-55 and `ground`. */
+  radiantMode?: 'station' | 'reflectance';
+  ground?: GroundSurface | null;
+  site?: GroundSite | null;
+  /** Per-hour ground temperature. The boolean is true when the ground is sunlit. Used by reflectance mode. */
+  surfaceTempForRow?: ((row: EPWDataRow, sunlitGround: boolean) => number | undefined) | null;
+};
+import {
   ASTRONOMICAL_SEASON_LABELS,
   astronomicalSeasonDaySegments,
   dateInAstronomicalSeason,
@@ -61,12 +80,39 @@ export function formatUtciCategoryLabel(category: string): string {
   return category.replace(/\b\w/g, c => c.toUpperCase());
 }
 
-/** UTCI polynomial is only defined inside these bounds (jsthermalcomfort `limit_inputs`). */
-export function utciRowOutsideModelRange(
-  row: EPWDataRow,
-  opts: { includeSun?: boolean; includeWind?: boolean } = {}
-): boolean {
+export type UtciRowOpts = UtciEnvironment & {
+  includeSun?: boolean;
+  includeWind?: boolean;
+};
+
+/** Previous shortcut, used only when the station location is missing so sun altitude cannot be computed. */
+function legacyMeanRadiantC(tdb: number, ghr: number, includeSun: boolean): number {
+  return includeSun ? tdb + 0.02 * Math.max(0, ghr) : tdb;
+}
+
+function meanRadiantForRow(row: EPWDataRow, opts: UtciRowOpts): number | null {
+  const tdb = row.dryBulbTemperature as number;
+  const ghr = row.globalHorizontalRadiation as number;
   const includeSun = opts.includeSun ?? true;
+  const ground = opts.ground ?? LADYBUG_GROUND;
+  if ((opts.radiantMode ?? 'station') === 'station') {
+    return (
+      stationMeanRadiantTemperatureC({ row, site: opts.site ?? null, personInSun: includeSun }) ??
+      legacyMeanRadiantC(tdb, ghr, includeSun)
+    );
+  }
+  if (!opts.site) return legacyMeanRadiantC(tdb, ghr, includeSun);
+  return groundMeanRadiantTemperatureC({
+    row,
+    ground,
+    site: opts.site,
+    personInSun: includeSun,
+    surfaceTempC: opts.surfaceTempForRow?.(row, includeSun),
+  });
+}
+
+/** UTCI polynomial is only defined inside these bounds (jsthermalcomfort `limit_inputs`). */
+export function utciRowOutsideModelRange(row: EPWDataRow, opts: UtciRowOpts = {}): boolean {
   const includeWind = opts.includeWind ?? true;
   const tdb = row.dryBulbTemperature as number;
   const rh = row.relativeHumidity as number;
@@ -74,16 +120,16 @@ export function utciRowOutsideModelRange(
   const ghr = row.globalHorizontalRadiation as number;
   if ([tdb, rh, windSpeed, ghr].some(v => v == null || Number.isNaN(v))) return false;
   const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-  const tr = includeSun ? tdb + 0.02 * Math.max(0, ghr) : tdb;
+  const tr = meanRadiantForRow(row, opts);
+  if (tr == null || !Number.isFinite(tr)) return true;
   const dtr = tr - tdb;
   return tdb < -50 || tdb > 50 || dtr < -30 || dtr > 70 || v > 17;
 }
 
 export function computeUtciForEpwRow(
   row: EPWDataRow,
-  opts: { includeSun?: boolean; includeWind?: boolean } = {}
+  opts: UtciRowOpts = {}
 ): { utci: number; category: string; isComfortable: boolean } | null {
-  const includeSun = opts.includeSun ?? true;
   const includeWind = opts.includeWind ?? true;
 
   const tdb = row.dryBulbTemperature as number;
@@ -94,7 +140,8 @@ export function computeUtciForEpwRow(
   if (utciRowOutsideModelRange(row, opts)) return null;
 
   const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
-  const tr = includeSun ? tdb + 0.02 * Math.max(0, ghr) : tdb;
+  const tr = meanRadiantForRow(row, opts);
+  if (tr == null || !Number.isFinite(tr)) return null;
 
   try {
     // Numeric UTCI only — never use library stress_category (nearest-threshold bug).
@@ -233,13 +280,17 @@ export type UtciOptimizedPick = {
  * For one EPW hour, evaluate all four exposure combos and pick the most comfortable.
  * Prefer smallest distance to the comfort band; ties break toward the band midpoint (17.5°C).
  */
-export function pickOptimizedUtciExposure(row: EPWDataRow): UtciOptimizedPick | null {
+export function pickOptimizedUtciExposure(
+  row: EPWDataRow,
+  env: UtciEnvironment = {}
+): UtciOptimizedPick | null {
   let best: UtciOptimizedPick | null = null;
   let bestDist = Number.POSITIVE_INFINITY;
   let bestCenter = Number.POSITIVE_INFINITY;
 
   for (const scenario of UTCI_EXPOSURE_SCENARIOS) {
     const computed = computeUtciForEpwRow(row, {
+      ...env,
       includeSun: scenario.includeSun,
       includeWind: scenario.includeWind,
     });
@@ -524,7 +575,7 @@ export type UtciCategoryShare = {
 
 export function computeUtciCategoryShares(
   rows: EPWDataRow[],
-  opts: { includeSun?: boolean; includeWind?: boolean }
+  opts: UtciRowOpts
 ): { shares: UtciCategoryShare[]; comfortPercent: number; hoursCounted: number } {
   const counts = new Map<string, number>();
   let comfortN = 0;
@@ -559,14 +610,15 @@ export function computeUtciCategoryShares(
 
 /** Category shares using the per-hour best exposure (Optimize mode). */
 export function computeOptimizedUtciCategoryShares(
-  rows: EPWDataRow[]
+  rows: EPWDataRow[],
+  env: UtciEnvironment = {}
 ): { shares: UtciCategoryShare[]; comfortPercent: number; hoursCounted: number } {
   const counts = new Map<string, number>();
   let comfortN = 0;
   let total = 0;
 
   for (const row of rows) {
-    const pick = pickOptimizedUtciExposure(row);
+    const pick = pickOptimizedUtciExposure(row, env);
     if (!pick) continue;
     total += 1;
     counts.set(pick.category, (counts.get(pick.category) ?? 0) + 1);
@@ -659,7 +711,8 @@ export function comfortPercentHeatStyle(
 export function computeUtciComfortMatrix(
   rows: EPWDataRow[],
   filter: GlobalFilterState,
-  siteLatitude?: number | null
+  siteLatitude?: number | null,
+  env: UtciEnvironment = {}
 ): UtciComfortMatrix {
   const hemisphere = resolveHemisphere(siteLatitude);
   const periods = UTCI_COMFORT_PERIOD_ROWS.map(p => ({
@@ -682,7 +735,7 @@ export function computeUtciComfortMatrix(
         if (!rowMatchesUtciComfortPeriod(row, period, filter, siteLatitude)) continue;
 
         if (scenario.optimized) {
-          const pick = pickOptimizedUtciExposure(row);
+          const pick = pickOptimizedUtciExposure(row, env);
           if (!pick) continue;
           total += 1;
           winIds.push(pick.scenario.id);
@@ -691,6 +744,7 @@ export function computeUtciComfortMatrix(
         }
 
         const utci = computeUtciForEpwRow(row, {
+          ...env,
           includeSun: scenario.includeSun ?? true,
           includeWind: scenario.includeWind ?? true,
         });
@@ -713,7 +767,7 @@ export function computeUtciComfortMatrix(
 /** UTCI heatmap/bar gradient domain (°C), extended for cold/high-altitude files. */
 export function utciGradientExtentFromRows(
   rows: EPWDataRow[],
-  opts: { includeSun?: boolean; includeWind?: boolean } = {}
+  opts: UtciRowOpts = {}
 ): { minC: number; maxC: number } {
   const values: number[] = [];
   for (const row of rows) {
@@ -739,11 +793,13 @@ export type UtciCellScenarioSummary = {
  */
 export function summarizeUtciCellScenarios(
   rows: EPWDataRow[],
-  statistic: HeatmapCellStatistic = 'mean'
+  statistic: HeatmapCellStatistic = 'mean',
+  env: UtciEnvironment = {}
 ): UtciCellScenarioSummary[] {
   return UTCI_EXPOSURE_SCENARIOS.map(scenario => {
     const computed = rows
       .map(row => computeUtciForEpwRow(row, {
+        ...env,
         includeSun: scenario.includeSun,
         includeWind: scenario.includeWind,
       }))

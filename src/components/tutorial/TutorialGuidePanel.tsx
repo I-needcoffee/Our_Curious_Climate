@@ -26,6 +26,8 @@ export function TutorialGuidePanel({
   filter,
   unitSystem,
   siteLatitude = null,
+  siteLng = null,
+  siteTimeZone = null,
 }: {
   theme: 'light' | 'dark';
   slot: ChartConfig;
@@ -33,6 +35,8 @@ export function TutorialGuidePanel({
   filter: GlobalFilterState;
   unitSystem: UnitSystem;
   siteLatitude?: number | null;
+  siteLng?: number | null;
+  siteTimeZone?: number | null;
 }) {
   const { snapshot, requestUtciSelection, clearUtciFocus } = useTutorialLive();
   const [selectedCell, setSelectedCell] = useState<{ periodIndex: number; scenarioIndex: number } | null>(
@@ -113,9 +117,11 @@ export function TutorialGuidePanel({
             filter,
             live: snapshot,
             siteLatitude,
+            siteLng,
+            siteTimeZone,
           })
         : null,
-    [slot.type, epwRows, filter, snapshot, siteLatitude]
+    [slot.type, epwRows, filter, snapshot, siteLatitude, siteLng, siteTimeZone]
   );
 
   const activeScenarioIndex = useMemo(() => {

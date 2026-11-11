@@ -19,6 +19,7 @@ import { useWindIemGlobalPrefs } from '../lib/iem/globalWindIemPrefsStore';
 import { variableLegendDomain } from '../lib/variableLegendDomain';
 import { convertUnit, convertValue, UNIT_C, UNIT_F } from '../lib/unitConversion';
 import { utciGradientExtentFromRows } from '../lib/utciModel';
+import { GROUND_PRESETS, realizeGround } from '../lib/groundComfort';
 import { GRADIENTS } from '../lib/constants';
 import { DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
 import { sequentialHeatmapColorFn } from '../lib/heatmapColorAdjust';
@@ -406,6 +407,12 @@ export function ComparisonModeLayout({
   const [utciGrad, setUtciGrad] = useState(DIFFERENCE_DIVERGING_ID);
   const [utciStats, setUtciStats] = useState(false);
   const [utciSettings, setUtciSettings] = useState(false);
+  const [utciGround, setUtciGround] = useState<CompareUtciSharedControls['ground']>(() =>
+    realizeGround(GROUND_PRESETS.find(p => p.id === 'grass-dry') ?? GROUND_PRESETS[0])
+  );
+  const [utciRadiantMode, setUtciRadiantMode] =
+    useState<CompareUtciSharedControls['radiantMode']>('station');
+  const [utciSurfaceHeat, setUtciSurfaceHeat] = useState(false);
 
   const utciShared: CompareUtciSharedControls = {
     aggregation: utciAgg,
@@ -426,6 +433,12 @@ export function ComparisonModeLayout({
     setShowStats: setUtciStats,
     showSettings: utciSettings,
     setShowSettings: setUtciSettings,
+    ground: utciGround,
+    setGround: setUtciGround,
+    radiantMode: utciRadiantMode,
+    setRadiantMode: setUtciRadiantMode,
+    surfaceHeat: utciSurfaceHeat,
+    setSurfaceHeat: setUtciSurfaceHeat,
   };
 
   const iemGlobal = useWindIemGlobalPrefs();

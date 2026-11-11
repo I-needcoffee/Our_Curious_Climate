@@ -7,6 +7,15 @@ import 'rc-slider/assets/index.css';
 import { EPWDataRow, type EPWMetadata } from '../lib/epwParser';
 import { appendExposedOnlyIcons } from '../lib/exposureMapIcons';
 import {
+  GROUND_METHOD_SUMMARY,
+  GROUND_PRESETS,
+  nearestReflectancePreset,
+  reflectanceLikeness,
+  buildSurfaceTemperatureLookup,
+  realizeGround,
+  type GroundSurface,
+} from '../lib/groundComfort';
+import {
   isSolarNightEpwStation,
   solarNightOverlayRgba,
   solarNightParamsFromHeatmapDatum,
@@ -101,6 +110,7 @@ import {
   rowMatchesUtciComfortPeriod,
   summarizeUtciCellScenarios,
   utciScenarioById,
+  type UtciEnvironment,
   UTCI_COLORS,
   UTCI_EXPOSURE_SCENARIOS,
   utciPeriodHeatmapBounds,
@@ -158,10 +168,11 @@ function openUtciCellInspect(args: {
   statistic: HeatmapCellStatistic;
   setInspect: (p: UtciCellInspectPayload | null) => void;
   winningScenarioId?: string | null;
+  env?: UtciEnvironment;
 }) {
-  const { rows, title, aggregation, statistic, setInspect, winningScenarioId } = args;
+  const { rows, title, aggregation, statistic, setInspect, winningScenarioId, env } = args;
   if (!rows.length) return;
-  const scenarios = summarizeUtciCellScenarios(rows, statistic);
+  const scenarios = summarizeUtciCellScenarios(rows, statistic, env);
   const hourCount = scenarios[0]?.hourCount ?? rows.length;
   const aggWord =
     aggregation === 'month'
@@ -376,6 +387,67 @@ export function UtciExplorer({
   const setOptimizeView = utciShared?.setOptimizeView ?? setIOptimizeView;
   const showExposureMap = optimizeMode && optimizeView === 'exposure' && !showDifference;
 
+  const [iGround, setIGround] = useState<GroundSurface | null>(() =>
+    realizeGround(GROUND_PRESETS.find(p => p.id === 'grass-dry') ?? GROUND_PRESETS[0])
+  );
+  const ground = utciShared?.ground ?? iGround;
+  const setGround = utciShared?.setGround ?? setIGround;
+  const [iRadiantMode, setIRadiantMode] = useState<'station' | 'reflectance'>('station');
+  const radiantMode = utciShared?.radiantMode ?? iRadiantMode;
+  const setRadiantMode = utciShared?.setRadiantMode ?? setIRadiantMode;
+  const [iSurfaceHeat, setISurfaceHeat] = useState(false);
+  const surfaceHeat = utciShared?.surfaceHeat ?? iSurfaceHeat;
+  const setSurfaceHeat = utciShared?.setSurfaceHeat ?? setISurfaceHeat;
+  const [showGroundNotes, setShowGroundNotes] = useState(false);
+
+  const activeGround = useMemo(() => {
+    const grass = GROUND_PRESETS.find(p => p.id === 'grass-dry') ?? GROUND_PRESETS[0];
+    const selected = ground && ground.id !== 'ladybug' ? ground : grass;
+    if (radiantMode !== 'reflectance' || !surfaceHeat) return selected;
+    return realizeGround(
+      selected.volumetricHeat
+        ? selected
+        : { ...grass, id: selected.id, label: selected.label, solarReflectance: selected.solarReflectance }
+    );
+  }, [radiantMode, ground, surfaceHeat]);
+
+  const surfaceTempLookup = useMemo(() => {
+    if (!surfaceHeat || radiantMode !== 'reflectance') return null;
+    return {
+      sun: buildSurfaceTemperatureLookup(data, activeGround, 'full'),
+      shade: buildSurfaceTemperatureLookup(data, activeGround, 'diffuse'),
+    };
+  }, [surfaceHeat, radiantMode, data, activeGround]);
+
+  const surfaceTempForRow = useMemo(() => {
+    if (!surfaceTempLookup) return null;
+    return (row: EPWDataRow, sunlitGround: boolean) =>
+      (sunlitGround ? surfaceTempLookup.sun : surfaceTempLookup.shade).get(
+        `${row.month}-${row.day}-${row.hour}`
+      );
+  }, [surfaceTempLookup]);
+
+  const utciSite = useMemo(() => {
+    if (
+      !metadata ||
+      !Number.isFinite(metadata.lat) ||
+      !Number.isFinite(metadata.lng) ||
+      !Number.isFinite(metadata.timeZone)
+    ) {
+      return null;
+    }
+    return { lat: metadata.lat, lng: metadata.lng, timeZone: metadata.timeZone };
+  }, [metadata]);
+  const utciEnv = useMemo<UtciEnvironment>(
+    () => ({
+      radiantMode,
+      ground: activeGround,
+      site: utciSite,
+      surfaceTempForRow: radiantMode === 'reflectance' ? surfaceTempForRow : null,
+    }),
+    [radiantMode, activeGround, utciSite, surfaceTempForRow]
+  );
+
   const [iColorMode, setIColorMode] = useState<'categories' | 'comfortTime' | 'gradient'>('comfortTime');
   const colorMode = utciShared?.colorMode ?? iColorMode;
   const setColorMode = utciShared?.setColorMode ?? setIColorMode;
@@ -412,23 +484,31 @@ export function UtciExplorer({
     if (showDifference && compareData) {
       return 'Compare lines: baseline vs comparison; shading shows the gap.';
     }
+    const groundLine =
+      radiantMode === 'station'
+        ? 'Station procedure · weather-file sunlight and cloud cover.'
+        : `ASHRAE-55 · ${(activeGround.solarReflectance * 100).toFixed(0)}% reflectance · ground at air temperature.`;
+    const methodLine =
+      surfaceHeat && radiantMode === 'reflectance'
+        ? `ASHRAE-55 · ${activeGround.label} · ${(activeGround.solarReflectance * 100).toFixed(0)}% reflectance. Surface-temperature estimate · ${Math.round((activeGround.thicknessM ?? 0.05) * 100)} cm · irrigation ${Math.round((activeGround.irrigation ?? 0) * 100)}%.`
+        : groundLine;
     if (showExposureMap) {
-      return 'Icons show what to leave exposed. House = sheltered. Moon replaces sun after sunset.';
+      return `Icons show what to leave exposed. ${methodLine}`;
     }
     if (optimizeMode) {
-      return 'Optimize uses the most comfortable sun/wind mix every hour. Use Exposure to map which condition wins.';
+      return `Optimize uses the most comfortable sun/wind mix every hour. ${methodLine}`;
     }
     if (colorMode === 'comfortTime') {
-      return 'Bars: comfort-time share per period (filtered).';
+      return methodLine;
     }
     if (colorMode === 'categories') {
-      return 'Strip: stress categories.';
+      return `Strip: stress categories. ${methodLine}`;
     }
     if (aggregation !== 'hour') {
-      return 'Bars span hourly UTCI minimum to maximum.';
+      return `Bars span hourly UTCI minimum to maximum. ${methodLine}`;
     }
-    return '';
-  }, [aggregation, colorMode, showDifference, compareData, optimizeMode, showExposureMap]);
+    return methodLine;
+  }, [aggregation, colorMode, showDifference, compareData, optimizeMode, showExposureMap, radiantMode, activeGround, surfaceHeat]);
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
@@ -449,8 +529,17 @@ export function UtciExplorer({
       includeSun,
       includeWind,
       optimizeMode,
+      utciGroundLabel: radiantMode === 'reflectance' && surfaceHeat ? activeGround.label : null,
+      utciGroundReflectance: activeGround.solarReflectance,
+      utciGroundEmissivity: activeGround.emissivity,
+      utciGroundEvaporates: surfaceHeat && (activeGround.irrigation ?? 0) > 0.02,
+      utciGroundIrrigation: activeGround.irrigation ?? 0,
+      utciGroundThicknessM: activeGround.thicknessM,
+      utciGroundVolumetricHeat: activeGround.volumetricHeat,
+      utciGroundConductivity: activeGround.conductivity,
+      utciRadiantMode: radiantMode === 'reflectance' && surfaceHeat ? 'surface' : radiantMode,
     });
-  }, [tutorialEnabled, tutorialReport, aggregation, colorMode, includeSun, includeWind, optimizeMode]);
+  }, [tutorialEnabled, tutorialReport, aggregation, colorMode, includeSun, includeWind, optimizeMode, activeGround, radiantMode, surfaceHeat]);
 
   const tutorialExposureSun = tutorialLive?.snapshot.includeSun;
   const tutorialExposureWind = tutorialLive?.snapshot.includeWind;
@@ -495,8 +584,12 @@ export function UtciExplorer({
       ? 'Optimize is on — turn it off to set sun/wind manually'
       : kind === 'sun'
         ? active
-          ? 'Solar radiation included \u2014 click to turn off'
-          : 'Solar radiation excluded \u2014 click to turn on'
+          ? radiantMode === 'station'
+            ? 'Sun on, using the station procedure \u2014 click for shade'
+            : 'Sun on the person and the ground \u2014 click for shade'
+          : radiantMode === 'station'
+            ? 'Shade: shaded-site sunlight, ground at the air temperature \u2014 click for sun'
+            : 'Shade: direct sun and ground reflection off, diffuse sky remains \u2014 click for sun'
         : active
           ? 'Wind speed included \u2014 click to turn off'
           : 'Wind excluded (0.5 m/s) \u2014 click to turn on';
@@ -670,7 +763,7 @@ export function UtciExplorer({
   const utciData: UtciDataRow[] = useMemo(() => {
     return data.map(d => {
       if (optimizeMode) {
-        const pick = pickOptimizedUtciExposure(d);
+        const pick = pickOptimizedUtciExposure(d, utciEnv);
         return {
           ...d,
           utci: pick?.utci ?? NaN,
@@ -679,7 +772,7 @@ export function UtciExplorer({
           bestScenarioId: pick?.scenario.id ?? null,
         };
       }
-      const computed = computeUtciForEpwRow(d, { includeSun, includeWind });
+      const computed = computeUtciForEpwRow(d, { ...utciEnv, includeSun, includeWind });
       return {
         ...d,
         utci: computed?.utci ?? NaN,
@@ -688,12 +781,12 @@ export function UtciExplorer({
         bestScenarioId: null,
       };
     });
-  }, [data, includeSun, includeWind, optimizeMode]);
+  }, [data, includeSun, includeWind, optimizeMode, utciEnv]);
 
   const compareUtciData: UtciDataRow[] = useMemo(() => {
     return (compareData || []).map(d => {
       if (optimizeMode) {
-        const pick = pickOptimizedUtciExposure(d);
+        const pick = pickOptimizedUtciExposure(d, utciEnv);
         return {
           ...d,
           utci: pick?.utci ?? NaN,
@@ -702,7 +795,7 @@ export function UtciExplorer({
           bestScenarioId: pick?.scenario.id ?? null,
         };
       }
-      const computed = computeUtciForEpwRow(d, { includeSun, includeWind });
+      const computed = computeUtciForEpwRow(d, { ...utciEnv, includeSun, includeWind });
       return {
         ...d,
         utci: computed?.utci ?? NaN,
@@ -711,7 +804,7 @@ export function UtciExplorer({
         bestScenarioId: null,
       };
     });
-  }, [compareData, includeSun, includeWind, optimizeMode]);
+  }, [compareData, includeSun, includeWind, optimizeMode, utciEnv]);
 
   const convertUtci = (val: number) => {
     if (unitSystem === 'imperial') {
@@ -744,8 +837,8 @@ export function UtciExplorer({
         const compareByHour = indexEpwByEquivalentHour(compareData);
         const utciOf = (row: EPWDataRow) =>
           optimizeMode
-            ? pickOptimizedUtciExposure(row)?.utci
-            : computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
+            ? pickOptimizedUtciExposure(row, utciEnv)?.utci
+            : computeUtciForEpwRow(row, { ...utciEnv, includeSun, includeWind })?.utci;
         const diffs: number[] = [];
         for (const row of data) {
           const compareRow = compareByHour.get(epwEquivalentHourKey(row));
@@ -765,7 +858,7 @@ export function UtciExplorer({
     }
     const extent = utciGradientExtentC(utciData.map(d => d.utci));
     return { utciMin: extent.minC, utciMax: extent.maxC };
-  }, [data, compareData, showDifference, includeSun, includeWind, optimizeMode, utciData]);
+  }, [data, compareData, showDifference, includeSun, includeWind, optimizeMode, utciEnv, utciData]);
 
   useEffect(() => {
     if (!svgRef.current || dimensions.width === 0) return;
@@ -868,8 +961,8 @@ export function UtciExplorer({
           .map(v => {
             const cD = compareByHour?.get(epwEquivalentHourKey(v));
             if (!cD) return null;
-            if (optimizeMode) return pickOptimizedUtciExposure(cD)?.utci ?? null;
-            return computeUtciForEpwRow(cD, { includeSun, includeWind })?.utci ?? null;
+            if (optimizeMode) return pickOptimizedUtciExposure(cD, utciEnv)?.utci ?? null;
+            return computeUtciForEpwRow(cD, { ...utciEnv, includeSun, includeWind })?.utci ?? null;
           })
           .filter((v): v is number => v != null);
         const compareStat = aggregateCellStatistic(compareValues, heatmapCellStatistic);
@@ -1160,6 +1253,7 @@ export function UtciExplorer({
           statistic: heatmapCellStatistic,
           setInspect: setCellInspectRef.current,
           winningScenarioId: optimizeMode ? d.dominantScenarioId ?? null : null,
+          env: utciEnv,
         });
       })
       .append("title")
@@ -1607,6 +1701,7 @@ export function UtciExplorer({
     optimizeMode,
     optimizeView,
     showExposureMap,
+    utciEnv,
     tutorialEnabled,
     tutorialFocusPeriodId,
     barGradientSvgId,
@@ -1631,8 +1726,8 @@ export function UtciExplorer({
       const compareByHour = indexEpwByEquivalentHour(compareData);
       const utciOf = (row: EPWDataRow) =>
         optimizeMode
-          ? pickOptimizedUtciExposure(row)?.utci
-          : computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
+          ? pickOptimizedUtciExposure(row, utciEnv)?.utci
+          : computeUtciForEpwRow(row, { ...utciEnv, includeSun, includeWind })?.utci;
       const diffs = filteredData.map(d => {
         const cD = compareByHour.get(epwEquivalentHourKey(d));
         if (!cD) return null;
@@ -1894,6 +1989,203 @@ export function UtciExplorer({
             hour; Comfort / Exposure switches between the usual gradient and the winning-condition map.
           </p>
           <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                Comfort calculation
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowGroundNotes(true)}
+                className={`text-[11px] font-semibold ${theme === 'dark' ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                What changes
+              </button>
+            </div>
+            <div className={`flex flex-wrap gap-1 rounded-full p-1 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`} role="group" aria-label="Verified radiant temperature">
+              {(['station', 'reflectance'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={radiantMode === mode}
+                  onClick={() => setRadiantMode(mode)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    radiantMode === mode
+                      ? theme === 'dark'
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-white text-gray-900 shadow-sm'
+                      : theme === 'dark'
+                        ? 'text-gray-300'
+                        : 'text-gray-600'
+                  }`}
+                >
+                  {mode === 'station' ? 'Station' : '+ Reflectance'}
+                </button>
+              ))}
+            </div>
+            <p className={`m-0 text-[11px] leading-snug ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+              {radiantMode === 'station'
+                ? 'Station follows the UTCI authors’ procedure for a weather file. Reflected sunlight is already inside that procedure, so material and reflectance stay hidden.'
+                : 'Reflectance uses ASHRAE-55. The slider is sunlight bouncing off the ground onto a person. A darker ground bounces less. The ground stays at the air temperature until the estimate below is on.'}
+            </p>
+            {radiantMode === 'reflectance' ? (() => {
+              const shown = activeGround;
+              const surfaceOn = surfaceHeat;
+              const row = (
+                label: string,
+                valueText: string,
+                hint: string,
+                enabled: boolean,
+                input: { min: number; max: number; step: number; value: number; onChange: (n: number) => void }
+              ) => (
+                <label
+                  key={label}
+                  className={`block text-[11px] font-semibold ${
+                    enabled
+                      ? theme === 'dark'
+                        ? 'text-gray-200'
+                        : 'text-gray-800'
+                      : theme === 'dark'
+                        ? 'text-gray-500'
+                        : 'text-gray-400'
+                  }`}
+                >
+                  {label} {valueText}
+                  {hint ? <span className="mt-0.5 block font-normal">{hint}</span> : null}
+                  <input
+                    type="range"
+                    min={input.min}
+                    max={input.max}
+                    step={input.step}
+                    value={input.value}
+                    disabled={!enabled}
+                    onChange={e => input.onChange(Number(e.target.value))}
+                    className={`mt-1 w-full ${enabled ? '' : 'cursor-not-allowed opacity-40'}`}
+                  />
+                </label>
+              );
+              return (
+                <>
+                  {row(
+                    'Solar reflectance',
+                    `${(shown.solarReflectance * 100).toFixed(0)}%`,
+                    surfaceOn
+                      ? 'Included in the radiant temperature.'
+                      : reflectanceLikeness(shown.solarReflectance),
+                    true,
+                    {
+                      min: 0,
+                      max: 0.8,
+                      step: 0.01,
+                      value: shown.solarReflectance,
+                      onChange: n =>
+                        setGround(
+                          surfaceOn
+                            ? realizeGround({ ...activeGround, id: 'custom', label: 'Custom', solarReflectance: n })
+                            : {
+                                id: 'custom',
+                                label: 'Custom',
+                                solarReflectance: n,
+                                emissivity: shown.emissivity,
+                                irrigation: 0,
+                              }
+                        ),
+                    }
+                  )}
+                  <div className={`space-y-2 rounded-2xl p-3 ${theme === 'dark' ? 'bg-amber-950/40' : 'bg-amber-50'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`m-0 text-[11px] font-semibold ${theme === 'dark' ? 'text-amber-100' : 'text-amber-950'}`}>
+                        Surface temperature estimate
+                      </p>
+                      <button
+                        type="button"
+                        aria-pressed={surfaceOn}
+                        onClick={() => {
+                          const next = !surfaceHeat;
+                          if (next && !GROUND_PRESETS.some(p => p.id === activeGround.id)) {
+                            setGround(realizeGround({ ...nearestReflectancePreset(activeGround.solarReflectance) }));
+                          }
+                          setSurfaceHeat(next);
+                        }}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          surfaceOn
+                            ? theme === 'dark'
+                              ? 'bg-amber-200 text-amber-950'
+                              : 'bg-amber-900 text-amber-50'
+                            : theme === 'dark'
+                              ? 'bg-gray-800 text-gray-300'
+                              : 'bg-white text-gray-600'
+                        }`}
+                      >
+                        {surfaceOn ? 'On' : 'Off'}
+                      </button>
+                    </div>
+                    <p className={`m-0 text-[11px] leading-snug ${theme === 'dark' ? 'text-amber-100/80' : 'text-amber-950'}`}>
+                      Separate from the station procedure and from ASHRAE-55. Off, the ground stays at the air temperature.
+                    </p>
+                    {surfaceOn ? (
+                      <>
+                        <select
+                          value={GROUND_PRESETS.some(p => p.id === shown.id) ? shown.id : 'custom'}
+                          onChange={e => {
+                            const preset = GROUND_PRESETS.find(p => p.id === e.target.value);
+                            if (preset) setGround(realizeGround({ ...preset }));
+                          }}
+                          className={`w-full rounded-full border-0 px-3.5 py-2 text-sm outline-none transition-colors focus:ring-2 focus:ring-blue-500 ${
+                            theme === 'dark' ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
+                          }`}
+                        >
+                          {GROUND_PRESETS.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                          {!GROUND_PRESETS.some(p => p.id === shown.id) ? <option value="custom">Custom</option> : null}
+                        </select>
+                        {row('Thermal emissivity', shown.emissivity.toFixed(2), '', true, {
+                          min: 0.8,
+                          max: 0.99,
+                          step: 0.01,
+                          value: shown.emissivity,
+                          onChange: n => setGround({ ...activeGround, id: 'custom', label: 'Custom', emissivity: n }),
+                        })}
+                        {row(
+                          'Irrigation',
+                          `${Math.round((shown.irrigation ?? 0) * 100)}%`,
+                          '0% is dry. 100% is well-watered evaporation. Steps between are a straight mix, not a measured watering rate.',
+                          true,
+                          {
+                            min: 0,
+                            max: 1,
+                            step: 0.05,
+                            value: shown.irrigation ?? 0,
+                            onChange: n =>
+                              setGround(realizeGround({ ...activeGround, id: 'custom', label: 'Custom', irrigation: n })),
+                          }
+                        )}
+                        {row(
+                          'Layer thickness',
+                          `${Math.round((shown.thicknessM ?? 0.05) * 100)} cm`,
+                          'Changes stored heat, not emissivity.',
+                          true,
+                          {
+                            min: 1,
+                            max: 30,
+                            step: 1,
+                            value: Math.round((shown.thicknessM ?? 0.05) * 100),
+                            onChange: n =>
+                              setGround(
+                                realizeGround({ ...activeGround, id: 'custom', label: 'Custom', thicknessM: n / 100 })
+                              ),
+                          }
+                        )}
+                      </>
+                    ) : null}
+                  </div>
+                </>
+              );
+            })() : null}
+          </div>
+          <div className="space-y-2">
             <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Visualization Mode</label>
             <select
               value={colorMode}
@@ -1937,6 +2229,26 @@ export function UtciExplorer({
           ) : null}
         </div>
 
+      </CardModal>
+
+      <CardModal
+        open={showGroundNotes}
+        onClose={() => setShowGroundNotes(false)}
+        title="Ground and outdoor comfort"
+        theme={theme}
+        anchorRef={outerRef as any}
+        maxWidthPx={520}
+      >
+        <div className="space-y-3">
+          {GROUND_METHOD_SUMMARY.map(paragraph => (
+            <p key={paragraph.slice(0, 24)} className={`m-0 text-xs leading-relaxed ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+              {paragraph}
+            </p>
+          ))}
+          <p className={`m-0 text-[11px] leading-snug ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+            Reflectance examples, not material models: new asphalt 6% and aged asphalt 15% (Synnefa et al. 2006); dark concrete 20% (Synnefa et al. 2006); short grass 25% (Oke 1987); light gray concrete 35% (PCA SN2982). Ground temperature is the air temperature unless the surface-temperature estimate is on.
+          </p>
+        </div>
       </CardModal>
 
       <UtciCellScenarioModal

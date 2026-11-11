@@ -33,6 +33,7 @@ import { dismissOnboarding, ONBOARDING_KEYS } from './lib/onboardingStorage';
 import { CARTO_LIGHT_ALL_WATER_HEX, GRADIENTS } from './lib/constants';
 import { CHART_TEXT_AUTO } from './lib/chartInk';
 import { TUTORIAL_LEGEND_DOM_ID } from './lib/tutorialCopy';
+import type { GroundSurface } from './lib/groundComfort';
 import { GradientDef } from './components/InteractiveLegend';
 import { ParsedEPW } from './lib/epwParser';
 import { withDstDisplayRespectingToggle } from './lib/dstDisplay';
@@ -314,6 +315,14 @@ export interface CompareUtciSharedControls {
   setShowStats: (v: boolean) => void;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
+  radiantMode: 'station' | 'reflectance';
+  setRadiantMode: (v: 'station' | 'reflectance') => void;
+  /** Separate energy-balance estimate. Used only in reflectance mode. */
+  surfaceHeat: boolean;
+  setSurfaceHeat: (v: boolean) => void;
+  /** Active ground for reflectance mode. Station mode ignores reflectance. */
+  ground: GroundSurface | null;
+  setGround: (v: GroundSurface | null) => void;
 }
 
 export interface CompareWindSharedControls {
@@ -1024,6 +1033,8 @@ export default function App() {
       tutorialFilter={globalFilter}
       tutorialUnitSystem={unitSystem}
       tutorialSiteLatitude={displayFiles[activeFileIndex]?.metadata.lat}
+      tutorialSiteLng={displayFiles[activeFileIndex]?.metadata.lng}
+      tutorialSiteTimeZone={displayFiles[activeFileIndex]?.metadata.timeZone}
       renderChart={config => {
         const tutSlot =
           viewMode === 'single' &&

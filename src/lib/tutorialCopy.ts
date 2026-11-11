@@ -19,6 +19,7 @@ export interface TutorialGuideInput {
     includeSun?: boolean;
     includeWind?: boolean;
     optimizeMode?: boolean;
+    utciGroundLabel?: string | null;
     windRoseBins?: number;
     radiusVarId?: string;
     radiusVarName?: string;
@@ -174,13 +175,17 @@ function utciCopy(input: TutorialGuideInput): TutorialGuideCopy {
         ? 'Each cell shows what share of timesteps felt physiologically comfortable for that bucket of time.'
         : 'Each cell shows the modeled comfort temperature itself on a color ramp you can change in Settings.';
 
+  const groundNote =
+    input.live.utciGroundLabel
+      ? ` Ground is ${input.live.utciGroundLabel}.`
+      : '';
   const exposureIntro = optimize
     ? 'Optimize mode picks the most comfortable of the four sun/wind exposures every hour. Stay on Comfort for the usual gradient, or switch to Exposure to map which condition wins.'
     : `Solar is ${sun ? 'on' : 'off'} and wind is ${wind ? 'on' : 'off'} in the model (sun/wind badges or the comfort table).`;
 
   return {
     chartTitle: 'Outdoor comfort (UTCI)',
-    overviewBody: `UTCI blends air temperature, humidity, wind, and shortwave sun into one outdoor comfort reading. ${exposureIntro} ${modeIntro} Columns move ${aggWords}. ${aggregationExplain(agg)}`,
+    overviewBody: `UTCI blends air temperature, humidity, wind, and shortwave sun into one outdoor comfort reading. ${exposureIntro}${groundNote} ${modeIntro} Columns move ${aggWords}. ${aggregationExplain(agg)}`,
     readingTitle: 'How to read it',
     readingBody: optimize
       ? 'Comfort view keeps the familiar green comfort-time (or category/temperature) fills under the best hourly exposure. Exposure view draws icons for what to leave exposed — sun (moon at night) and/or wind, or a house when fully sheltered.'

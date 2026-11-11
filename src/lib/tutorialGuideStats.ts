@@ -21,8 +21,10 @@ import {
   rowMatchesUtciComfortPeriod,
   type UtciCategoryShare,
   type UtciComfortMatrix,
+  type UtciEnvironment,
   UTCI_COMFORT_CATEGORY,
 } from './utciModel';
+import { GROUND_PRESETS, LADYBUG_GROUND, buildSurfaceTemperatureLookup, realizeGround, surfaceTemperatureForRow } from './groundComfort';
 
 export type TutorialQuickStat = { label: string; value: string };
 
@@ -323,13 +325,60 @@ export function computeTutorialNvQuickStats(opts: {
 }
 
 /** UTCI category breakdown + comfort table for guided Outdoor comfort panel. */
+function utciEnvFromLive(
+  live: TutorialLiveSnapshot,
+  site: UtciEnvironment['site'],
+  rows: EPWDataRow[]
+): UtciEnvironment {
+  const named = [LADYBUG_GROUND, ...GROUND_PRESETS].find(p => p.label === live.utciGroundLabel);
+  const picked = named ?? {
+    ...LADYBUG_GROUND,
+    id: 'live',
+    label: live.utciGroundLabel ?? LADYBUG_GROUND.label,
+    solarReflectance: live.utciGroundReflectance ?? LADYBUG_GROUND.solarReflectance,
+    emissivity: live.utciGroundEmissivity ?? LADYBUG_GROUND.emissivity,
+    irrigation: live.utciGroundIrrigation,
+    thicknessM: live.utciGroundThicknessM,
+    volumetricHeat: live.utciGroundVolumetricHeat,
+    conductivity: live.utciGroundConductivity,
+  };
+  const withEdits = realizeGround({
+    ...picked,
+    solarReflectance: live.utciGroundReflectance ?? picked.solarReflectance,
+    emissivity: live.utciGroundEmissivity ?? picked.emissivity,
+    irrigation: live.utciGroundIrrigation ?? picked.irrigation,
+    thicknessM: live.utciGroundThicknessM ?? picked.thicknessM,
+    volumetricHeat: live.utciGroundVolumetricHeat ?? picked.volumetricHeat,
+    conductivity: live.utciGroundConductivity ?? picked.conductivity,
+  });
+  const ground =
+    live.utciRadiantMode === 'surface'
+      ? withEdits
+      : live.utciRadiantMode === 'reflectance'
+        ? { ...withEdits, irrigation: 0, evaporates: false, heatCapacity: 0 }
+        : LADYBUG_GROUND;
+  const lookupSun = live.utciRadiantMode === 'surface' ? buildSurfaceTemperatureLookup(rows, ground, 'full') : null;
+  const lookupShade = live.utciRadiantMode === 'surface' ? buildSurfaceTemperatureLookup(rows, ground, 'diffuse') : null;
+  return {
+    radiantMode: live.utciRadiantMode === 'station' || live.utciRadiantMode == null ? 'station' : 'reflectance',
+    site: site ?? null,
+    ground,
+    surfaceTempForRow:
+      lookupSun && lookupShade
+        ? (row, sunlitGround) => surfaceTemperatureForRow(sunlitGround ? lookupSun : lookupShade, row)
+        : null,
+  };
+}
+
 export function computeTutorialUtciQuickStats(opts: {
   rows: EPWDataRow[] | undefined;
   filter: GlobalFilterState;
   live: TutorialLiveSnapshot;
   siteLatitude?: number | null;
+  siteLng?: number | null;
+  siteTimeZone?: number | null;
 }): TutorialUtciQuickStats | null {
-  const { rows, filter, live, siteLatitude = null } = opts;
+  const { rows, filter, live, siteLatitude = null, siteLng = null, siteTimeZone = null } = opts;
   if (!rows?.length) return null;
 
   const globallyFiltered = filterRows(rows, filter);
@@ -345,10 +394,20 @@ export function computeTutorialUtciQuickStats(opts: {
   const includeSun = live.includeSun ?? true;
   const includeWind = live.includeWind ?? true;
   const optimizeMode = live.optimizeMode === true;
+  const site =
+    siteLatitude != null &&
+    siteLng != null &&
+    siteTimeZone != null &&
+    Number.isFinite(siteLatitude) &&
+    Number.isFinite(siteLng) &&
+    Number.isFinite(siteTimeZone)
+      ? { lat: siteLatitude, lng: siteLng, timeZone: siteTimeZone }
+      : null;
+  const env = utciEnvFromLive(live, site, rows);
   const { shares, comfortPercent, hoursCounted } = optimizeMode
-    ? computeOptimizedUtciCategoryShares(shareRows)
-    : computeUtciCategoryShares(shareRows, { includeSun, includeWind });
-  const comfortMatrix = computeUtciComfortMatrix(rows, filter, siteLatitude);
+    ? computeOptimizedUtciCategoryShares(shareRows, env)
+    : computeUtciCategoryShares(shareRows, { ...env, includeSun, includeWind });
+  const comfortMatrix = computeUtciComfortMatrix(rows, filter, siteLatitude, env);
 
   return {
     categoryShares: shares,

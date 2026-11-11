@@ -19,6 +19,16 @@ export interface TutorialLiveSnapshot {
   includeWind?: boolean;
   /** Per-hour best of the four sun/wind exposure combos. */
   optimizeMode?: boolean;
+  /** Ground surface for the radiant model. Null/absent keeps the simple sun boost. */
+  utciGroundLabel?: string | null;
+  utciGroundReflectance?: number;
+  utciGroundEmissivity?: number;
+  utciGroundEvaporates?: boolean;
+  utciGroundIrrigation?: number;
+  utciGroundThicknessM?: number;
+  utciGroundVolumetricHeat?: number;
+  utciGroundConductivity?: number;
+  utciRadiantMode?: 'station' | 'reflectance' | 'surface';
   /** Guided comfort table: period row id to highlight on the UTCI heatmap/bars. */
   utciFocusPeriodId?: string | null;
   windRoseBins?: number;
