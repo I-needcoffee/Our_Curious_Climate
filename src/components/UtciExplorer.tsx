@@ -4,10 +4,16 @@ import { useTutorialLiveOptional } from '../context/TutorialLiveContext';
 import * as d3 from 'd3';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
-import { EPWDataRow } from '../lib/epwParser';
+import { EPWDataRow, type EPWMetadata } from '../lib/epwParser';
+import { appendExposedOnlyIcons } from '../lib/exposureMapIcons';
+import {
+  isSolarNightEpwStation,
+  solarNightOverlayRgba,
+  solarNightParamsFromHeatmapDatum,
+} from '../lib/solarNightHeatmap';
 // @ts-ignore
 import tc from 'jsthermalcomfort';
-import { Sun, Wind, X, Settings2 } from 'lucide-react';
+import { Sun, Moon, Wind, Home, X, Settings2, Sparkles } from 'lucide-react';
 import {
   InteractiveLegend,
   GradientDef,
@@ -90,10 +96,15 @@ import {
   getUtciComfortPeriodById,
   heatmapCellFocusDaySpans,
   computeUtciForEpwRow,
+  dominantOptimizedScenarioId,
+  pickOptimizedUtciExposure,
   rowMatchesUtciComfortPeriod,
   summarizeUtciCellScenarios,
+  utciScenarioById,
   UTCI_COLORS,
+  UTCI_EXPOSURE_SCENARIOS,
   utciPeriodHeatmapBounds,
+  type UtciOptimizeView,
 } from '../lib/utciModel';
 import {
   UtciCellScenarioModal,
@@ -126,6 +137,8 @@ interface UtciExplorerProps {
   pairSuppressFooterLegend?: boolean;
   /** EPW site latitude — flips astronomical seasons for the Southern Hemisphere. */
   siteLatitude?: number | null;
+  /** Station lat/lng/timezone for solar night shading on the exposure map. */
+  metadata?: EPWMetadata | null;
 }
 
 // Create a continuous color scale for UTCI categories
@@ -144,8 +157,9 @@ function openUtciCellInspect(args: {
   aggregation: 'hour' | 'day' | 'week' | 'month';
   statistic: HeatmapCellStatistic;
   setInspect: (p: UtciCellInspectPayload | null) => void;
+  winningScenarioId?: string | null;
 }) {
-  const { rows, title, aggregation, statistic, setInspect } = args;
+  const { rows, title, aggregation, statistic, setInspect, winningScenarioId } = args;
   if (!rows.length) return;
   const scenarios = summarizeUtciCellScenarios(rows, statistic);
   const hourCount = scenarios[0]?.hourCount ?? rows.length;
@@ -157,11 +171,15 @@ function openUtciCellInspect(args: {
         : aggregation === 'day'
           ? 'Daily'
           : 'Hourly';
-  const subtitle =
+  const winner = utciScenarioById(winningScenarioId);
+  const subtitleBase =
     aggregation === 'hour' || hourCount <= 1
       ? `${aggWord} cell · ${heatmapStatisticLabel(statistic)} feels-like for this hour`
       : `${aggWord} cell · ${heatmapStatisticLabel(statistic)} feels-like across ${hourCount} hours in this box`;
-  setInspect({ title, subtitle, scenarios });
+  const subtitle = winner
+    ? `${subtitleBase} · Optimize usually picks ${winner.shortLabel}`
+    : subtitleBase;
+  setInspect({ title, subtitle, scenarios, winningScenarioId: winningScenarioId ?? null });
 }
 
 const utciCategoryScale = d3.scaleLinear<string>()
@@ -260,6 +278,51 @@ interface UtciDataRow extends EPWDataRow {
   utci: number;
   utciCategory: string;
   isComfortable: number;
+  /** Winning exposure id when Optimize is on. */
+  bestScenarioId: string | null;
+}
+
+function ExposureLegendGlyph({ kind }: { kind: 'sun' | 'moon' | 'wind' | 'shelter' }) {
+  const tone =
+    kind === 'wind'
+      ? 'text-sky-500'
+      : kind === 'moon'
+        ? 'text-indigo-400'
+        : kind === 'shelter'
+          ? 'text-slate-400'
+          : 'text-amber-500';
+  const Icon = kind === 'wind' ? Wind : kind === 'moon' ? Moon : kind === 'shelter' ? Home : Sun;
+  return (
+    <span className={`inline-flex h-4 w-4 items-center justify-center ${tone}`}>
+      <Icon className="h-4 w-4 fill-current" strokeWidth={1.25} aria-hidden />
+    </span>
+  );
+}
+
+function UtciOptimizeScenarioLegend({ theme }: { theme: 'light' | 'dark' }) {
+  const muted = theme === 'dark' ? 'text-gray-400' : 'text-gray-500';
+  const ink = theme === 'dark' ? 'text-gray-200' : 'text-gray-700';
+  return (
+    <div className={`flex flex-col gap-1 ${muted}`} aria-label="Optimized exposure legend">
+      <p className={`m-0 text-[10px] font-medium leading-snug ${ink}`}>
+        Icons mark what to leave exposed.
+        {' '}
+        <ExposureLegendGlyph kind="shelter" /> = sheltered.
+        {' '}
+        <ExposureLegendGlyph kind="moon" /> replaces sun at night.
+      </p>
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] font-medium leading-none">
+        {UTCI_EXPOSURE_SCENARIOS.map(s => (
+          <span key={s.id} className={`inline-flex items-center gap-0.5 ${ink}`}>
+            {s.includeSun ? <ExposureLegendGlyph kind="sun" /> : null}
+            {s.includeWind ? <ExposureLegendGlyph kind="wind" /> : null}
+            {!s.includeSun && !s.includeWind ? <ExposureLegendGlyph kind="shelter" /> : null}
+            <span className={muted}>{s.shortLabel}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function UtciExplorer({
@@ -287,6 +350,7 @@ export function UtciExplorer({
   tutorialChromeAnchors,
   pairSuppressFooterLegend,
   siteLatitude = null,
+  metadata = null,
 }: UtciExplorerProps) {
   const barGradientSvgId = explorerChartValueGradientId(useId());
   const svgRef = useRef<SVGSVGElement>(null);
@@ -302,6 +366,15 @@ export function UtciExplorer({
   const [iWind, setIWind] = useState(true);
   const includeWind = utciShared?.includeWind ?? iWind;
   const setIncludeWind = utciShared?.setIncludeWind ?? setIWind;
+
+  const [iOptimize, setIOptimize] = useState(false);
+  const optimizeMode = utciShared?.optimizeMode ?? iOptimize;
+  const setOptimizeMode = utciShared?.setOptimizeMode ?? setIOptimize;
+
+  const [iOptimizeView, setIOptimizeView] = useState<UtciOptimizeView>('comfort');
+  const optimizeView = utciShared?.optimizeView ?? iOptimizeView;
+  const setOptimizeView = utciShared?.setOptimizeView ?? setIOptimizeView;
+  const showExposureMap = optimizeMode && optimizeView === 'exposure' && !showDifference;
 
   const [iColorMode, setIColorMode] = useState<'categories' | 'comfortTime' | 'gradient'>('comfortTime');
   const colorMode = utciShared?.colorMode ?? iColorMode;
@@ -339,6 +412,12 @@ export function UtciExplorer({
     if (showDifference && compareData) {
       return 'Compare lines: baseline vs comparison; shading shows the gap.';
     }
+    if (showExposureMap) {
+      return 'Icons show what to leave exposed. House = sheltered. Moon replaces sun after sunset.';
+    }
+    if (optimizeMode) {
+      return 'Optimize uses the most comfortable sun/wind mix every hour. Use Exposure to map which condition wins.';
+    }
     if (colorMode === 'comfortTime') {
       return 'Bars: comfort-time share per period (filtered).';
     }
@@ -349,7 +428,7 @@ export function UtciExplorer({
       return 'Bars span hourly UTCI minimum to maximum.';
     }
     return '';
-  }, [aggregation, colorMode, showDifference, compareData]);
+  }, [aggregation, colorMode, showDifference, compareData, optimizeMode, showExposureMap]);
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
@@ -369,17 +448,26 @@ export function UtciExplorer({
       utciColorMode: colorMode,
       includeSun,
       includeWind,
+      optimizeMode,
     });
-  }, [tutorialEnabled, tutorialReport, aggregation, colorMode, includeSun, includeWind]);
+  }, [tutorialEnabled, tutorialReport, aggregation, colorMode, includeSun, includeWind, optimizeMode]);
 
   const tutorialExposureSun = tutorialLive?.snapshot.includeSun;
   const tutorialExposureWind = tutorialLive?.snapshot.includeWind;
+  const tutorialOptimizeMode = tutorialLive?.snapshot.optimizeMode;
   const tutorialFocusPeriodId = tutorialLive?.snapshot.utciFocusPeriodId;
   // Keep chart UTCI (12×24 + bars) in sync with guided matrix exposure picks — not only when the
   // period row changes (same period + different sun/wind was previously ignored).
   useEffect(() => {
     if (!tutorialEnabled || utciShared) return;
-    if (tutorialExposureSun === undefined && tutorialExposureWind === undefined) return;
+    if (
+      tutorialExposureSun === undefined &&
+      tutorialExposureWind === undefined &&
+      tutorialOptimizeMode === undefined
+    ) {
+      return;
+    }
+    if (tutorialOptimizeMode !== undefined) setOptimizeMode(tutorialOptimizeMode);
     if (tutorialExposureSun !== undefined) setIncludeSun(tutorialExposureSun);
     if (tutorialExposureWind !== undefined) setIncludeWind(tutorialExposureWind);
   }, [
@@ -387,16 +475,25 @@ export function UtciExplorer({
     utciShared,
     tutorialExposureSun,
     tutorialExposureWind,
+    tutorialOptimizeMode,
     setIncludeSun,
     setIncludeWind,
+    setOptimizeMode,
   ]);
 
   const exposureTheme = exportMode ? 'light' : theme;
 
+  const setOptimizeModeSafe = (next: boolean) => {
+    setOptimizeMode(next);
+    if (!next) setOptimizeView('comfort');
+  };
+
   const exposureBadge = (kind: 'sun' | 'wind', active: boolean) => {
     const Icon = kind === 'sun' ? Sun : Wind;
-    const title =
-      kind === 'sun'
+    const locked = optimizeMode;
+    const title = locked
+      ? 'Optimize is on — turn it off to set sun/wind manually'
+      : kind === 'sun'
         ? active
           ? 'Solar radiation included \u2014 click to turn off'
           : 'Solar radiation excluded \u2014 click to turn on'
@@ -404,6 +501,10 @@ export function UtciExplorer({
           ? 'Wind speed included \u2014 click to turn off'
           : 'Wind excluded (0.5 m/s) \u2014 click to turn on';
     const toggle = () => {
+      if (locked) {
+        setOptimizeModeSafe(false);
+        return;
+      }
       if (kind === 'sun') setIncludeSun(v => !v);
       else setIncludeWind(v => !v);
     };
@@ -412,36 +513,44 @@ export function UtciExplorer({
       <button
         type="button"
         title={title}
-        aria-pressed={active}
+        aria-pressed={active && !locked}
         aria-label={title}
         onClick={toggle}
         className={`inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
-          active
-            ? kind === 'sun'
-              ? exposureTheme === 'dark'
-                ? 'bg-amber-950/50 hover:bg-amber-900/60'
-                : 'bg-amber-100 hover:bg-amber-200'
+          locked
+            ? exposureTheme === 'dark'
+              ? 'bg-gray-800/30 opacity-45'
+              : 'bg-gray-100 opacity-45'
+            : active
+              ? kind === 'sun'
+                ? exposureTheme === 'dark'
+                  ? 'bg-amber-950/50 hover:bg-amber-900/60'
+                  : 'bg-amber-100 hover:bg-amber-200'
+                : exposureTheme === 'dark'
+                  ? 'bg-sky-950/50 hover:bg-sky-900/60'
+                  : 'bg-sky-100 hover:bg-sky-200'
               : exposureTheme === 'dark'
-                ? 'bg-sky-950/50 hover:bg-sky-900/60'
-                : 'bg-sky-100 hover:bg-sky-200'
-            : exposureTheme === 'dark'
-              ? 'bg-gray-800/40 hover:bg-gray-700/50'
-              : 'bg-gray-100 hover:bg-gray-200'
+                ? 'bg-gray-800/40 hover:bg-gray-700/50'
+                : 'bg-gray-100 hover:bg-gray-200'
         }`}
       >
         <Icon
           className={`h-2.5 w-2.5 ${
-            active
-              ? kind === 'sun'
-                ? exposureTheme === 'dark'
-                  ? 'text-amber-400'
-                  : 'text-amber-600'
+            locked
+              ? exposureTheme === 'dark'
+                ? 'text-gray-500'
+                : 'text-gray-400'
+              : active
+                ? kind === 'sun'
+                  ? exposureTheme === 'dark'
+                    ? 'text-amber-400'
+                    : 'text-amber-600'
+                  : exposureTheme === 'dark'
+                    ? 'text-sky-400'
+                    : 'text-sky-600'
                 : exposureTheme === 'dark'
-                  ? 'text-sky-400'
-                  : 'text-sky-600'
-              : exposureTheme === 'dark'
-                ? 'text-gray-500 opacity-[0.18]'
-                : 'text-gray-400 opacity-[0.18]'
+                  ? 'text-gray-500 opacity-[0.18]'
+                  : 'text-gray-400 opacity-[0.18]'
           }`}
           aria-hidden
         />
@@ -449,10 +558,81 @@ export function UtciExplorer({
     );
   };
 
+  const optimizeToggle = (
+    <button
+      type="button"
+      title={
+        optimizeMode
+          ? 'Optimize on — each hour uses its most comfortable sun/wind mix'
+          : 'Optimize — pick the most comfortable exposure every hour'
+      }
+      aria-pressed={optimizeMode}
+      aria-label="Optimize outdoor comfort exposure"
+      onClick={() => setOptimizeModeSafe(!optimizeMode)}
+      className={`inline-flex h-5 items-center gap-0.5 rounded-full px-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+        optimizeMode
+          ? exposureTheme === 'dark'
+            ? 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/70'
+            : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+          : exposureTheme === 'dark'
+            ? 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/50'
+            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+      }`}
+    >
+      <Sparkles className="h-2.5 w-2.5" aria-hidden />
+      <span className="text-[10px] font-semibold leading-none tracking-tight">Opt</span>
+    </button>
+  );
+
+  const optimizeViewToggle = optimizeMode ? (
+    <div
+      className={`inline-flex h-5 items-center rounded-full p-0.5 ${
+        exposureTheme === 'dark' ? 'bg-gray-800/70' : 'bg-gray-100'
+      }`}
+      role="group"
+      aria-label="Optimize chart view"
+    >
+      {(
+        [
+          { id: 'comfort' as const, label: 'Comfort', title: 'Show optimized comfort values' },
+          { id: 'exposure' as const, label: 'Exposure', title: 'Show which exposure wins each cell' },
+        ] as const
+      ).map(opt => {
+        const active = optimizeView === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            title={opt.title}
+            aria-pressed={active}
+            onClick={() => setOptimizeView(opt.id)}
+            className={`rounded-full px-1.5 text-[10px] font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              active
+                ? exposureTheme === 'dark'
+                  ? 'bg-gray-700 text-gray-100'
+                  : 'bg-white text-gray-900 shadow-sm'
+                : exposureTheme === 'dark'
+                  ? 'text-gray-400 hover:text-gray-200'
+                  : 'text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   const exposureIndicators = (
     <div className="flex shrink-0 items-center gap-1" aria-label="UTCI exposure inputs">
       {exposureBadge('sun', includeSun)}
       {exposureBadge('wind', includeWind)}
+      <span
+        className={`mx-0.5 h-3 w-px ${exposureTheme === 'dark' ? 'bg-gray-700' : 'bg-gray-200'}`}
+        aria-hidden
+      />
+      {optimizeToggle}
+      {optimizeViewToggle}
     </div>
   );
 
@@ -489,27 +669,49 @@ export function UtciExplorer({
   // Pre-calculate UTCI for all data points to avoid recalculating on every render/aggregation change
   const utciData: UtciDataRow[] = useMemo(() => {
     return data.map(d => {
+      if (optimizeMode) {
+        const pick = pickOptimizedUtciExposure(d);
+        return {
+          ...d,
+          utci: pick?.utci ?? NaN,
+          utciCategory: pick?.category ?? '',
+          isComfortable: pick ? (pick.isComfortable ? 1 : 0) : NaN,
+          bestScenarioId: pick?.scenario.id ?? null,
+        };
+      }
       const computed = computeUtciForEpwRow(d, { includeSun, includeWind });
       return {
         ...d,
         utci: computed?.utci ?? NaN,
         utciCategory: computed?.category ?? '',
         isComfortable: computed ? (computed.isComfortable ? 1 : 0) : NaN,
+        bestScenarioId: null,
       };
     });
-  }, [data, includeSun, includeWind]);
+  }, [data, includeSun, includeWind, optimizeMode]);
 
   const compareUtciData: UtciDataRow[] = useMemo(() => {
     return (compareData || []).map(d => {
+      if (optimizeMode) {
+        const pick = pickOptimizedUtciExposure(d);
+        return {
+          ...d,
+          utci: pick?.utci ?? NaN,
+          utciCategory: pick?.category ?? '',
+          isComfortable: pick ? (pick.isComfortable ? 1 : 0) : NaN,
+          bestScenarioId: pick?.scenario.id ?? null,
+        };
+      }
       const computed = computeUtciForEpwRow(d, { includeSun, includeWind });
       return {
         ...d,
         utci: computed?.utci ?? NaN,
         utciCategory: computed?.category ?? '',
         isComfortable: computed ? (computed.isComfortable ? 1 : 0) : NaN,
+        bestScenarioId: null,
       };
     });
-  }, [compareData, includeSun, includeWind]);
+  }, [compareData, includeSun, includeWind, optimizeMode]);
 
   const convertUtci = (val: number) => {
     if (unitSystem === 'imperial') {
@@ -522,11 +724,17 @@ export function UtciExplorer({
   const utciLegendTitle =
     showDifference && compareData
       ? `\u0394 UTCI (${utciUnit})`
-      : colorMode === 'gradient'
-        ? `UTCI (${utciUnit})`
-        : colorMode === 'categories'
-          ? 'Stress categories'
-          : 'Time in comfort zone';
+      : showExposureMap
+        ? 'Best exposure map'
+        : optimizeMode
+          ? colorMode === 'comfortTime'
+            ? 'Optimized comfort time'
+            : `Optimized UTCI (${utciUnit})`
+          : colorMode === 'gradient'
+            ? `UTCI (${utciUnit})`
+            : colorMode === 'categories'
+              ? 'Stress categories'
+              : 'Time in comfort zone';
 
   const { utciMin, utciMax } = useMemo(() => {
     if (showDifference && compareData) {
@@ -535,7 +743,9 @@ export function UtciExplorer({
       try {
         const compareByHour = indexEpwByEquivalentHour(compareData);
         const utciOf = (row: EPWDataRow) =>
-          computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
+          optimizeMode
+            ? pickOptimizedUtciExposure(row)?.utci
+            : computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
         const diffs: number[] = [];
         for (const row of data) {
           const compareRow = compareByHour.get(epwEquivalentHourKey(row));
@@ -555,7 +765,7 @@ export function UtciExplorer({
     }
     const extent = utciGradientExtentC(utciData.map(d => d.utci));
     return { utciMin: extent.minC, utciMax: extent.maxC };
-  }, [data, compareData, showDifference, includeSun, includeWind, utciData]);
+  }, [data, compareData, showDifference, includeSun, includeWind, optimizeMode, utciData]);
 
   useEffect(() => {
     if (!svgRef.current || dimensions.width === 0) return;
@@ -658,6 +868,7 @@ export function UtciExplorer({
           .map(v => {
             const cD = compareByHour?.get(epwEquivalentHourKey(v));
             if (!cD) return null;
+            if (optimizeMode) return pickOptimizedUtciExposure(cD)?.utci ?? null;
             return computeUtciForEpwRow(cD, { includeSun, includeWind })?.utci ?? null;
           })
           .filter((v): v is number => v != null);
@@ -712,6 +923,18 @@ export function UtciExplorer({
       tooltipPrefix: string;
     }) => {
       const { avgUtciVal, comfortRatio } = aggregateUtciCellRows(opts.selectedRows);
+      const dominantId = optimizeMode
+        ? dominantOptimizedScenarioId(opts.selectedRows.map(r => r.bestScenarioId))
+        : null;
+      const dominant = utciScenarioById(dominantId);
+      const optimizeLine =
+        optimizeMode && dominant
+          ? `\nBest exposure: ${dominant.shortLabel} (${dominant.label})`
+          : optimizeMode
+            ? '\nBest exposure: —'
+            : '';
+      const mid =
+        opts.selectedRows[Math.floor(opts.selectedRows.length / 2)] ?? opts.selectedRows[0];
       heatmapData.push({
         x0: opts.x0,
         x1: opts.x1,
@@ -722,14 +945,20 @@ export function UtciExplorer({
           ? getUtciCategoryForValue(avgUtciVal)
           : 'no thermal stress',
         isComfortable: comfortRatio,
+        dominantScenarioId: dominantId,
         label: opts.label,
         cellRows: opts.selectedRows,
         cellTitle: opts.cellTitle,
+        sunYear: mid?.year ?? 2000,
+        sunMonth: opts.month,
+        sunDay: aggregation === 'month' ? 15 : (mid?.day ?? 15),
+        sunHour: opts.hour,
+        solarStandardClock: mid?.solarStandardClock,
         tooltip: !Number.isFinite(avgUtciVal)
           ? `${opts.tooltipPrefix}\nNo hours in dry-bulb band`
           : colorMode === 'comfortTime'
-            ? `${opts.tooltipPrefix} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}`
-            : `${opts.tooltipPrefix} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}`,
+            ? `${opts.tooltipPrefix} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}${optimizeLine}`
+            : `${opts.tooltipPrefix} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}${optimizeLine}`,
       });
     };
 
@@ -845,6 +1074,14 @@ export function UtciExplorer({
       heatmapData = currentData.map(d => {
         const pass = rowPassesGlobalFilters(d, filter);
         const utciVal = pass ? d.utci : NaN;
+        const dominantId = pass && optimizeMode ? d.bestScenarioId : null;
+        const dominant = utciScenarioById(dominantId);
+        const optimizeLine =
+          optimizeMode && dominant
+            ? `\nBest exposure: ${dominant.shortLabel} (${dominant.label})`
+            : optimizeMode
+              ? '\nBest exposure: —'
+              : '';
         return {
           x0: d.dayOfYear,
           x1: d.dayOfYear + 1,
@@ -853,16 +1090,22 @@ export function UtciExplorer({
           utci: utciVal,
           utciCategory: pass ? d.utciCategory : 'no thermal stress',
           isComfortable: pass ? d.isComfortable : 0,
+          dominantScenarioId: dominantId,
           label: formatEpwStationDate(d),
           cellRows: pass ? [d] : [],
           cellTitle: formatEpwStationDateTime(d),
+          sunYear: d.year,
+          sunMonth: d.month,
+          sunDay: d.day,
+          sunHour: d.hour,
+          solarStandardClock: d.solarStandardClock,
           tooltip: !pass
             ? `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`
             : !Number.isFinite(d.utci)
               ? `${formatEpwStationDateTime(d)}\nUTCI could not be calculated (outside the model range)`
             : colorMode === 'comfortTime'
-              ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}`
-              : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}`,
+              ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}${optimizeLine}`
+              : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}${optimizeLine}`,
         };
       });
     }
@@ -873,7 +1116,11 @@ export function UtciExplorer({
     const overlayMinWidth = Math.max(12, minDayCellWidth * 1.1, cellInnerHeightPx * 0.75);
     const type = explorerSvgTypography(renderScale, cellInnerHeightPx);
     const axisInk = chartAxisInk(heatmapTextColor, theme);
+    const exposureCellFill = theme === 'dark' ? 'rgba(55,65,81,0.35)' : 'rgba(243,244,246,0.95)';
     const utciCellFill = (d: any): string => {
+      if (showExposureMap) {
+        return d.dominantScenarioId ? exposureCellFill : emptyUtciFill;
+      }
       if (!Number.isFinite(d.utci)) return emptyUtciFill;
       if (colorMode === 'categories') return UTCI_COLORS[d.utciCategory] || '#cccccc';
       return colorScale(colorMode === 'comfortTime' ? d.isComfortable : d.utci);
@@ -912,6 +1159,7 @@ export function UtciExplorer({
           aggregation,
           statistic: heatmapCellStatistic,
           setInspect: setCellInspectRef.current,
+          winningScenarioId: optimizeMode ? d.dominantScenarioId ?? null : null,
         });
       })
       .append("title")
@@ -921,8 +1169,68 @@ export function UtciExplorer({
           : d.tooltip
       );
 
+    const solarNightOverlayEnabled =
+      showExposureMap &&
+      !!metadata &&
+      Number.isFinite(metadata.lat) &&
+      Number.isFinite(metadata.lng) &&
+      Number.isFinite(metadata.timeZone);
+
+    const cellIsSolarNight = (d: any): boolean => {
+      if (!solarNightOverlayEnabled) return false;
+      return isSolarNightEpwStation(
+        metadata!.lat,
+        metadata!.lng,
+        solarNightParamsFromHeatmapDatum(d, metadata!.timeZone)
+      );
+    };
+
+    if (solarNightOverlayEnabled) {
+      cells
+        .append('rect')
+        .attr('width', d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width)
+        .attr('height', d => rowInnerHeight(d.y))
+        .attr('rx', 2)
+        .attr('ry', 2)
+        .style('fill', solarNightOverlayRgba(theme))
+        .style('stroke', 'none')
+        .style('pointer-events', 'none')
+        .style('opacity', d =>
+          cellIsSolarNight(d) ? heatmapCellOpacity(d.month, d.y, d.x0, d.x1) : 0
+        );
+    }
+
+    if (showExposureMap) {
+      const markCells = cells.filter(
+        d =>
+          !!d.dominantScenarioId &&
+          explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width > overlayMinWidth * 0.45
+      );
+      markCells.each(function (d) {
+        const scenario = utciScenarioById(d.dominantScenarioId);
+        if (!scenario) return;
+        const gMark = d3.select(this);
+        const w = explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width;
+        const h = rowInnerHeight(d.y);
+        appendExposedOnlyIcons(gMark as any, {
+          includeSun: scenario.includeSun,
+          includeWind: scenario.includeWind,
+          isNight: cellIsSolarNight(d),
+          cx: w / 2,
+          cy: h / 2,
+          cellW: w,
+          cellH: h,
+          opacity: heatmapCellOpacity(d.month, d.y, d.x0, d.x1),
+        });
+      });
+    }
+
     // Overlay text for month and week aggregations if cells are large enough
-    if ((aggregation === 'month' || aggregation === 'week') && type.showCellValues) {
+    if (
+      !showExposureMap &&
+      (aggregation === 'month' || aggregation === 'week') &&
+      type.showCellValues
+    ) {
       const cellLabels = cells.append("text")
         .attr("x", d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width / 2)
         .attr("y", d => rowInnerHeight(d.y) / 2)
@@ -1296,11 +1604,15 @@ export function UtciExplorer({
     heatmapCellStatistic,
     includeSun,
     includeWind,
+    optimizeMode,
+    optimizeView,
+    showExposureMap,
     tutorialEnabled,
     tutorialFocusPeriodId,
     barGradientSvgId,
     barChartFillMode,
     siteLatitude,
+    metadata,
   ]);
 
   // Calculate local stats for filtered data
@@ -1317,7 +1629,10 @@ export function UtciExplorer({
 
     if (showDifference && compareData) {
       const compareByHour = indexEpwByEquivalentHour(compareData);
-      const utciOf = (row: EPWDataRow) => computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
+      const utciOf = (row: EPWDataRow) =>
+        optimizeMode
+          ? pickOptimizedUtciExposure(row)?.utci
+          : computeUtciForEpwRow(row, { includeSun, includeWind })?.utci;
       const diffs = filteredData.map(d => {
         const cD = compareByHour.get(epwEquivalentHourKey(d));
         if (!cD) return null;
@@ -1575,7 +1890,8 @@ export function UtciExplorer({
       >
         <div className="grid grid-cols-1 gap-3">
           <p className={`text-xs leading-snug ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-            Sun and wind are toggled with the icons on the chart header.
+            Sun and wind are toggled on the chart header. Opt picks the most comfortable exposure every
+            hour; Comfort / Exposure switches between the usual gradient and the winning-condition map.
           </p>
           <div className="space-y-2">
             <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Visualization Mode</label>
@@ -1631,6 +1947,7 @@ export function UtciExplorer({
         payload={cellInspect}
         activeIncludeSun={includeSun}
         activeIncludeWind={includeWind}
+        optimizeMode={optimizeMode}
         anchorRef={outerRef}
       />
 
@@ -1657,6 +1974,13 @@ export function UtciExplorer({
               isDifference={true}
               footnote={utciLegendFootnote}
             />
+          ) : showExposureMap ? (
+            <>
+              <UtciOptimizeScenarioLegend theme={theme} />
+              <p className={LEGEND_FOOTNOTE_CLASS} title={utciLegendFootnote}>
+                {utciLegendFootnote}
+              </p>
+            </>
           ) : colorMode === 'categories' ? (
             <>
               <UtciCategoryLegendStrip theme={theme} />

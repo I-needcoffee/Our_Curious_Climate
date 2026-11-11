@@ -54,7 +54,11 @@ export function explorerHeatmapXOfDay(innerWidth: number, dayOfYearOrFraction: n
   return ((dayOfYearOrFraction - 1) / 365) * innerWidth;
 }
 
-/** Integer left + width so adjacent cells share one gap of `cellGapPx`. */
+/**
+ * Pixel left + width so adjacent cells share a gutter of up to `cellGapPx`.
+ * For single-day / hour cells the natural span is often &lt; 1px; never let the
+ * gutter erase those cells (month/week stay gapped as usual).
+ */
 export function explorerHeatmapCellXPx(
   innerWidth: number,
   cellGapPx: number,
@@ -63,7 +67,10 @@ export function explorerHeatmapCellXPx(
 ): { x: number; width: number } {
   const left = explorerHeatmapXOfDay(innerWidth, x0);
   const right = explorerHeatmapXOfDay(innerWidth, x1);
-  return { x: left, width: Math.max(0, right - left - cellGapPx) };
+  const span = right - left;
+  if (!(span > 0)) return { x: left, width: 0 };
+  const gap = Math.min(cellGapPx, Math.max(0, span - 0.5));
+  return { x: left, width: Math.max(0, span - gap) };
 }
 
 /** Selection / brush rectangle spans full day range (no cell gap subtracted on outer edges). */

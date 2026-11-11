@@ -13,6 +13,7 @@ import {
   formatNvCriteriaSummary,
 } from './naturalVentilationModel';
 import {
+  computeOptimizedUtciCategoryShares,
   computeUtciCategoryShares,
   computeUtciComfortMatrix,
   formatUtciCategoryLabel,
@@ -265,10 +266,10 @@ export function computeTutorialGuideQuickStats(opts: {
   if (chartType === 'utci') {
     const includeSun = live.includeSun ?? true;
     const includeWind = live.includeWind ?? true;
-    const { shares, comfortPercent, hoursCounted } = computeUtciCategoryShares(filtered, {
-      includeSun,
-      includeWind,
-    });
+    const { shares, comfortPercent, hoursCounted } =
+      live.optimizeMode === true
+        ? computeOptimizedUtciCategoryShares(filtered)
+        : computeUtciCategoryShares(filtered, { includeSun, includeWind });
 
     if (!hoursCounted) {
       return [
@@ -343,9 +344,10 @@ export function computeTutorialUtciQuickStats(opts: {
 
   const includeSun = live.includeSun ?? true;
   const includeWind = live.includeWind ?? true;
-  const modelOpts = { includeSun, includeWind };
-
-  const { shares, comfortPercent, hoursCounted } = computeUtciCategoryShares(shareRows, modelOpts);
+  const optimizeMode = live.optimizeMode === true;
+  const { shares, comfortPercent, hoursCounted } = optimizeMode
+    ? computeOptimizedUtciCategoryShares(shareRows)
+    : computeUtciCategoryShares(shareRows, { includeSun, includeWind });
   const comfortMatrix = computeUtciComfortMatrix(rows, filter, siteLatitude);
 
   return {

@@ -14,6 +14,8 @@ export type UtciCellInspectPayload = {
   /** Aggregation + statistic context. */
   subtitle: string;
   scenarios: UtciCellScenarioSummary[];
+  /** When Optimize is on: most common winning exposure for this cell. */
+  winningScenarioId?: string | null;
 };
 
 function convertUtciDisplay(utciC: number, unitSystem: 'metric' | 'imperial'): number {
@@ -39,6 +41,7 @@ export function UtciCellScenarioModal({
   payload,
   activeIncludeSun,
   activeIncludeWind,
+  optimizeMode = false,
   anchorRef,
 }: {
   open: boolean;
@@ -49,6 +52,8 @@ export function UtciCellScenarioModal({
   /** Current chart exposure — highlight matching scenario column. */
   activeIncludeSun: boolean;
   activeIncludeWind: boolean;
+  /** When true, highlight the Optimize winner instead of fixed sun/wind toggles. */
+  optimizeMode?: boolean;
   anchorRef: RefObject<HTMLElement | null>;
 }) {
   if (!payload) return null;
@@ -74,9 +79,10 @@ export function UtciCellScenarioModal({
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {payload.scenarios.map(s => {
-            const isActive =
-              s.scenario.includeSun === activeIncludeSun &&
-              s.scenario.includeWind === activeIncludeWind;
+            const isActive = optimizeMode
+              ? s.scenario.id === payload.winningScenarioId
+              : s.scenario.includeSun === activeIncludeSun &&
+                s.scenario.includeWind === activeIncludeWind;
             const color = UTCI_COLORS[s.category] || '#94a3b8';
             const feels = Number.isFinite(s.utciC)
               ? convertUtciDisplay(s.utciC, unitSystem).toFixed(1)
@@ -168,7 +174,11 @@ export function UtciCellScenarioModal({
                   <p className={`m-0 mt-auto text-[11px] ${muted}`}>
                     Comfort time {comfortPct}
                     {s.hourCount > 0 ? ` · ${s.hourCount} hr${s.hourCount === 1 ? '' : 's'}` : ''}
-                    {isActive ? ' · chart view' : ''}
+                    {isActive
+                      ? optimizeMode
+                        ? ' · Optimize pick'
+                        : ' · chart view'
+                      : ''}
                   </p>
                 </div>
               </div>
@@ -177,8 +187,8 @@ export function UtciCellScenarioModal({
         </div>
 
         <p className={`m-0 text-xs leading-snug ${muted}`}>
-          Values use the same Low / Ave / High setting as the chart. Click a matrix scenario or the
-          sun/wind badges to change what the 12×24 shows.
+          Values use the same Low / Ave / High setting as the chart. Use sun/wind badges, Opt, or the
+          details comfort table to change what the 12×24 shows.
         </p>
       </div>
     </CardModal>

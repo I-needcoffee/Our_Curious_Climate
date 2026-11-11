@@ -194,6 +194,98 @@ export function utciExposureScenarioIndex(includeSun: boolean, includeWind: bool
   return idx === -1 ? 0 : idx;
 }
 
+/**
+ * Soft, distinct fills for the Optimize “exposure map” view (not overlaid on comfort).
+ * Warm clay / dusty teal / soft ochre / cool stone — readable side-by-side without neon.
+ */
+export const UTCI_SCENARIO_TINT: Record<string, string> = {
+  exposed: '#C98B6E',
+  'protected-sun': '#6E9EAF',
+  'protected-wind': '#D4B06A',
+  'protected-both': '#8E95A8',
+};
+
+export type UtciOptimizeView = 'comfort' | 'exposure';
+
+export const UTCI_OPTIMIZED_COLUMN = {
+  id: 'optimized',
+  label: 'Optimized (best exposure each hour)',
+  shortLabel: 'Optimized',
+  optimized: true as const,
+};
+
+/** Comfort-band distance: 0 inside [9, 26]°C; larger = farther from comfort. */
+export function utciComfortDistance(utci: number): number {
+  if (!Number.isFinite(utci)) return Number.POSITIVE_INFINITY;
+  if (utci < 9) return 9 - utci;
+  if (utci > 26) return utci - 26;
+  return 0;
+}
+
+export type UtciOptimizedPick = {
+  scenario: UtciExposureScenario;
+  utci: number;
+  category: string;
+  isComfortable: boolean;
+};
+
+/**
+ * For one EPW hour, evaluate all four exposure combos and pick the most comfortable.
+ * Prefer smallest distance to the comfort band; ties break toward the band midpoint (17.5°C).
+ */
+export function pickOptimizedUtciExposure(row: EPWDataRow): UtciOptimizedPick | null {
+  let best: UtciOptimizedPick | null = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+  let bestCenter = Number.POSITIVE_INFINITY;
+
+  for (const scenario of UTCI_EXPOSURE_SCENARIOS) {
+    const computed = computeUtciForEpwRow(row, {
+      includeSun: scenario.includeSun,
+      includeWind: scenario.includeWind,
+    });
+    if (!computed) continue;
+    const dist = utciComfortDistance(computed.utci);
+    const center = Math.abs(computed.utci - 17.5);
+    if (dist < bestDist || (dist === bestDist && center < bestCenter)) {
+      bestDist = dist;
+      bestCenter = center;
+      best = {
+        scenario,
+        utci: computed.utci,
+        category: computed.category,
+        isComfortable: computed.isComfortable,
+      };
+    }
+  }
+  return best;
+}
+
+/** Mode (most common) winning exposure id across hours; null if none. */
+export function dominantOptimizedScenarioId(
+  scenarioIds: Array<string | null | undefined>
+): string | null {
+  const counts = new Map<string, number>();
+  for (const id of scenarioIds) {
+    if (!id) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const scenario of UTCI_EXPOSURE_SCENARIOS) {
+    const n = counts.get(scenario.id) ?? 0;
+    if (n > bestN) {
+      bestN = n;
+      best = scenario.id;
+    }
+  }
+  return best;
+}
+
+export function utciScenarioById(id: string | null | undefined): UtciExposureScenario | undefined {
+  if (!id) return undefined;
+  return UTCI_EXPOSURE_SCENARIOS.find(s => s.id === id);
+}
+
 /** Inclusive clock hours. The name is the first and last hour, so 7am–6pm is hours 7 through 18 with no gaps between morning, midday, and afternoon. */
 export const UTCI_CLOCK_WINDOWS = {
   day: { start: 7, end: 18, label: '7am–6pm' },
@@ -465,17 +557,81 @@ export function computeUtciCategoryShares(
   };
 }
 
+/** Category shares using the per-hour best exposure (Optimize mode). */
+export function computeOptimizedUtciCategoryShares(
+  rows: EPWDataRow[]
+): { shares: UtciCategoryShare[]; comfortPercent: number; hoursCounted: number } {
+  const counts = new Map<string, number>();
+  let comfortN = 0;
+  let total = 0;
+
+  for (const row of rows) {
+    const pick = pickOptimizedUtciExposure(row);
+    if (!pick) continue;
+    total += 1;
+    counts.set(pick.category, (counts.get(pick.category) ?? 0) + 1);
+    if (pick.isComfortable) comfortN += 1;
+  }
+
+  if (!total) {
+    return { shares: [], comfortPercent: NaN, hoursCounted: 0 };
+  }
+
+  const shares: UtciCategoryShare[] = UTCI_CATEGORY_ORDER.map(category => ({
+    category,
+    label: formatUtciCategoryLabel(category),
+    percentage: ((counts.get(category) ?? 0) / total) * 100,
+    color: UTCI_COLORS[category] ?? '#cccccc',
+    isComfort: category === UTCI_COMFORT_CATEGORY,
+  }));
+
+  return {
+    shares,
+    comfortPercent: (comfortN / total) * 100,
+    hoursCounted: total,
+  };
+}
+
 export type UtciComfortMatrixCell = {
   percentComfort: number;
   hoursCounted: number;
+  /** Optimize column only: most common winning exposure for those hours. */
+  dominantScenarioId?: string | null;
+};
+
+export type UtciComfortMatrixScenario = {
+  id: string;
+  label: string;
+  shortLabel: string;
+  optimized?: boolean;
+  includeSun?: boolean;
+  includeWind?: boolean;
 };
 
 export type UtciComfortMatrix = {
   periods: { id: string; label: string }[];
-  scenarios: UtciExposureScenario[];
+  scenarios: UtciComfortMatrixScenario[];
   /** [periodIndex][scenarioIndex] */
   cells: UtciComfortMatrixCell[][];
 };
+
+export function utciComfortMatrixScenarios(): UtciComfortMatrixScenario[] {
+  return [
+    ...UTCI_EXPOSURE_SCENARIOS.map(s => ({
+      id: s.id,
+      label: s.label,
+      shortLabel: s.shortLabel,
+      includeSun: s.includeSun,
+      includeWind: s.includeWind,
+    })),
+    {
+      id: UTCI_OPTIMIZED_COLUMN.id,
+      label: UTCI_OPTIMIZED_COLUMN.label,
+      shortLabel: UTCI_OPTIMIZED_COLUMN.shortLabel,
+      optimized: true,
+    },
+  ];
+}
 
 /** Matches UTCI chart “comfort time” scale: grey (0%) → outdoor comfort green (100%). */
 export function comfortPercentHeatStyle(
@@ -514,28 +670,44 @@ export function computeUtciComfortMatrix(
         : `${formatAstronomicalSeasonLabel(p.season, hemisphere)} ${p.label.slice(p.label.indexOf(')') + 1).trim()}`,
   }));
 
+  const scenarios = utciComfortMatrixScenarios();
+
   const cells = UTCI_COMFORT_PERIOD_ROWS.map(period =>
-    UTCI_EXPOSURE_SCENARIOS.map(scenario => {
+    scenarios.map(scenario => {
       let comfortN = 0;
       let total = 0;
+      const winIds: string[] = [];
+
       for (const row of rows) {
         if (!rowMatchesUtciComfortPeriod(row, period, filter, siteLatitude)) continue;
+
+        if (scenario.optimized) {
+          const pick = pickOptimizedUtciExposure(row);
+          if (!pick) continue;
+          total += 1;
+          winIds.push(pick.scenario.id);
+          if (pick.isComfortable) comfortN += 1;
+          continue;
+        }
+
         const utci = computeUtciForEpwRow(row, {
-          includeSun: scenario.includeSun,
-          includeWind: scenario.includeWind,
+          includeSun: scenario.includeSun ?? true,
+          includeWind: scenario.includeWind ?? true,
         });
         if (!utci) continue;
         total += 1;
         if (utci.isComfortable) comfortN += 1;
       }
+
       return {
         percentComfort: total ? (comfortN / total) * 100 : NaN,
         hoursCounted: total,
+        dominantScenarioId: scenario.optimized ? dominantOptimizedScenarioId(winIds) : undefined,
       };
     })
   );
 
-  return { periods, scenarios: UTCI_EXPOSURE_SCENARIOS, cells };
+  return { periods, scenarios, cells };
 }
 
 /** UTCI heatmap/bar gradient domain (°C), extended for cold/high-altitude files. */

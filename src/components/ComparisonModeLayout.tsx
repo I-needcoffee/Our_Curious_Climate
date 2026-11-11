@@ -399,6 +399,9 @@ export function ComparisonModeLayout({
   const [utciAgg, setUtciAgg] = useState<CompareUtciSharedControls['aggregation']>('month');
   const [utciSun, setUtciSun] = useState(true);
   const [utciWind, setUtciWind] = useState(true);
+  const [utciOptimize, setUtciOptimize] = useState(false);
+  const [utciOptimizeView, setUtciOptimizeView] =
+    useState<CompareUtciSharedControls['optimizeView']>('comfort');
   const [utciColorMode, setUtciColorMode] = useState<CompareUtciSharedControls['colorMode']>('comfortTime');
   const [utciGrad, setUtciGrad] = useState(DIFFERENCE_DIVERGING_ID);
   const [utciStats, setUtciStats] = useState(false);
@@ -411,6 +414,10 @@ export function ComparisonModeLayout({
     setIncludeSun: setUtciSun,
     includeWind: utciWind,
     setIncludeWind: setUtciWind,
+    optimizeMode: utciOptimize,
+    setOptimizeMode: setUtciOptimize,
+    optimizeView: utciOptimizeView,
+    setOptimizeView: setUtciOptimizeView,
     colorMode: utciColorMode,
     setColorMode: setUtciColorMode,
     gradientId: utciGrad,

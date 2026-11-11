@@ -17,6 +17,8 @@ export interface TutorialLiveSnapshot {
   utciColorMode?: TutorialUtciMode;
   includeSun?: boolean;
   includeWind?: boolean;
+  /** Per-hour best of the four sun/wind exposure combos. */
+  optimizeMode?: boolean;
   /** Guided comfort table: period row id to highlight on the UTCI heatmap/bars. */
   utciFocusPeriodId?: string | null;
   windRoseBins?: number;
@@ -37,8 +39,9 @@ type Ctx = {
   /** Guided UTCI panel: apply exposure + timeframe focus on the chart card. */
   requestUtciSelection: (selection: {
     periodId: string;
-    includeSun: boolean;
-    includeWind: boolean;
+    includeSun?: boolean;
+    includeWind?: boolean;
+    optimizeMode?: boolean;
   }) => void;
   /** Remove period highlight on the UTCI 12×24 heatmap (keeps sun/wind toggles). */
   clearUtciFocus: () => void;
@@ -74,20 +77,30 @@ export function TutorialLiveProvider({
     [enabled]
   );
   const requestUtciSelection = useCallback(
-    (selection: { periodId: string; includeSun: boolean; includeWind: boolean }) => {
+    (selection: {
+      periodId: string;
+      includeSun?: boolean;
+      includeWind?: boolean;
+      optimizeMode?: boolean;
+    }) => {
       if (!enabled) return;
       setSnapshot(prev => {
+        const nextOptimize = selection.optimizeMode ?? false;
+        const nextSun = selection.includeSun ?? prev.includeSun;
+        const nextWind = selection.includeWind ?? prev.includeWind;
         if (
-          prev.includeSun === selection.includeSun &&
-          prev.includeWind === selection.includeWind &&
+          prev.optimizeMode === nextOptimize &&
+          prev.includeSun === nextSun &&
+          prev.includeWind === nextWind &&
           prev.utciFocusPeriodId === selection.periodId
         ) {
           return prev;
         }
         return {
           ...prev,
-          includeSun: selection.includeSun,
-          includeWind: selection.includeWind,
+          optimizeMode: nextOptimize,
+          includeSun: nextSun,
+          includeWind: nextWind,
           utciFocusPeriodId: selection.periodId,
         };
       });

@@ -1,5 +1,9 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { comfortPercentHeatStyle, utciExposureScenarioIndex, UTCI_HOUR_WINDOW_NOTE } from '../../lib/utciModel';
+import {
+  comfortPercentHeatStyle,
+  utciExposureScenarioIndex,
+  UTCI_HOUR_WINDOW_NOTE,
+} from '../../lib/utciModel';
 import type { ChartConfig } from '../../App';
 import type { UnitSystem } from '../../App';
 import type { GlobalFilterState } from '../GlobalFilterPanel';
@@ -40,19 +44,6 @@ export function TutorialGuidePanel({
     setSelectedCell(null);
     clearUtciFocus();
   }, [clearUtciFocus]);
-
-  const activeScenarioIndex = utciExposureScenarioIndex(
-    snapshot.includeSun ?? true,
-    snapshot.includeWind ?? true
-  );
-
-  useEffect(() => {
-    setSelectedCell(prev => {
-      if (!prev) return null;
-      if (prev.scenarioIndex === activeScenarioIndex) return prev;
-      return { ...prev, scenarioIndex: activeScenarioIndex };
-    });
-  }, [activeScenarioIndex]);
 
   useEffect(() => {
     if (!selectedCell && !snapshot.utciFocusPeriodId) return;
@@ -126,6 +117,27 @@ export function TutorialGuidePanel({
         : null,
     [slot.type, epwRows, filter, snapshot, siteLatitude]
   );
+
+  const activeScenarioIndex = useMemo(() => {
+    if (snapshot.optimizeMode) {
+      const idx = utciStats?.comfortMatrix.scenarios.findIndex(s => s.optimized) ?? -1;
+      return idx === -1 ? 4 : idx;
+    }
+    return utciExposureScenarioIndex(snapshot.includeSun ?? true, snapshot.includeWind ?? true);
+  }, [
+    snapshot.optimizeMode,
+    snapshot.includeSun,
+    snapshot.includeWind,
+    utciStats?.comfortMatrix.scenarios,
+  ]);
+
+  useEffect(() => {
+    setSelectedCell(prev => {
+      if (!prev) return null;
+      if (prev.scenarioIndex === activeScenarioIndex) return prev;
+      return { ...prev, scenarioIndex: activeScenarioIndex };
+    });
+  }, [activeScenarioIndex]);
 
   const nvStats = useMemo(
     () =>
@@ -305,9 +317,10 @@ export function TutorialGuidePanel({
                     <h4 className={blockTitle}>Time in comfort by period</h4>
                     <p className={`mb-3 ${hintText}`}>
                       Click a cell to apply that exposure and highlight the matching time window on the chart. Greener =
-                      more comfort time. Click the cell again, use Clear, or click outside the table to remove the
-                      highlight. Seasonal rows use astronomical boundaries (equinoxes/solstices), not whole calendar
-                      months.
+                      more comfort time. Optimized picks the best of the four exposures every hour (use the chart’s
+                      Exposure toggle to map winning conditions). Click the cell again, use Clear, or click outside
+                      the table to remove the highlight. Seasonal rows use astronomical boundaries
+                      (equinoxes/solstices), not whole calendar months.
                     </p>
                     {(selectedCell || snapshot.utciFocusPeriodId) && (
                       <button
@@ -382,11 +395,19 @@ export function TutorialGuidePanel({
                                             return;
                                           }
                                           setSelectedCell({ periodIndex: pi, scenarioIndex: si });
-                                          requestUtciSelection({
-                                            periodId: period.id,
-                                            includeSun: scenario.includeSun,
-                                            includeWind: scenario.includeWind,
-                                          });
+                                          if (scenario.optimized) {
+                                            requestUtciSelection({
+                                              periodId: period.id,
+                                              optimizeMode: true,
+                                            });
+                                          } else {
+                                            requestUtciSelection({
+                                              periodId: period.id,
+                                              includeSun: scenario.includeSun ?? true,
+                                              includeWind: scenario.includeWind ?? true,
+                                              optimizeMode: false,
+                                            });
+                                          }
                                         }}
                                       >
                                         {Number.isFinite(cell.percentComfort) ? `${cell.percentComfort.toFixed(1)}%` : '—'}

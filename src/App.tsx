@@ -301,6 +301,11 @@ export interface CompareUtciSharedControls {
   setIncludeSun: (v: boolean) => void;
   includeWind: boolean;
   setIncludeWind: (v: boolean) => void;
+  optimizeMode: boolean;
+  setOptimizeMode: (v: boolean) => void;
+  /** When Optimize is on: comfort %/UTCI fills vs exposure-condition map. */
+  optimizeView: 'comfort' | 'exposure';
+  setOptimizeView: (v: 'comfort' | 'exposure') => void;
   colorMode: 'categories' | 'comfortTime' | 'gradient';
   setColorMode: (v: 'categories' | 'comfortTime' | 'gradient') => void;
   gradientId: string;
@@ -900,6 +905,7 @@ export default function App() {
             tutorialChromeAnchors={tutorialChromeAnchors}
             pairSuppressFooterLegend={pairSuppressFooterLegend}
             siteLatitude={fileData.metadata.lat}
+            metadata={fileData.metadata}
           />
         );
       case 'naturalVentilation':
