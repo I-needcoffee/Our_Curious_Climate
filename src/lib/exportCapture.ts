@@ -41,10 +41,43 @@ const FIXED_FRAMES: Record<Exclude<ExportFrameSize, 'viewport'>, { width: number
 };
 
 /**
- * All preset aspect exports render the dashboard at this logical size first, then
- * letterbox into the selected frame so card positions stay identical across ratios.
+ * 16:9 layout used when a preset is not 16:9. Those frames letterbox this layout.
+ * 16:9 presets (including 4K) are captured at their own pixel size so the file is
+ * sharp instead of an upscale of 1080p.
  */
 export const CANONICAL_EXPORT = { width: 1920, height: 1080 } as const;
+
+const CANONICAL_ASPECT = CANONICAL_EXPORT.width / CANONICAL_EXPORT.height;
+
+function isSixteenNine(width: number, height: number): boolean {
+  return Math.abs(width / height - CANONICAL_ASPECT) < 0.02;
+}
+
+/** Largest 16:9 size that fits inside the target without upscaling. */
+function sixteenNineSourceSize(targetWidth: number, targetHeight: number): { width: number; height: number } {
+  const widthIfHeightMatches = Math.round(targetHeight * CANONICAL_ASPECT);
+  if (widthIfHeightMatches <= targetWidth + 1) {
+    return { width: widthIfHeightMatches, height: targetHeight };
+  }
+  return { width: targetWidth, height: Math.round(targetWidth / CANONICAL_ASPECT) };
+}
+
+/**
+ * 16:9 presets are captured at their listed pixel size, so 4K is a real 3840×2160
+ * render. Other aspects keep a 1080p (or larger, if the frame would upscale it)
+ * 16:9 layout and letterbox it in.
+ */
+function presetCaptureSize(targetWidth: number, targetHeight: number): { width: number; height: number } {
+  if (isSixteenNine(targetWidth, targetHeight)) {
+    return { width: targetWidth, height: targetHeight };
+  }
+  const canonicalScale = Math.min(
+    targetWidth / CANONICAL_EXPORT.width,
+    targetHeight / CANONICAL_EXPORT.height
+  );
+  if (canonicalScale >= 1) return sixteenNineSourceSize(targetWidth, targetHeight);
+  return { width: CANONICAL_EXPORT.width, height: CANONICAL_EXPORT.height };
+}
 
 export function exportFrameLabel(frame: ExportFrameSize): string {
   return EXPORT_FRAME_OPTIONS.find(o => o.value === frame)?.label ?? 'Screen';
@@ -97,11 +130,12 @@ async function letterboxDataUrl(
 /** Chart ResizeObservers debounce ~100ms, then re-render SVG text sized for the new frame. */
 const CHART_RESIZE_SETTLE_MS = 350;
 
-function waitForLayout(): Promise<void> {
+function waitForLayout(captureWidth: number): Promise<void> {
+  const settleMs = captureWidth > CANONICAL_EXPORT.width ? 700 : CHART_RESIZE_SETTLE_MS;
   return new Promise(resolve => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        window.setTimeout(resolve, CHART_RESIZE_SETTLE_MS);
+        window.setTimeout(resolve, settleMs);
       });
     });
   });
@@ -142,28 +176,35 @@ function restoreElementStyles(el: HTMLElement, saved: SavedStyles) {
   el.style.flex = saved.flex;
 }
 
-async function captureCanonicalPng(element: HTMLElement): Promise<string> {
+async function captureAtSize(
+  element: HTMLElement,
+  width: number,
+  height: number,
+  image: 'png' | 'jpeg'
+): Promise<string> {
   const saved = saveElementStyles(element);
-  element.style.width = `${CANONICAL_EXPORT.width}px`;
-  element.style.height = `${CANONICAL_EXPORT.height}px`;
-  element.style.minWidth = `${CANONICAL_EXPORT.width}px`;
-  element.style.minHeight = `${CANONICAL_EXPORT.height}px`;
-  element.style.maxWidth = `${CANONICAL_EXPORT.width}px`;
-  element.style.maxHeight = `${CANONICAL_EXPORT.height}px`;
+  element.style.width = `${width}px`;
+  element.style.height = `${height}px`;
+  element.style.minWidth = `${width}px`;
+  element.style.minHeight = `${height}px`;
+  element.style.maxWidth = `${width}px`;
+  element.style.maxHeight = `${height}px`;
   element.style.flex = 'none';
   element.style.overflow = 'hidden';
 
-  await waitForLayout();
+  await waitForLayout(width);
+
+  const captureOptions = {
+    quality: 0.95,
+    backgroundColor: '#ffffff',
+    width,
+    height,
+    pixelRatio: 1,
+    cacheBust: true,
+  };
 
   try {
-    return await toPng(element, {
-      quality: 0.95,
-      backgroundColor: '#ffffff',
-      width: CANONICAL_EXPORT.width,
-      height: CANONICAL_EXPORT.height,
-      pixelRatio: 1,
-      cacheBust: true,
-    });
+    return image === 'jpeg' ? await toJpeg(element, captureOptions) : await toPng(element, captureOptions);
   } finally {
     restoreElementStyles(element, saved);
   }
@@ -209,15 +250,22 @@ export async function exportDashboardArea(opts: {
       element.style.overflow = prevOverflow;
     }
   } else {
-    const canonicalPng = await captureCanonicalPng(element);
-    dataUrl = await letterboxDataUrl(
-      canonicalPng,
-      CANONICAL_EXPORT.width,
-      CANONICAL_EXPORT.height,
-      target.width,
-      target.height,
-      format
-    );
+    const source = presetCaptureSize(target.width, target.height);
+    const native =
+      source.width === target.width && source.height === target.height;
+    if (native) {
+      dataUrl = await captureAtSize(element, source.width, source.height, format === 'jpeg' ? 'jpeg' : 'png');
+    } else {
+      const png = await captureAtSize(element, source.width, source.height, 'png');
+      dataUrl = await letterboxDataUrl(
+        png,
+        source.width,
+        source.height,
+        target.width,
+        target.height,
+        format
+      );
+    }
   }
 
   if (format === 'jpeg') {

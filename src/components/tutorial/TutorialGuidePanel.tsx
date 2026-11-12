@@ -174,8 +174,7 @@ export function TutorialGuidePanel({
 
   return (
     <aside className={`@container flex min-h-0 min-w-0 flex-col overflow-y-auto rounded-2xl p-4 glow-lg @2xl:p-6 ${surface}`}>
-      <div className="grid gap-4 @4xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] @4xl:gap-6">
-        <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4">
           <section>
             <h2 className={`text-lg font-bold leading-tight tracking-[-0.01em] @2xl:text-xl ${ink}`}>{copy.chartTitle}</h2>
             <p className={`mt-2.5 max-w-[68ch] ${bodyText} ${ink}`}>{copy.overviewBody}</p>
@@ -187,9 +186,7 @@ export function TutorialGuidePanel({
               <p className={`max-w-[68ch] ${bodyText} ${ink}`}>{copy.readingBody}</p>
             </section>
           ) : null}
-        </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
           <section className={panel}>
             <h3 className={sectionTitle}>Quick numbers</h3>
             <p className={`mb-4 ${hintText}`}>
@@ -204,7 +201,7 @@ export function TutorialGuidePanel({
                 <div className="flex flex-col gap-5">
                   <div>
                     <h4 className={blockTitle}>Suitable hours by preset</h4>
-                    <ul className="grid gap-2 @2xl:grid-cols-2">
+                    <ul className="grid gap-2">
                       {nvStats.presetStats.map(stat => {
                         const preset = NV_CRITERIA_PRESETS.find(p => p.id === stat.id);
                         return (
@@ -434,7 +431,7 @@ export function TutorialGuidePanel({
                 <p className={hintText}>No hours match your current filters.</p>
               )
             ) : (
-              <div className="grid gap-x-6 gap-y-5 @2xl:grid-cols-2">
+              <div className="grid gap-y-5">
                 {statBlocks.map((block, bi) => (
                   <div key={bi} className="min-w-0">
                     {block.heading ? <h4 className={blockTitle}>{block.heading}</h4> : null}
@@ -501,7 +498,6 @@ export function TutorialGuidePanel({
               </div>
             </section>
           ) : null}
-        </div>
       </div>
     </aside>
   );

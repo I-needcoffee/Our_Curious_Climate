@@ -245,7 +245,7 @@ export function SingleModeLayout({
             <div ref={tutorialColRef} className="flex w-full flex-1 min-h-0 flex-col gap-2 md:min-h-0 md:overflow-visible">
               <div
                 ref={tutorialChromeObserveRef}
-                className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:gap-4 md:overflow-visible"
+                className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)] md:gap-4 md:overflow-visible"
               >
                 {(() => {
                   const slot = pageSlots[0];
@@ -277,7 +277,7 @@ export function SingleModeLayout({
           )}
 
           {layoutMode === 'hero-left' && (
-            // Primary column share must match tutorial mode (2fr chart + 3fr guide → 2/5) so the hero card width is unchanged when switching layouts.
+            // Hero keeps its own 2/5 primary column. Details gives the chart 3/7, a little wider than 2/5.
             <div className="grid w-full gap-2.5 flex-1 min-h-0 grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] md:[grid-template-rows:minmax(0,1fr)_minmax(0,1fr)] md:overflow-visible">
               {pageSlots.map((slot, idx) => {
                 const isHero = idx === 0;

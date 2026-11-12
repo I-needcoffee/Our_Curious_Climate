@@ -11,13 +11,13 @@ export function chartAxisInk(textColor: string, theme: 'light' | 'dark'): string
 
 /**
  * Ink for values printed inside heatmap cells: always the same near-black, in every chart, on
- * every fill. One ink keeps the grid reading as a single surface; the lighter weight
- * (`HEATMAP_CELL_FONT_WEIGHT`) is what keeps it from competing with the color.
+ * every fill. One ink keeps the grid reading as a single surface; semibold
+ * (`HEATMAP_CELL_FONT_WEIGHT`) keeps the numbers readable on the cell color.
  * Explicit text colors pass straight through.
  */
 export function heatmapCellInk(textColor: string): string {
   return textColor === CHART_TEXT_AUTO ? INK_DARK : textColor;
 }
 
-/** Inter Light: the numbers annotate the cells rather than stamp them. */
-export const HEATMAP_CELL_FONT_WEIGHT = '300';
+/** Inter Semibold: cell numbers stay readable without the light weight washing out. */
+export const HEATMAP_CELL_FONT_WEIGHT = '600';
