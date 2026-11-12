@@ -7,7 +7,12 @@ import {
   hemisphereFromLatitude,
   seasonForDate,
 } from '../lib/seasons';
-import { computeUtciForEpwRow, utciRowOutsideModelRange, UTCI_CLOCK_WINDOWS, UTCI_HOUR_WINDOW_NOTE } from '../lib/utciModel';
+import {
+  computeUtciForEpwRow,
+  utciRowOutsideModelRange,
+  UTCI_CLOCK_WINDOWS,
+  UTCI_HOUR_WINDOW_NOTE_SHORT,
+} from '../lib/utciModel';
 
 function cToF(v: number) {
   return v * (9 / 5) + 32;
@@ -202,7 +207,7 @@ export function Grid4x2StatsColumn({
   const mutedInk = dark ? 'text-gray-500' : 'text-gray-400';
   const valueInk = dark ? 'text-gray-100' : 'text-gray-900';
   const groupBg = dark ? 'bg-gray-700/40' : 'bg-gray-50';
-  const group = `flex w-full min-w-0 flex-col items-start gap-0.5 rounded-xl px-2.5 py-1.5 @[14rem]:gap-1 @[14rem]:py-2 ${groupBg}`;
+  const group = `flex w-full min-w-0 flex-col items-start gap-1 rounded-xl px-2.5 py-1.5 @[14rem]:py-2 ${groupBg}`;
 
   const Value = ({ value, emphasis = false }: { value: string; emphasis?: boolean }) => {
     const [rawNum, ...unit] = value.split(' ');
@@ -221,11 +226,14 @@ export function Grid4x2StatsColumn({
     );
   };
 
-  /** Name plus a muted detail (date or hour range) that only shows when the panel is wide enough. */
+  /**
+   * Name plus a muted detail (date or hour range). The detail waits until the column can hold
+   * "Winter Dec 21–Mar 20" beside its value; narrower columns keep the name only.
+   */
   const DetailLabel = ({ name, detail }: { name: string; detail: string }) => (
     <>
       {name}
-      <span className={`hidden @[14rem]:inline ${mutedInk}`}> {detail}</span>
+      <span className={`hidden @[18rem]:inline ${mutedInk}`}> {detail}</span>
     </>
   );
 
@@ -250,17 +258,17 @@ export function Grid4x2StatsColumn({
     title?: string;
     hint?: string;
   }) => (
-    <div className="flex max-w-full min-w-0 flex-col">
-      <div className="flex max-w-full min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0">
+    <div className="flex max-w-full min-w-0 flex-col gap-0.5">
+      <div className="grid max-w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-1.5">
         <span
-          className={`min-w-0 truncate text-[11px] leading-snug @[14rem]:text-xs ${labelInk}`}
+          className={`min-w-0 truncate text-[11px] leading-none @[14rem]:text-xs ${labelInk}`}
           title={title}
         >
           {label}
         </span>
         <Value value={value} />
       </div>
-      {hint ? <span className={`text-[10px] leading-tight ${mutedInk}`}>{hint}</span> : null}
+      {hint ? <span className={`truncate text-[10px] leading-none ${mutedInk}`}>{hint}</span> : null}
     </div>
   );
 
@@ -295,8 +303,10 @@ export function Grid4x2StatsColumn({
         <div className={panelInner}>
           <p className={heading}>Outdoor comfort</p>
           {stats.utciOutOfRange > 0 ? (
-            <p className={`text-[10px] leading-snug ${mutedInk}`}>
-              {stats.utciOutOfRange.toLocaleString()} hours are outside the UTCI model range, so they are not included in these percentages.
+            <p className={`text-[10px] leading-normal ${mutedInk}`}>
+              {stats.utciOutOfRange === 1
+                ? '1 hour is outside the UTCI model range, so it is not included in these percentages.'
+                : `${stats.utciOutOfRange.toLocaleString()} hours are outside the UTCI model range, so they are not included in these percentages.`}
             </p>
           ) : null}
           <div className={group}>
@@ -322,7 +332,7 @@ export function Grid4x2StatsColumn({
             <Row label={<DetailLabel name="Morning" detail={UTCI_CLOCK_WINDOWS.morning.label} />} title={`Morning · ${UTCI_CLOCK_WINDOWS.morning.label}`} value={stats.comfortDayParts.morning} />
             <Row label={<DetailLabel name="Midday" detail={UTCI_CLOCK_WINDOWS.midday.label} />} title={`Midday · ${UTCI_CLOCK_WINDOWS.midday.label}`} value={stats.comfortDayParts.midday} />
             <Row label={<DetailLabel name="Afternoon" detail={UTCI_CLOCK_WINDOWS.afternoon.label} />} title={`Afternoon · ${UTCI_CLOCK_WINDOWS.afternoon.label}`} value={stats.comfortDayParts.afternoon} />
-            <p className={`px-0.5 text-[10px] font-light italic leading-snug ${mutedInk}`}>{UTCI_HOUR_WINDOW_NOTE}</p>
+            <p className={`text-[10px] font-light italic leading-normal ${mutedInk}`}>{UTCI_HOUR_WINDOW_NOTE_SHORT}</p>
           </div>
         </div>
       </aside>

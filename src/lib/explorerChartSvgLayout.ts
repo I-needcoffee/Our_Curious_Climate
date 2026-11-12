@@ -12,6 +12,11 @@ export const EXPLORER_SVG_DEFAULT_HEIGHT = 380;
 const EXPLORER_SVG_MIN_HEIGHT = 250;
 /** Tallest chart: beyond this, extra card height becomes whitespace rather than taller rows. */
 const EXPLORER_SVG_MAX_HEIGHT = 460;
+/**
+ * Share of the card's aspect used for the chart. The rest stays quiet space so monthly/hourly
+ * rows are a little shorter than the slot instead of stretching to its edges.
+ */
+const EXPLORER_SVG_CARD_FILL = 0.94;
 
 /** Bottom margin is a short gap under the 12×24 grid, just past the top margin. */
 export const EXPLORER_SVG_MARGIN = { top: 8, right: 4, bottom: 10, left: 40 } as const;
@@ -121,12 +126,16 @@ const EXPLORER_SVG_FIXED_HEIGHT =
 
 /**
  * Explorer viewBoxes keep a fixed width and pick their height from the card's aspect ratio, so
- * the chart always spans the card width: short cards compress heatmap rows, tall cards grow them.
+ * the chart always spans the card width. The fit is then eased down slightly so heatmap rows
+ * stay a little shorter than a tall grid cell.
  */
 export function explorerSvgHeightForBox(boxWidth: number, boxHeight: number): number {
   if (!(boxWidth > 0 && boxHeight > 0)) return EXPLORER_SVG_DEFAULT_HEIGHT;
   const fit = Math.floor((EXPLORER_SVG_BASE_WIDTH * boxHeight) / boxWidth / 10) * 10;
-  return Math.min(EXPLORER_SVG_MAX_HEIGHT, Math.max(EXPLORER_SVG_MIN_HEIGHT, fit));
+  const capped = Math.min(EXPLORER_SVG_MAX_HEIGHT, Math.max(EXPLORER_SVG_MIN_HEIGHT, fit));
+  if (capped <= EXPLORER_SVG_MIN_HEIGHT) return EXPLORER_SVG_MIN_HEIGHT;
+  const eased = Math.floor((capped * EXPLORER_SVG_CARD_FILL) / 10) * 10;
+  return Math.max(EXPLORER_SVG_MIN_HEIGHT, eased);
 }
 
 export function explorerBarChartHeightPx(svgHeight = EXPLORER_SVG_DEFAULT_HEIGHT): number {

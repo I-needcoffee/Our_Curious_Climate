@@ -348,6 +348,10 @@ export const UTCI_CLOCK_WINDOWS = {
 export const UTCI_HOUR_WINDOW_NOTE =
   'Each name is the clock hour that starts then, through the last hour listed. 7am–6pm is hours 7–18. Morning is 7–10, midday 11–2, afternoon 3–6, with no hours left out between them.';
 
+/** One line for the narrow grid sidebar, where the full note wraps into itself. */
+export const UTCI_HOUR_WINDOW_NOTE_SHORT =
+  '7am–6pm is hours 7–18. Morning 7–10, midday 11–2, afternoon 3–6.';
+
 export const UTCI_COMFORT_PERIOD_ROWS: UtciComfortPeriodDef[] = [
   { id: 'annual-24h', label: 'Annual (24 hour)', season: 'all', startHour: 0, endHour: 23 },
   { id: 'annual-7-18', label: 'Annual 7am–6pm', season: 'all', startHour: 7, endHour: 18 },
