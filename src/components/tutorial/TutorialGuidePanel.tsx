@@ -24,6 +24,7 @@ import {
 import { useTutorialLive } from '../../context/TutorialLiveContext';
 import { NATURAL_VENTILATION_SUITABLE_BLUE_HEX, OUTDOOR_COMFORT_GREEN_HEX } from '../../lib/constants';
 import { formatNvPresetLabel, NV_CRITERIA_PRESETS } from '../../lib/naturalVentilationModel';
+import { useIsDesktopLg } from '../../hooks/useIsMobileMaxSm';
 
 type ParsedStatBlock = {
   heading?: string;
@@ -210,6 +211,8 @@ export function TutorialGuidePanel({
   siteTimeZone?: number | null;
 }) {
   const { snapshot, requestUtciSelection, clearUtciFocus } = useTutorialLive();
+  const isDesktopLg = useIsDesktopLg();
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedCell, setSelectedCell] = useState<{ periodIndex: number; scenarioIndex: number } | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [utciTab, setUtciTab] = useState<'periods' | 'bands'>('periods');
@@ -228,13 +231,19 @@ export function TutorialGuidePanel({
   }, [slot.type]);
 
   useEffect(() => {
-    if (!guideOpen) return;
+    if (isDesktopLg) setSheetOpen(false);
+  }, [isDesktopLg]);
+
+  useEffect(() => {
+    if (!guideOpen && !sheetOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setGuideOpen(false);
+      if (e.key !== 'Escape') return;
+      if (guideOpen) setGuideOpen(false);
+      else if (sheetOpen) setSheetOpen(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [guideOpen]);
+  }, [guideOpen, sheetOpen]);
 
   useEffect(() => {
     if (!selectedCell && !snapshot.utciFocusPeriodId) return;
@@ -419,6 +428,41 @@ export function TutorialGuidePanel({
     return 'All summary figures are computed directly from your loaded weather file using the same month and hour filters applied to the chart in Settings.';
   }, [slot.type]);
 
+  const mobilePeekSummary = useMemo((): { badge: string; detail?: string } => {
+    if (slot.type === 'utci' && utciStats) {
+      const pct = Number.isFinite(utciStats.comfortPercent) ? `${utciStats.comfortPercent.toFixed(1)}%` : '—';
+      return {
+        badge: `${pct} comfort`,
+        detail: utciStats.isolationLabel ?? formatUtciCategoryRange(UTCI_COMFORT_CATEGORY, unitSystem),
+      };
+    }
+    if (slot.type === 'naturalVentilation' && nvStats) {
+      const pct = Number.isFinite(nvStats.activeBreakdown.suitablePct)
+        ? `${nvStats.activeBreakdown.suitablePct.toFixed(1)}%`
+        : '—';
+      return {
+        badge: `${pct} suitable`,
+        detail: `${nvStats.activeBreakdown.suitableHours.toLocaleString()} hrs`,
+      };
+    }
+    if ((slot.type === 'wind' || slot.type === 'windrose') && windInsights) {
+      const top = windInsights.predominant[0];
+      return {
+        badge: top ? `Prevailing ${top.label} (${top.pct.toFixed(0)}%)` : `Avg ${windInsights.avgSpeed}`,
+        detail: `Avg ${windInsights.avgSpeed} · Peak ${windInsights.peakSpeed}`,
+      };
+    }
+    const primary = parsedBlocks[0];
+    if (primary && (primary.avg || primary.peak || primary.low)) {
+      return {
+        badge: primary.avg ? `Avg ${primary.avg}` : primary.peak ?? 'Summary',
+        detail:
+          primary.low && primary.peak ? `${primary.low} – ${primary.peak}` : primary.heading,
+      };
+    }
+    return { badge: copy.chartTitle, detail: 'Summary & guide' };
+  }, [slot.type, utciStats, nvStats, windInsights, parsedBlocks, unitSystem, copy.chartTitle]);
+
   const dark = theme === 'dark';
   const surface = dark ? 'bg-gray-800' : 'bg-white';
   /** White-on-white inset sections defined purely by soft outer glows. */
@@ -512,12 +556,33 @@ export function TutorialGuidePanel({
     );
   };
 
-  return (
+  const panelContent = (
     <aside
-      className={`@container relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl glow-lg ${surface}`}
+      className={`@container relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl ${
+        isDesktopLg ? 'glow-lg' : 'glow-xl'
+      } ${surface}`}
     >
+      {/* Mobile / tablet sheet drag handle */}
+      {!isDesktopLg ? (
+        <button
+          type="button"
+          onClick={() => setSheetOpen(false)}
+          aria-label="Collapse details sheet"
+          className="flex w-full shrink-0 justify-center pt-2 pb-0.5"
+        >
+          <span
+            className={`h-1 w-10 rounded-full ${dark ? 'bg-gray-600' : 'bg-gray-300'}`}
+            aria-hidden
+          />
+        </button>
+      ) : null}
+
       {/* Compact Header */}
-      <header className="flex shrink-0 items-start justify-between gap-3 px-4 pt-3.5 pb-2.5 @2xl:px-5 @2xl:pt-4">
+      <header
+        className={`flex shrink-0 items-start justify-between gap-2.5 px-4 pb-2.5 @2xl:px-5 ${
+          isDesktopLg ? 'pt-3.5 @2xl:pt-4' : 'pt-1.5'
+        }`}
+      >
         <div className="min-w-0 flex-1">
           <h2 className={`truncate text-base font-bold leading-tight tracking-[-0.01em] @2xl:text-lg ${ink}`}>
             {copy.chartTitle}
@@ -527,22 +592,41 @@ export function TutorialGuidePanel({
           </p>
         </div>
 
-        <button
-          type="button"
-          data-tutorial-guide-keep-focus="true"
-          onClick={() => setGuideOpen(true)}
-          aria-expanded={guideOpen}
-          aria-controls="tutorial-guide-drawer"
-          className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold glow-sm transition-colors ${
-            dark
-              ? 'bg-gray-800 text-gray-100 hover:bg-gray-700'
-              : 'bg-white text-gray-700 hover:text-gray-950'
-          }`}
-          title="Open plain-language guide & how to read this chart"
-        >
-          <BookOpen className="h-3.5 w-3.5" aria-hidden />
-          <span>Guide</span>
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            data-tutorial-guide-keep-focus="true"
+            onClick={() => setGuideOpen(true)}
+            aria-expanded={guideOpen}
+            aria-controls="tutorial-guide-drawer"
+            className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold glow-sm transition-colors ${
+              dark
+                ? 'bg-gray-800 text-gray-100 hover:bg-gray-700'
+                : 'bg-white text-gray-700 hover:text-gray-950'
+            }`}
+            title="Open plain-language guide & how to read this chart"
+          >
+            <BookOpen className="h-3.5 w-3.5" aria-hidden />
+            <span>Guide</span>
+          </button>
+
+          {!isDesktopLg ? (
+            <button
+              type="button"
+              data-tutorial-guide-keep-focus="true"
+              onClick={() => setSheetOpen(false)}
+              aria-label="Hide details panel"
+              className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-xs font-semibold glow-sm transition-colors ${
+                dark
+                  ? 'bg-gray-800 text-gray-200 hover:bg-gray-700'
+                  : 'bg-white text-gray-700 hover:text-gray-950'
+              }`}
+            >
+              <span>Hide</span>
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {/* Main single-page structured body */}
@@ -578,20 +662,34 @@ export function TutorialGuidePanel({
                       {utciStats.hoursCounted.toLocaleString()} hrs
                     </span>
                     {(selectedCell || snapshot.utciFocusPeriodId) && (
-                      <button
-                        type="button"
-                        data-tutorial-guide-keep-focus="true"
-                        onClick={clearComfortHighlight}
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
-                          dark
-                            ? 'bg-orange-950/70 text-orange-200 hover:bg-orange-900/80'
-                            : 'bg-white text-orange-700 glow-sm hover:bg-orange-50'
-                        }`}
-                        title="Clear period highlight on chart"
-                      >
-                        <span>{utciStats.isolationLabel ?? 'Filtered'}</span>
-                        <X className="h-3 w-3" aria-hidden />
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          data-tutorial-guide-keep-focus="true"
+                          onClick={clearComfortHighlight}
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+                            dark
+                              ? 'bg-orange-950/70 text-orange-200 hover:bg-orange-900/80'
+                              : 'bg-white text-orange-700 glow-sm hover:bg-orange-50'
+                          }`}
+                          title="Clear period highlight on chart"
+                        >
+                          <span>{utciStats.isolationLabel ?? 'Filtered'}</span>
+                          <X className="h-3 w-3" aria-hidden />
+                        </button>
+                        {!isDesktopLg ? (
+                          <button
+                            type="button"
+                            data-tutorial-guide-keep-focus="true"
+                            onClick={() => setSheetOpen(false)}
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold glow-sm transition-colors ${
+                              dark ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-800'
+                            }`}
+                          >
+                            <span>View chart</span>
+                          </button>
+                        ) : null}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1351,5 +1449,78 @@ export function TutorialGuidePanel({
         </div>
       </div>
     </aside>
+  );
+
+  if (isDesktopLg) {
+    return panelContent;
+  }
+
+  return (
+    <>
+      {/* Compact bottom sheet peek bar (mobile & portrait/mid tablets) — leaves ~88% height for the chart */}
+      <button
+        type="button"
+        data-tutorial-guide-keep-focus="true"
+        onClick={() => setSheetOpen(true)}
+        aria-expanded={sheetOpen}
+        aria-controls="mobile-details-sheet"
+        className={`flex w-full shrink-0 flex-col items-center rounded-2xl px-3.5 pt-1.5 pb-2.5 text-left glow-lg transition-shadow active:scale-[0.995] ${surface}`}
+      >
+        <span
+          className={`mb-1.5 h-1 w-9 rounded-full ${dark ? 'bg-gray-600' : 'bg-gray-300'}`}
+          aria-hidden
+        />
+        <div className="flex w-full min-w-0 items-center justify-between gap-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className={`truncate text-xs font-bold ${ink}`}>{mobilePeekSummary.badge}</span>
+              {mobilePeekSummary.detail ? (
+                <span className={`truncate text-[11px] ${muted}`}>{mobilePeekSummary.detail}</span>
+              ) : null}
+            </div>
+          </div>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold glow-sm ${
+              dark ? 'bg-gray-700 text-gray-100' : 'bg-white text-gray-800'
+            }`}
+          >
+            <span>Details</span>
+            <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+          </span>
+        </div>
+      </button>
+
+      {/* Backdrop dim inside the Details workspace container (never covers header or footer) */}
+      <div
+        className={`absolute inset-0 z-30 rounded-2xl transition-opacity duration-200 ${
+          sheetOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        aria-hidden={!sheetOpen}
+      >
+        <button
+          type="button"
+          tabIndex={sheetOpen ? 0 : -1}
+          aria-label="Collapse details sheet"
+          onClick={() => setSheetOpen(false)}
+          className="h-full w-full rounded-2xl bg-black/25 backdrop-blur-[1px] dark:bg-black/45"
+        />
+      </div>
+
+      {/* Expandable Bottom Sheet Drawer */}
+      <div
+        id="mobile-details-sheet"
+        role="dialog"
+        aria-label={`${copy.chartTitle} details`}
+        aria-hidden={!sheetOpen}
+        data-tutorial-guide-keep-focus="true"
+        className={`absolute inset-x-0 bottom-0 z-40 h-[86%] max-h-[calc(100%-12px)] transition-[transform,opacity,visibility] duration-200 ease-out ${
+          sheetOpen
+            ? 'visible translate-y-0 opacity-100'
+            : 'invisible pointer-events-none translate-y-8 opacity-0'
+        }`}
+      >
+        {panelContent}
+      </div>
+    </>
   );
 }

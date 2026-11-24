@@ -58,7 +58,7 @@ export function ChartToolbarLabeledMenu({
   const title = `${label}: ${selectedName}`;
 
   return (
-    <div id={domId} className="relative shrink-0">
+    <div id={domId} data-card-dropdown-open={open ? 'true' : undefined} className="relative shrink-0">
       <button
         ref={btnRef}
         type="button"
@@ -70,7 +70,13 @@ export function ChartToolbarLabeledMenu({
         onClick={() => setOpen(v => !v)}
       >
         {label}
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70 @lg:h-4 @lg:w-4" strokeWidth={2.25} aria-hidden />
+        <ChevronDown
+          className={`h-2.5 w-2.5 shrink-0 transition-transform duration-150 @lg:h-3 @lg:w-3 ${
+            open ? 'rotate-180 opacity-90' : 'opacity-65'
+          }`}
+          strokeWidth={2.4}
+          aria-hidden
+        />
       </button>
 
       {open ? (

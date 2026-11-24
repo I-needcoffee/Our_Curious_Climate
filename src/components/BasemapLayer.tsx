@@ -40,6 +40,71 @@ export function writeBasemapStyle(style: BasemapStyle) {
   }
 }
 
+function enhanceStateAndCountryBorders(glMap: any) {
+  try {
+    const style = glMap.getStyle?.();
+    if (!style || !Array.isArray(style.layers)) return;
+
+    let enhancedState = false;
+    for (const layer of style.layers) {
+      if (layer.type !== 'line') continue;
+      const id = String(layer.id || '');
+      const srcLayer = String(layer['source-layer'] || '');
+
+      if (id === 'boundary_state' || (srcLayer === 'boundary' && /state|province|admin[_-]?4/i.test(id))) {
+        enhancedState = true;
+        glMap.setLayoutProperty(id, 'visibility', 'visible');
+        glMap.setLayerZoomRange(id, 2, 24);
+        glMap.setPaintProperty(id, 'line-color', '#94a3b8');
+        glMap.setPaintProperty(id, 'line-opacity', 0.85);
+        glMap.setPaintProperty(id, 'line-width', [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          2,
+          0.7,
+          5,
+          1.1,
+          8,
+          1.5,
+        ]);
+      } else if (id.startsWith('boundary_country') || (srcLayer === 'boundary' && /country|admin[_-]?2/i.test(id))) {
+        glMap.setPaintProperty(id, 'line-color', '#7c8796');
+        glMap.setPaintProperty(id, 'line-opacity', 0.9);
+      }
+    }
+
+    // Defensive fallback if the remote Positron style ever omits a dedicated `boundary_state` layer.
+    if (!enhancedState && style.sources && !glMap.getLayer('custom-boundary-state')) {
+      const sourceName =
+        'openmaptiles' in style.sources
+          ? 'openmaptiles'
+          : Object.keys(style.sources).find(k => style.sources[k]?.type === 'vector');
+      if (sourceName) {
+        const beforeLabel = style.layers.find((l: any) => l.type === 'symbol')?.id;
+        glMap.addLayer(
+          {
+            id: 'custom-boundary-state',
+            type: 'line',
+            source: sourceName,
+            'source-layer': 'boundary',
+            minzoom: 2,
+            filter: ['all', ['==', ['get', 'admin_level'], 4], ['!=', ['get', 'maritime'], 1]],
+            paint: {
+              'line-color': '#94a3b8',
+              'line-opacity': 0.85,
+              'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.7, 5, 1.1, 8, 1.5],
+            },
+          },
+          beforeLabel
+        );
+      }
+    }
+  } catch {
+    // Ignore transient style errors while MapLibre is still loading
+  }
+}
+
 function PositronGlLayer() {
   const map = useMap();
 
@@ -47,8 +112,27 @@ function PositronGlLayer() {
     const layer = maplibreGL({
       style: OPENFREEMAP_POSITRON_STYLE,
       attributionControl: { customAttribution: OPENFREEMAP_ATTRIBUTION },
-    });
+      // Zero throttle & generous pre-rendered padding eliminate panning lag and blank edges.
+      updateInterval: 0,
+      padding: 0.35,
+      interactive: false,
+      fadeDuration: 0,
+    } as any);
     map.addLayer(layer);
+
+    const glMap = (layer as any).getMaplibreMap?.();
+    if (glMap) {
+      const onStyleReady = () => enhanceStateAndCountryBorders(glMap);
+      if (glMap.isStyleLoaded?.()) onStyleReady();
+      glMap.on('load', onStyleReady);
+      glMap.on('styledata', onStyleReady);
+      return () => {
+        glMap.off('load', onStyleReady);
+        glMap.off('styledata', onStyleReady);
+        map.removeLayer(layer);
+      };
+    }
+
     return () => {
       map.removeLayer(layer);
     };
@@ -65,8 +149,20 @@ export function BasemapLayer({ style }: { style: BasemapStyle }) {
   if (style === 'satellite') {
     return (
       <>
-        <TileLayer attribution={ESRI_SATELLITE_ATTRIBUTION} url={ESRI_SATELLITE_URL} maxZoom={19} />
-        <TileLayer attribution="" url={ESRI_SATELLITE_LABELS_URL} maxZoom={19} />
+        <TileLayer
+          attribution={ESRI_SATELLITE_ATTRIBUTION}
+          url={ESRI_SATELLITE_URL}
+          maxZoom={19}
+          keepBuffer={4}
+          updateWhenIdle={false}
+        />
+        <TileLayer
+          attribution=""
+          url={ESRI_SATELLITE_LABELS_URL}
+          maxZoom={19}
+          keepBuffer={4}
+          updateWhenIdle={false}
+        />
       </>
     );
   }

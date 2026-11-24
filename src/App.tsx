@@ -153,16 +153,9 @@ export type LayoutMode = 'hero-left' | 'grid-4x2' | 'focus-deep' | 'tutorial' | 
 function LayoutIconStacked({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      {/* Single card with a left↔right arrow to suggest full-width single-column layout. */}
-      <rect x="5" y="4" width="30" height="20" rx="3" stroke="currentColor" strokeWidth="1.75" />
-      <path
-        d="M14 14h12m0 0-2.5-2.5M26 14l-2.5 2.5M14 14l2.5-2.5M14 14l2.5 2.5"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity="0.85"
-      />
+      {/* Two clean vertically stacked full-width cards for scrolling view. */}
+      <rect x="7" y="3" width="26" height="9.5" rx="2.5" stroke="currentColor" strokeWidth="1.9" />
+      <rect x="7" y="15.5" width="26" height="9.5" rx="2.5" stroke="currentColor" strokeWidth="1.9" />
     </svg>
   );
 }
@@ -1154,14 +1147,14 @@ export default function App() {
       {/* Top Navigation Bar */}
       <div
         id="tutorial-nav-bar"
-        className={`relative z-30 flex min-h-0 w-full min-w-0 items-center justify-between gap-2 px-2 py-1.5 transition-[background-color,box-shadow] duration-200 sm:px-3 ${
+        className={`relative z-30 flex min-h-0 w-full min-w-0 items-center justify-between gap-1.5 px-2 py-1.5 transition-[background-color,box-shadow] duration-200 sm:gap-2 sm:px-3 ${
           theme === 'dark'
             ? 'bg-gray-800 shadow-[0_2px_18px_rgba(0,0,0,0.35)]'
             : 'bg-white shadow-[0_2px_18px_rgba(15,23,42,0.07)]'
         }`}
       >
-        <div className="flex min-h-0 min-w-0 flex-1 items-center gap-2 overflow-visible sm:gap-4">
-          <span className="control-bleed-sm inline-flex shrink-0 overflow-visible rounded-full">
+        <div className="flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-hidden sm:gap-3 sm:overflow-visible">
+          <span className="inline-flex shrink-0 overflow-visible rounded-full sm:control-bleed-sm">
             <button
               id="tutorial-nav-back"
               type="button"
@@ -1174,7 +1167,7 @@ export default function App() {
                 setDifferenceCompareIndex(1);
                 windIemGlobal.setIemStation(null);
               }}
-              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow] duration-200 sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow] duration-200 sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
               title="Back to Map"
             >
               <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -1183,14 +1176,14 @@ export default function App() {
 
           <div
             id="tutorial-nav-files"
-            className="flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-visible hide-scrollbar py-1 pe-1 sm:gap-2"
+            className="flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-visible hide-scrollbar py-1 px-0.5 sm:gap-2 sm:px-0 sm:pe-1"
           >
             {selectedFiles.map((file, index) => {
               const fileTypeNote = weatherFileTypeLine(file);
               return (
               <div 
                 key={index} 
-                className={`group flex shrink-0 items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1.5 transition-[color,background-color,box-shadow] duration-200 cursor-pointer sm:gap-2 sm:py-1.5 sm:pl-3 sm:pr-2 ${
+                className={`group flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 transition-[color,background-color,box-shadow] duration-200 cursor-pointer sm:gap-2 sm:py-1.5 sm:pl-3 sm:pr-2 ${
                   viewMode === 'single' && activeFileIndex === index 
                     ? (theme === 'dark'
                       ? 'bg-gray-600 text-gray-100 glow-md z-10'
@@ -1208,15 +1201,15 @@ export default function App() {
                 }
               >
                 <MapPin
-                  className={`h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-200' : 'text-gray-600') : (theme === 'dark' ? 'text-gray-400' : 'text-gray-500')}`}
+                  className={`hidden h-3.5 w-3.5 shrink-0 sm:block sm:h-4 sm:w-4 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-200' : 'text-gray-600') : (theme === 'dark' ? 'text-gray-400' : 'text-gray-500')}`}
                 />
-                <div className="flex max-w-[12rem] min-w-0 flex-col gap-1 text-left leading-none sm:max-w-[17rem]">
-                  <span className="truncate text-xs font-semibold leading-none sm:text-[13px]">
+                <div className="flex max-w-[6.75rem] min-w-0 flex-col gap-0.5 text-left leading-none sm:max-w-[16rem] sm:gap-1">
+                  <span className="truncate text-[11.5px] font-semibold leading-none sm:text-[13px]">
                     {weatherPlaceLine(file) || file.metadata.city}
                   </span>
                   {fileTypeNote ? (
                     <span
-                      className={`truncate text-[10.5px] font-medium leading-none sm:text-[11px] ${
+                      className={`truncate text-[9.5px] font-medium leading-none sm:text-[11px] ${
                         viewMode === 'single' && activeFileIndex === index
                           ? theme === 'dark'
                             ? 'text-gray-300'
@@ -1245,7 +1238,7 @@ export default function App() {
                     setDifferenceBaselineIndex(0);
                     setDifferenceCompareIndex(1);
                   }}
-                  className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-red-500/10 hover:text-red-500 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-300' : 'text-gray-500') : 'text-gray-400'}`}
+                  className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-red-500/10 hover:text-red-500 sm:h-6 sm:w-6 ${viewMode === 'single' && activeFileIndex === index ? (theme === 'dark' ? 'text-gray-300' : 'text-gray-500') : 'text-gray-400'}`}
                   title="Remove file"
                 >
                   <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -1257,13 +1250,16 @@ export default function App() {
               <button
                 id="tutorial-nav-add"
                 type="button"
+                aria-label="Add weather location"
+                title="Add weather location"
                 onClick={() => {
                   dismissOnboarding(ONBOARDING_KEYS.addLocation);
                   setIsSelectingFile(true);
                 }}
-                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-all sm:h-9 sm:px-3.5 sm:text-[13px] ${theme === 'dark' ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white' : 'bg-white text-gray-600 glow-sm hover:text-gray-900 hover:glow-md'}`}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-0 text-xs font-semibold transition-all sm:h-9 sm:w-auto sm:px-3.5 sm:text-[13px] ${theme === 'dark' ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white' : 'bg-white text-gray-600 glow-sm hover:text-gray-900 hover:glow-md'}`}
               >
-                <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> Add
+                <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="hidden sm:inline">Add</span>
               </button>
             </DiscoverPulseShell>
           </div>
@@ -1318,7 +1314,7 @@ export default function App() {
               className="relative inline-flex shrink-0"
             >
               <div
-                className={`inline-flex h-9 shrink-0 items-stretch gap-0.5 rounded-full p-1 sm:h-10 ${
+                className={`inline-flex h-8 shrink-0 items-stretch gap-0.5 rounded-full p-0.5 sm:h-10 sm:p-1 ${
                   theme === 'dark' ? 'bg-gray-700/70' : 'bg-white glow-sm'
                 }`}
                 role="group"
@@ -1334,17 +1330,17 @@ export default function App() {
                       aria-label={ariaLabel}
                       aria-pressed={active}
                       title={title}
-                      className={`flex min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
+                      className={`flex min-w-8 shrink-0 items-center justify-center gap-1 rounded-full px-1.5 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
                         active
                           ? theme === 'dark'
                             ? 'bg-gray-500 text-gray-100 glow-sm'
-                            : 'bg-white text-gray-900 shadow-[0_1px_4px_rgba(15,23,42,0.12),0_0_8px_rgba(15,23,42,0.08)]'
+                            : 'bg-white text-gray-900 glow-sm'
                           : theme === 'dark'
                             ? 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-200'
                             : 'text-gray-400 hover:text-gray-800'
                       }`}
                     >
-                      <Icon className="h-[18px] w-[26px] sm:h-5 sm:w-7" />
+                      <Icon className="h-4 w-5 sm:h-5 sm:w-7" />
                       <span
                         className={`hidden max-w-[7rem] truncate pr-1 text-xs leading-none md:inline ${
                           active ? 'font-semibold' : 'font-medium'
@@ -1508,7 +1504,7 @@ export default function App() {
               type="button"
               aria-label="Global settings"
               onClick={() => setShowSettingsModal(true)}
-              className={`relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+              className={`relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
               title="Global settings"
             >
               <Settings className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden />
@@ -1526,7 +1522,7 @@ export default function App() {
                 aria-label="Export layout"
                 data-export-ui
                 onClick={() => setExportMode(true)}
-                className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
                 title="Export layout"
               >
                 <Download className="w-4 h-4 sm:w-5 sm:h-5" />

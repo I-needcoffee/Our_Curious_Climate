@@ -11,7 +11,7 @@ export const EXPLORER_SVG_DEFAULT_HEIGHT = 380;
 /** Shortest chart: heatmap rows compress this far before the chart letterboxes instead. */
 const EXPLORER_SVG_MIN_HEIGHT = 250;
 /** Tallest chart: beyond this, extra card height becomes whitespace rather than taller rows. */
-const EXPLORER_SVG_MAX_HEIGHT = 460;
+const EXPLORER_SVG_MAX_HEIGHT = 520;
 /**
  * Share of the card's aspect used for the chart. The rest stays quiet space so monthly/hourly
  * rows are a little shorter than the slot instead of stretching to its edges.

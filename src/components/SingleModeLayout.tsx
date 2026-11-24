@@ -225,16 +225,16 @@ export function SingleModeLayout({
           className={`w-full relative flex flex-col ${pages.length === 1 ? 'flex-1 min-h-0' : ''}`}
         >
           {layoutMode === 'stacked' && (
-            <div className="flex w-full flex-1 min-h-0 flex-col gap-2 overflow-y-auto">
+            <div className="flex w-full flex-1 min-h-0 flex-col gap-3 overflow-y-auto pb-1">
               {pageSlots.map((slot, idx) => {
-                let className = 'w-full min-h-[340px] flex flex-col overflow-visible ';
+                let className = 'w-full h-[min(78svh,540px)] min-h-[480px] flex flex-col overflow-visible ';
                 if (!exportMode) {
                   className += `rounded-2xl glow-lg ${
                     theme === 'dark' ? 'bg-gray-800' : 'bg-white'
                   }`;
                 }
                 return (
-                  <div key={`${layoutMode}-${slot.id}-${idx}`} className="w-full">
+                  <div key={`${layoutMode}-${slot.id}-${idx}`} className="w-full shrink-0">
                     {renderSlotShell(slot, idx, pageIndex, pageSlots, className)}
                   </div>
                 );
@@ -243,15 +243,15 @@ export function SingleModeLayout({
           )}
 
           {layoutMode === 'tutorial' && (
-            <div ref={tutorialColRef} className="flex w-full flex-1 min-h-0 flex-col gap-2 md:min-h-0 md:overflow-visible">
+            <div ref={tutorialColRef} className="relative flex w-full flex-1 min-h-0 flex-col gap-2 overflow-visible">
               <div
                 ref={tutorialChromeObserveRef}
-                className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)] md:[grid-template-rows:minmax(0,1fr)] md:gap-4 md:overflow-visible"
+                className="relative flex min-h-0 flex-1 flex-col gap-2.5 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,4fr)] lg:[grid-template-rows:minmax(0,1fr)] lg:gap-4 lg:overflow-visible"
               >
                 {(() => {
                   const slot = pageSlots[0];
                   let className =
-                    'flex h-full min-h-[46vh] w-full flex-col overflow-visible md:min-h-0 ';
+                    'flex min-h-0 flex-1 w-full flex-col overflow-visible lg:h-full ';
                   if (!exportMode) {
                     className += `rounded-2xl glow-lg ${
                       theme === 'dark' ? 'bg-gray-800' : 'bg-white'

@@ -1,5 +1,5 @@
 import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback, startTransition, type CSSProperties } from 'react';
-import { MapContainer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet';
+import { MapContainer, Marker, Popup, useMap, useMapEvents, CircleMarker, ZoomControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Search, Upload, ExternalLink, CloudLightning, Loader2, X } from 'lucide-react';
 import L from 'leaflet';
@@ -480,8 +480,10 @@ function MapBoundsListener({
         return paddedBounds.contains([loc.lat, loc.lng]);
       });
 
-      // Limit to 500 markers to prevent browser freeze
-      setVisibleGroups(visible.slice(0, 500));
+      // Limit to 500 markers to prevent browser freeze; wrap in startTransition so pan stays smooth.
+      startTransition(() => {
+        setVisibleGroups(visible.slice(0, 500));
+      });
     } catch (e) {
       console.warn("Error updating visible locations:", e);
     }
@@ -584,7 +586,9 @@ function ObKmlBoundsListener({
         if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return false;
         return paddedBounds.contains([p.lat, p.lng]);
       });
-      setVisiblePins(visible.slice(0, MAX_OB_KML_MARKERS_VISIBLE));
+      startTransition(() => {
+        setVisiblePins(visible.slice(0, MAX_OB_KML_MARKERS_VISIBLE));
+      });
     } catch (e) {
       console.warn('OB KML bounds update failed:', e);
     }
@@ -631,7 +635,9 @@ function FutureLayerBoundsListener<T extends { lat: number; lng: number }>({
         if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return false;
         return paddedBounds.contains([p.lat, p.lng]);
       });
-      setVisible(visible.slice(0, MAX_FUTURE_LAYER_MARKERS));
+      startTransition(() => {
+        setVisible(visible.slice(0, MAX_FUTURE_LAYER_MARKERS));
+      });
     } catch (e) {
       console.warn('Future layer bounds update failed:', e);
     }
@@ -1961,9 +1967,11 @@ export function MapSelector({
             zoom={mapZoom}
             className="h-full w-full"
             minZoom={2}
-            zoomControl={true}
+            preferCanvas={true}
+            zoomControl={false}
             style={{ background: basemapStyle === 'satellite' ? '#1c1917' : CARTO_LIGHT_ALL_WATER_HEX }}
           >
+            <ZoomControl position="bottomright" />
             <LocationFlyer center={mapCenter} zoom={mapZoom} />
             <FitBoundsController points={fitBoundsPoints} trigger={fitBoundsTrigger} />
             <BasemapLayer style={basemapStyle} />
@@ -2156,39 +2164,67 @@ export function MapSelector({
         )}
       </div>
 
-      {!showFuture && (
-        <div
-          tabIndex={0}
-          aria-label="Map marker legend: TMY3 teardrop pin, TMYx sky-blue circle"
-          className="group/legend pointer-events-auto absolute bottom-3 left-3 z-[1000] hidden h-9 items-center overflow-hidden rounded-full bg-white/95 px-2.5 text-xs font-semibold text-gray-700 backdrop-blur-sm glow-md transition-all duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 sm:inline-flex"
-        >
-          <span className="inline-flex shrink-0 items-center">
-            <img
-              src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png"
-              alt=""
-              aria-hidden
-              className="h-4 w-2.5 shrink-0 object-contain"
-            />
-            <span className="inline-block max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-hover/legend:ml-1.5 group-hover/legend:max-w-[3.5rem] group-hover/legend:opacity-100 group-focus-visible/legend:ml-1.5 group-focus-visible/legend:max-w-[3.5rem] group-focus-visible/legend:opacity-100">
-              TMY3
-            </span>
-          </span>
-          <span
-            className="mx-1.5 h-3.5 w-px shrink-0 bg-gray-200/80 transition-[margin] duration-[350ms] group-hover/legend:mx-2.5 group-focus-visible/legend:mx-2.5"
-            aria-hidden
-          />
-          <span className="inline-flex shrink-0 items-center">
-            <span
-              className="inline-block h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: '#bae6fd', border: '1.5px solid #0369a1' }}
-              aria-hidden
-            />
-            <span className="inline-block max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-hover/legend:ml-1.5 group-hover/legend:max-w-[3.5rem] group-hover/legend:opacity-100 group-focus-visible/legend:ml-1.5 group-focus-visible/legend:max-w-[3.5rem] group-focus-visible/legend:opacity-100">
-              TMYx
-            </span>
-          </span>
-        </div>
-      )}
+      {!showFuture && <MapMarkerLegend />}
     </div>
+  );
+}
+
+/**
+ * Compact icon-only legend pill in bottom-left; slides open to reveal "TMY3" and "TMYx" on
+ * desktop hover/focus or on tap on mobile/touch screens.
+ */
+function MapMarkerLegend() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded(v => !v)}
+      aria-expanded={expanded}
+      aria-label="Map marker legend: TMY3 teardrop pin, TMYx sky-blue circle"
+      className="group/legend pointer-events-auto absolute bottom-3 left-3 z-[1000] inline-flex h-9 items-center overflow-hidden rounded-full bg-white/95 px-2.5 text-xs font-semibold text-gray-700 backdrop-blur-sm glow-md transition-all duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+    >
+      <span className="inline-flex shrink-0 items-center">
+        <img
+          src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png"
+          alt=""
+          aria-hidden
+          className="h-4 w-2.5 shrink-0 object-contain"
+        />
+        <span
+          className={`inline-block overflow-hidden whitespace-nowrap transition-[max-width,opacity,margin] duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+            expanded
+              ? 'ml-1.5 max-w-[3.5rem] opacity-100'
+              : 'max-w-0 opacity-0 group-hover/legend:ml-1.5 group-hover/legend:max-w-[3.5rem] group-hover/legend:opacity-100 group-focus-visible/legend:ml-1.5 group-focus-visible/legend:max-w-[3.5rem] group-focus-visible/legend:opacity-100'
+          }`}
+        >
+          TMY3
+        </span>
+      </span>
+      <span
+        className={`h-3.5 w-px shrink-0 bg-gray-200/80 transition-[margin] duration-[350ms] ${
+          expanded
+            ? 'mx-2.5'
+            : 'mx-1.5 group-hover/legend:mx-2.5 group-focus-visible/legend:mx-2.5'
+        }`}
+        aria-hidden
+      />
+      <span className="inline-flex shrink-0 items-center">
+        <span
+          className="inline-block h-3 w-3 shrink-0 rounded-full"
+          style={{ backgroundColor: '#bae6fd', border: '1.5px solid #0369a1' }}
+          aria-hidden
+        />
+        <span
+          className={`inline-block overflow-hidden whitespace-nowrap transition-[max-width,opacity,margin] duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+            expanded
+              ? 'ml-1.5 max-w-[3.5rem] opacity-100'
+              : 'max-w-0 opacity-0 group-hover/legend:ml-1.5 group-hover/legend:max-w-[3.5rem] group-hover/legend:opacity-100 group-focus-visible/legend:ml-1.5 group-focus-visible/legend:max-w-[3.5rem] group-focus-visible/legend:opacity-100'
+          }`}
+        >
+          TMYx
+        </span>
+      </span>
+    </button>
   );
 }

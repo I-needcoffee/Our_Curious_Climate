@@ -41,16 +41,23 @@ export function chartToolbarExportIconClass(theme: Theme): string {
 
 function chartTypeChipTone(theme: Theme): string {
   return theme === 'dark'
-    ? 'bg-gray-700 text-gray-100 hover:bg-gray-600'
-    : 'bg-gray-100 text-gray-800 hover:bg-gray-200 hover:text-gray-900';
+    ? 'bg-gray-700/90 text-gray-100 glow-sm hover:bg-gray-600'
+    : 'bg-white text-gray-800 glow-sm hover:text-gray-950';
 }
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400/80 focus-visible:ring-offset-1 dark:focus-visible:ring-orange-500/70 dark:focus-visible:ring-offset-gray-800';
 
-/** Chart-type pill in edit mode — soft filled chip, icon + hover label. */
+/** Chart-type dropdown pill in edit mode — crisp white glow-sm chip with always-visible chevron. */
 export function chartToolbarTypePillClass(theme: Theme): string {
-  return `inline-flex h-5 min-w-0 max-w-full items-center overflow-hidden rounded-full transition-[background-color,box-shadow,padding] duration-200 ease-out @lg:h-6 ${chartTypeChipTone(theme)} ${FOCUS_RING}`;
+  return `inline-flex h-5 min-w-0 max-w-full items-center overflow-hidden rounded-full transition-[background-color,box-shadow,color,padding] duration-200 ease-out @lg:h-6 ${chartTypeChipTone(theme)} ${FOCUS_RING}`;
+}
+
+/** Interactive variable / category selector pill — hugs label on wide cards, truncates cleanly on narrow cards. */
+export function chartToolbarSelectPillClass(theme: Theme): string {
+  return theme === 'dark'
+    ? 'bg-gray-700/90 text-gray-100 glow-sm group-hover/var-select:bg-gray-600 group-focus-within/var-select:ring-2 group-focus-within/var-select:ring-gray-400'
+    : 'bg-white text-gray-800 glow-sm group-hover/var-select:text-gray-950 group-hover/var-select:glow-md group-focus-within/var-select:ring-2 group-focus-within/var-select:ring-gray-400';
 }
 
 /** Compare-mode card header: type icon only (no menu), same chip. */
@@ -74,12 +81,12 @@ export function chartToolbarTitleClass(theme: Theme): string {
   return `flex h-6 min-w-0 flex-1 items-center truncate @2xl:h-7 ${CHART_TOOLBAR_TITLE_TEXT_CLASS} ${chartToolbarTitleInk(theme)}`;
 }
 
-/** Sun path Color / Radius triggers — same typography as titles, pill hover. */
+/** Sun path Color / Size triggers — compact white glow-sm dropdown pills matching VariableChartSelect. */
 export function chartToolbarMenuTriggerClass(theme: Theme): string {
-  return `inline-flex h-6 shrink-0 items-center gap-0.5 rounded-full px-1.5 @2xl:h-7 ${CHART_TOOLBAR_TITLE_TEXT_CLASS} ${chartToolbarTitleInk(
-    theme
-  )} transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 ${
-    theme === 'dark' ? 'hover:bg-white/10' : 'hover:bg-gray-100'
+  return `inline-flex h-5 shrink-0 items-center gap-0.5 rounded-full px-2 @lg:h-6 ${CHART_TOOLBAR_TITLE_TEXT_CLASS} transition-[background-color,box-shadow,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 ${
+    theme === 'dark'
+      ? 'bg-gray-700/90 text-gray-100 glow-sm hover:bg-gray-600'
+      : 'bg-white text-gray-800 glow-sm hover:text-gray-950 hover:glow-md'
   }`;
 }
 

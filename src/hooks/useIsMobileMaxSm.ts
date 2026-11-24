@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 const MOBILE_OR_COARSE_QUERY = '(max-width: 639px), (hover: none), (pointer: coarse)';
+const DESKTOP_LG_QUERY = '(min-width: 1024px)';
 
 /**
  * True on small viewports (< 640px) OR touch/coarse-pointer devices (iPads, tablets, touch laptops)
@@ -17,5 +18,20 @@ export function useIsMobileMaxSm() {
     },
     () => (typeof window !== 'undefined' ? window.matchMedia(MOBILE_OR_COARSE_QUERY).matches : false),
     () => false
+  );
+}
+
+/** Matches Tailwind `lg:` (>= 1024px) for side-by-side Details layout vs. collapsible bottom sheet. */
+export function useIsDesktopLg() {
+  return useSyncExternalStore(
+    onChange => {
+      if (typeof window === 'undefined') return () => {};
+      const mql = window.matchMedia(DESKTOP_LG_QUERY);
+      const on = () => onChange();
+      mql.addEventListener('change', on);
+      return () => mql.removeEventListener('change', on);
+    },
+    () => (typeof window !== 'undefined' ? window.matchMedia(DESKTOP_LG_QUERY).matches : true),
+    () => true
   );
 }

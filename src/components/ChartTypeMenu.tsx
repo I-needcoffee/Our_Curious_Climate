@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useId, useRef, useState } from 'react';
 import { ChartType } from '../App';
-import { Sun, BarChart3, ThermometerSun, Wind, ChevronDown, DoorOpen } from 'lucide-react';
+import { Sun, BarChart3, ThermometerSun, Wind, ChevronDown, DoorOpen, Check } from 'lucide-react';
 import { WindRoseGlyph } from './WindRoseGlyph';
 import {
   CHART_TOOLBAR_ICON_GLYPH_CLASS,
@@ -147,21 +147,26 @@ export function ChartTypeMenu({
       aria-haspopup="menu"
       aria-expanded={open}
       aria-controls={menuId}
-      className={`${chartToolbarTypePillClass(theme)} shrink-0 pl-0.5 pr-0.5 group-hover/chart-type:pr-1.5 group-focus-within/chart-type:pr-1.5 @lg:pl-1 @lg:pr-1 @lg:group-hover/chart-type:pr-2 @lg:group-focus-within/chart-type:pr-2 ${
+      className={`${chartToolbarTypePillClass(theme)} shrink-0 gap-0.5 pl-1.5 pr-1 @lg:pl-2 @lg:pr-1.5 ${
         disabled ? 'cursor-default opacity-60' : ''
       }`}
-      title={`Change chart type · ${typeLabel}`}
+      title={`Switch chart type · ${typeLabel}`}
     >
-      <span className={`${CHART_TOOLBAR_ICON_SLOT_CLASS} shrink-0`}>
-        <Icon className={CHART_TOOLBAR_ICON_GLYPH_CLASS} />
-      </span>
+      <Icon className={`${CHART_TOOLBAR_ICON_GLYPH_CLASS} shrink-0`} />
+      {/* Expand chart-type label on hover only in wider cards (@md+) so narrow 4x2 headers never crush sibling titles. */}
       <span
-        className={`pointer-events-none flex max-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out motion-reduce:transition-none group-hover/chart-type:max-w-[10rem] group-hover/chart-type:pl-1 group-hover/chart-type:opacity-100 group-focus-within/chart-type:max-w-[10rem] group-focus-within/chart-type:pl-1 group-focus-within/chart-type:opacity-100 @lg:group-hover/chart-type:max-w-[12rem] @lg:group-focus-within/chart-type:max-w-[12rem] ${CHART_TOOLBAR_TITLE_TEXT_CLASS} ${dark ? 'text-gray-100' : 'text-gray-800'}`}
+        className={`pointer-events-none hidden max-w-0 items-center overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out motion-reduce:transition-none @md:flex @md:group-hover/chart-type:max-w-[9.5rem] @md:group-hover/chart-type:pl-1 @md:group-hover/chart-type:opacity-100 @md:group-focus-within/chart-type:max-w-[9.5rem] @md:group-focus-within/chart-type:pl-1 @md:group-focus-within/chart-type:opacity-100 ${CHART_TOOLBAR_TITLE_TEXT_CLASS} ${dark ? 'text-gray-100' : 'text-gray-800'}`}
         aria-hidden
       >
         <span className="truncate">{typeLabel}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 @lg:h-3.5 @lg:w-3.5" strokeWidth={2.25} />
       </span>
+      <ChevronDown
+        className={`h-2.5 w-2.5 shrink-0 transition-transform duration-150 @lg:h-3 @lg:w-3 ${
+          open ? 'rotate-180 opacity-90' : 'opacity-65'
+        }`}
+        strokeWidth={2.4}
+        aria-hidden
+      />
     </button>
   );
 
@@ -169,6 +174,7 @@ export function ChartTypeMenu({
     return (
       <div
         id={tutorialAnchorId}
+        data-card-dropdown-open={open ? 'true' : undefined}
         className={`group/chart-type relative z-[5] min-w-0 overflow-visible ${className ?? ''}`}
       >
         {discoverPulse ? (
@@ -190,6 +196,7 @@ export function ChartTypeMenu({
           >
             {CHART_TYPE_MENU_OPTIONS.map(t => {
               const active = value === t;
+              const ItemIcon = ICON[t];
               return (
                 <button
                   key={t}
@@ -200,17 +207,21 @@ export function ChartTypeMenu({
                     dismissDiscover();
                     onChange(t);
                   }}
-                  className={`w-full rounded-full px-3.5 py-2 text-left text-sm font-semibold transition-colors ${
+                  className={`flex w-full items-center justify-between gap-2 rounded-full px-3 py-1.5 text-left text-xs font-semibold transition-colors ${
                     active
                       ? dark
                         ? 'bg-gray-700 text-white'
-                        : 'bg-gray-100 text-gray-900'
+                        : 'bg-gray-100 text-gray-950'
                       : dark
                         ? 'text-gray-200 hover:bg-gray-700/60'
                         : 'text-gray-700 hover:bg-gray-50'
                   }`}
                 >
-                  {LABELS[t]}
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <ItemIcon className="h-3.5 w-3.5 shrink-0 opacity-75" />
+                    <span className="truncate">{LABELS[t]}</span>
+                  </span>
+                  {active ? <Check className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden /> : null}
                 </button>
               );
             })}
@@ -221,7 +232,7 @@ export function ChartTypeMenu({
   }
 
   return (
-    <div id={tutorialAnchorId} className="relative min-w-0">
+    <div id={tutorialAnchorId} data-card-dropdown-open={open ? 'true' : undefined} className="relative min-w-0">
       <button
         ref={btnRef}
         type="button"

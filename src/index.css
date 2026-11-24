@@ -173,4 +173,10 @@
       0 10px 30px rgba(0, 0, 0, 0.55),
       0 0 48px rgba(0, 0, 0, 0.55);
   }
+
+  /* Hide a card's floating hover toolbar whenever one of its header dropdown menus is open. */
+  .group:has([data-card-dropdown-open="true"]) .chart-hover-toolbar {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
 }
