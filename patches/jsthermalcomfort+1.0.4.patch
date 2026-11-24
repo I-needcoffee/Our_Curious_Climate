@@ -28,27 +28,3 @@ index 56f157e..dc19579 100644
  export type VasomotricitytRet = {
      /**
       * - Blood flow rate, [kg/m2/h]
-diff --git a/node_modules/jsthermalcomfort/lib/cjs/models/utci.js b/node_modules/jsthermalcomfort/lib/cjs/models/utci.js
---- a/node_modules/jsthermalcomfort/lib/cjs/models/utci.js
-+++ b/node_modules/jsthermalcomfort/lib/cjs/models/utci.js
-@@ -236,7 +236,7 @@
-  */
- function exponential(t_db) {
-     const tk = t_db + 273.15; // air temp in K
--    let es = 2.7150305 * Math.log1p(tk);
-+    let es = 2.7150305 * Math.log(tk);
-     for (let i = 0; i < g.length; i++) {
-         es = es + g[i] * Math.pow(tk, i - 2);
-     }
-diff --git a/node_modules/jsthermalcomfort/lib/esm/models/utci.js b/node_modules/jsthermalcomfort/lib/esm/models/utci.js
---- a/node_modules/jsthermalcomfort/lib/esm/models/utci.js
-+++ b/node_modules/jsthermalcomfort/lib/esm/models/utci.js
-@@ -232,7 +232,7 @@
-  */
- function exponential(t_db) {
-     const tk = t_db + 273.15; // air temp in K
--    let es = 2.7150305 * Math.log1p(tk);
-+    let es = 2.7150305 * Math.log(tk);
-     for (let i = 0; i < g.length; i++) {
-         es = es + g[i] * Math.pow(tk, i - 2);
-     }
