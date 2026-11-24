@@ -1683,7 +1683,7 @@ export default function App() {
           backgroundColor: exportMode ? '#ffffff' : theme === 'dark' ? '#121211' : '#ffffff',
         }}
       >
-        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden px-2 pt-2 pb-0 sm:px-3 sm:pt-3 ${exportMode ? 'bg-white' : ''}`}>
+        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden px-2 pt-2 pb-2.5 sm:px-3 sm:pt-3 sm:pb-3 ${exportMode ? 'bg-white' : ''}`}>
           {showSettingsModal && (
             <SettingsModal
               isOpen={showSettingsModal}
@@ -1793,7 +1793,7 @@ export default function App() {
 
           </div>
         <div
-          className={`shrink-0 overflow-visible ${exportMode ? 'bg-white' : 'bg-inherit'}`}
+          className={`relative z-10 shrink-0 overflow-visible ${exportMode ? 'bg-white' : 'bg-inherit'}`}
         >
           <div className="w-full px-2 py-1.5 sm:px-3">
             <SiteFooter

@@ -86,9 +86,9 @@ function MiniWindRose({
   const size = 180;
   const cx = size / 2;
   const cy = size / 2;
-  const maxR = 69;
+  const maxR = 73;
   const innerR = 4.5;
-  const halfStepDeg = 22.5 / 2 - 1.0; // subtle gap between adjacent spokes
+  const halfStepDeg = 22.5 / 2 - 0.9; // subtle crisp gap between adjacent spokes
   const ringStroke = dark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(100, 116, 139, 0.22)';
   const labelFill = dark ? '#94a3b8' : '#64748b';
   const safeMax = Math.max(1, maxHours);
@@ -111,7 +111,7 @@ function MiniWindRose({
     <svg
       viewBox={`0 0 ${size} ${size}`}
       preserveAspectRatio="xMidYMid meet"
-      className="h-full max-h-[240px] w-full max-w-[240px] select-none"
+      className="absolute inset-0 h-full w-full select-none"
       role="img"
       aria-label={`${kindLabel} directional wind rose`}
     >
@@ -140,7 +140,7 @@ function MiniWindRose({
             key={bin.label}
             d={wedgePath(bin.deg, Math.max(innerR + 2.5, r))}
             fill={color}
-            fillOpacity={0.82}
+            fillOpacity={0.84}
             className="transition-opacity duration-150 hover:opacity-100"
           >
             <title>
@@ -161,16 +161,16 @@ function MiniWindRose({
       />
 
       {/* Cardinal compass labels */}
-      <text x={cx} y={13} textAnchor="middle" fill={labelFill} fontSize="10.5" fontWeight="700">
+      <text x={cx} y={10.5} textAnchor="middle" fill={labelFill} fontSize="10" fontWeight="700">
         N
       </text>
-      <text x={size - 10} y={cy + 3.5} textAnchor="middle" fill={labelFill} fontSize="10.5" fontWeight="700">
+      <text x={size - 7} y={cy + 3.5} textAnchor="middle" fill={labelFill} fontSize="10" fontWeight="700">
         E
       </text>
-      <text x={cx} y={size - 5} textAnchor="middle" fill={labelFill} fontSize="10.5" fontWeight="700">
+      <text x={cx} y={size - 3.5} textAnchor="middle" fill={labelFill} fontSize="10" fontWeight="700">
         S
       </text>
-      <text x={10} y={cy + 3.5} textAnchor="middle" fill={labelFill} fontSize="10.5" fontWeight="700">
+      <text x={7.5} y={cy + 3.5} textAnchor="middle" fill={labelFill} fontSize="10" fontWeight="700">
         W
       </text>
 
@@ -180,7 +180,7 @@ function MiniWindRose({
         y={cy - maxR * 0.72}
         textAnchor="start"
         fill={labelFill}
-        fontSize="9"
+        fontSize="8.5"
         fontWeight="600"
         opacity={0.85}
       >
@@ -514,7 +514,7 @@ export function TutorialGuidePanel({
 
   return (
     <aside
-      className={`@container relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl glow-lg ${surface}`}
+      className={`@container relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl glow-lg ${surface}`}
     >
       {/* Compact Header */}
       <header className="flex shrink-0 items-start justify-between gap-3 px-4 pt-3.5 pb-2.5 @2xl:px-5 @2xl:pt-4">
@@ -1106,11 +1106,11 @@ export function TutorialGuidePanel({
                 ] as const;
 
                 return (
-                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-2.5 @sm:grid-cols-2">
+                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-2.5 @sm:grid-cols-2 @sm:[grid-template-rows:minmax(0,1fr)]">
                     {cards.map(card => (
                       <section
                         key={card.key}
-                        className={`flex min-h-0 flex-col justify-between rounded-2xl p-3 ${softSectionBg}`}
+                        className={`flex h-full min-h-0 flex-col justify-between rounded-2xl p-3 ${softSectionBg}`}
                       >
                         <div className="shrink-0">
                           <div className="flex items-center justify-between gap-2">
@@ -1158,8 +1158,8 @@ export function TutorialGuidePanel({
                           </div>
                         </div>
 
-                        {/* Fluid Wind Rose filling available vertical & horizontal card space */}
-                        <div className="my-1.5 flex min-h-[150px] flex-1 items-center justify-center">
+                        {/* Fluid Wind Rose adaptively filling all available vertical & horizontal card space */}
+                        <div className="relative my-1.5 min-h-[120px] w-full flex-1">
                           {card.bucket.hours > 0 ? (
                             <MiniWindRose
                               bins={card.bucket.roseBins}
@@ -1169,7 +1169,9 @@ export function TutorialGuidePanel({
                               kindLabel={card.title}
                             />
                           ) : (
-                            <p className={`text-center text-xs ${muted}`}>{card.emptyText}</p>
+                            <div className="flex h-full items-center justify-center">
+                              <p className={`text-center text-xs ${muted}`}>{card.emptyText}</p>
+                            </div>
                           )}
                         </div>
 
