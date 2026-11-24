@@ -90,11 +90,11 @@ export function SiteFooter({
     return () => document.removeEventListener('keydown', onKey);
   }, [iemDisclaimerOpen]);
 
-  /** Light: white pill body; dark: low-contrast shell. */
+  /** White-on-white pill defined by a clearly visible soft dark-grey outer glow. */
   const pillShell =
     theme === 'dark'
-      ? 'bg-gray-950/90 text-gray-300 glow-sm backdrop-blur-sm'
-      : 'bg-white/92 text-gray-700 glow-sm backdrop-blur-sm';
+      ? 'bg-gray-800/95 text-gray-300 glow-sm backdrop-blur-sm'
+      : 'bg-white/95 text-gray-700 glow-sm backdrop-blur-sm';
 
   /** One scale for all footer footnote & pill labels; weight varies per control (selected = bold). */
   const footnoteText = 'text-[11px] sm:text-xs leading-snug';
@@ -289,22 +289,35 @@ export function SiteFooter({
   );
 
   const pillH = 'h-7';
-  /** Slightly below inner row height (h-6) so the chip sits with equal top/bottom inset. */
-  const donateChipH = 'h-5';
+  /** Meets WCAG 2.2 minimum 24px target size while staying compact in the footer strip. */
+  const donateChipH = 'h-6';
 
   /**
-   * Metric / Imperial: grey trough; selected = white cap with a soft glow, unselected = bare label on the trough.
+   * Unified white-on-white outer-glow capsules: each capsule holds its muted uppercase micro-label
+   * alongside the selectable options, with a clearly visible dark-grey outer glow defining both
+   * the group pill and the active choice.
    */
-  const unitTrack =
+  const footerCapsule =
     theme === 'dark'
-      ? `inline-flex ${pillH} min-w-0 max-w-[min(100vw-8rem,16rem)] items-stretch gap-0.5 rounded-full bg-gray-800 p-0.5`
-      : `inline-flex ${pillH} min-w-0 max-w-[min(100vw-8rem,16rem)] items-stretch gap-0.5 rounded-full bg-gray-200/70 p-0.5`;
-  const unitSegBase = `flex min-w-0 flex-1 items-center justify-center rounded-full px-2 ${footnoteText} font-medium transition-[color,background-color,box-shadow,font-weight] duration-200 sm:px-3`;
+      ? `inline-flex ${pillH} min-w-0 max-w-[min(100vw-6rem,22rem)] shrink-0 items-center gap-0.5 rounded-full bg-gray-800/95 p-0.5 glow-sm`
+      : `inline-flex ${pillH} min-w-0 max-w-[min(100vw-6rem,22rem)] shrink-0 items-center gap-0.5 rounded-full bg-white p-0.5 glow-sm`;
+  const unitSegBase = `flex h-6 min-w-0 items-center justify-center rounded-full px-2.5 ${footnoteText} font-medium transition-[color,background-color,box-shadow,font-weight] duration-200`;
+  const activeSeg =
+    theme === 'dark'
+      ? 'bg-white text-gray-900 glow-sm font-semibold'
+      : 'bg-white text-gray-950 font-semibold glow-sm';
+  const idleSeg =
+    theme === 'dark'
+      ? 'text-gray-400 hover:text-gray-100'
+      : 'text-gray-400 hover:text-gray-800';
 
-  const metricLabel = isMobile ? 'Met' : 'Metric';
-  const imperialLabel = isMobile ? 'Imp' : 'Imperial';
-  const dstLabel = isMobile ? 'DST' : 'Daylight savings time';
-  const windDataLabel = isMobile ? 'Wind' : 'Wind Data';
+  const metricLabel = isMobile ? '°C / SI' : 'Metric';
+  const imperialLabel = isMobile ? '°F / IP' : 'Imperial';
+  const dstLabel = isMobile ? 'DST' : 'Daylight saving time';
+  const windDataLabel = 'Wind';
+  const footerGroupLabel = `shrink-0 select-none pl-2.5 pr-1 text-[9px] font-bold uppercase tracking-[0.08em] ${
+    theme === 'dark' ? 'text-gray-400' : 'text-gray-400'
+  }`;
   return (
     <>
       <div className="flex w-full flex-col gap-0.5">
@@ -355,46 +368,33 @@ export function SiteFooter({
             </DiscoverPulseShell>
             <DiscoverPulseShell storageKey={ONBOARDING_KEYS.unitSystem} rounded="pill">
             <div
-              className={unitTrack}
+              className={footerCapsule}
               title="Unit system for numbers in charts"
               role="group"
               aria-label="Unit system"
             >
+              {!isMobile && <span className={footerGroupLabel}>Units</span>}
               <button
                 type="button"
+                aria-pressed={unitSystem === 'metric'}
                 onClick={() => {
                   dismissOnboarding(ONBOARDING_KEYS.unitSystem);
                   onUnitSystemChange?.('metric');
                 }}
                 aria-label="Metric"
-                className={`${unitSegBase} ${
-                  unitSystem === 'metric'
-                    ? theme === 'dark'
-                      ? 'bg-white text-gray-900 glow-sm font-bold'
-                      : 'bg-white text-gray-900 glow-sm font-bold'
-                    : theme === 'dark'
-                      ? 'text-gray-300 hover:text-white'
-                      : 'text-gray-600 hover:text-gray-900'
-                }`}
+                className={`${unitSegBase} ${unitSystem === 'metric' ? activeSeg : idleSeg}`}
               >
                 {metricLabel}
               </button>
               <button
                 type="button"
+                aria-pressed={unitSystem === 'imperial'}
                 onClick={() => {
                   dismissOnboarding(ONBOARDING_KEYS.unitSystem);
                   onUnitSystemChange?.('imperial');
                 }}
                 aria-label="Imperial"
-                className={`${unitSegBase} ${
-                  unitSystem === 'imperial'
-                    ? theme === 'dark'
-                      ? 'bg-white text-gray-900 glow-sm font-bold'
-                      : 'bg-white text-gray-900 glow-sm font-bold'
-                    : theme === 'dark'
-                      ? 'text-gray-300 hover:text-white'
-                      : 'text-gray-600 hover:text-gray-900'
-                }`}
+                className={`${unitSegBase} ${unitSystem === 'imperial' ? activeSeg : idleSeg}`}
               >
                 {imperialLabel}
               </button>
@@ -402,56 +402,36 @@ export function SiteFooter({
             </DiscoverPulseShell>
             {showHeatmapCellToggle && onHeatmapCellStatisticChange && heatmapCellStatistic !== undefined ? (
               <div
-                className={unitTrack}
+                className={footerCapsule}
                 title="Heatmaps: statistic within each colored cell over selected hours."
                 role="group"
                 aria-label="Heatmap cell statistic"
               >
+                {!isMobile && <span className={footerGroupLabel}>Cell</span>}
                 <button
                   type="button"
+                  aria-pressed={heatmapCellStatistic === 'low'}
                   onClick={() => onHeatmapCellStatisticChange('low')}
                   aria-label="Heatmap cells show low"
-                  className={`${unitSegBase} ${
-                    heatmapCellStatistic === 'low'
-                      ? theme === 'dark'
-                        ? 'bg-white text-gray-900 glow-sm font-bold'
-                        : 'bg-white text-gray-900 glow-sm font-bold'
-                      : theme === 'dark'
-                        ? 'text-gray-300 hover:text-white'
-                        : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`${unitSegBase} ${heatmapCellStatistic === 'low' ? activeSeg : idleSeg}`}
                 >
                   {isMobile ? 'Lo' : 'Low'}
                 </button>
                 <button
                   type="button"
+                  aria-pressed={heatmapCellStatistic === 'mean'}
                   onClick={() => onHeatmapCellStatisticChange('mean')}
                   aria-label="Heatmap cells show average"
-                  className={`${unitSegBase} ${
-                    heatmapCellStatistic === 'mean'
-                      ? theme === 'dark'
-                        ? 'bg-white text-gray-900 glow-sm font-bold'
-                        : 'bg-white text-gray-900 glow-sm font-bold'
-                      : theme === 'dark'
-                        ? 'text-gray-300 hover:text-white'
-                        : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`${unitSegBase} ${heatmapCellStatistic === 'mean' ? activeSeg : idleSeg}`}
                 >
-                  {isMobile ? 'Av' : 'Ave'}
+                  {isMobile ? 'Avg' : 'Ave'}
                 </button>
                 <button
                   type="button"
+                  aria-pressed={heatmapCellStatistic === 'high'}
                   onClick={() => onHeatmapCellStatisticChange('high')}
                   aria-label="Heatmap cells show high"
-                  className={`${unitSegBase} ${
-                    heatmapCellStatistic === 'high'
-                      ? theme === 'dark'
-                        ? 'bg-white text-gray-900 glow-sm font-bold'
-                        : 'bg-white text-gray-900 glow-sm font-bold'
-                      : theme === 'dark'
-                        ? 'text-gray-300 hover:text-white'
-                        : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`${unitSegBase} ${heatmapCellStatistic === 'high' ? activeSeg : idleSeg}`}
                 >
                   {isMobile ? 'Hi' : 'High'}
                 </button>
@@ -461,55 +441,33 @@ export function SiteFooter({
               <>
                 <DiscoverPulseShell storageKey={ONBOARDING_KEYS.windDataSource} rounded="pill">
                 <div
-                  className={`inline-flex ${pillH} min-w-0 max-w-[min(100vw-6rem,24rem)] shrink-0 items-stretch gap-0.5 overflow-visible rounded-full p-0.5 ${
-                    theme === 'dark' ? 'bg-gray-800' : 'bg-gray-200/70'
-                  }`}
+                  className={footerCapsule}
                   title="Wind data: weather file (TMY) vs Iowa Environmental Mesonet station archive"
                   role="group"
                   aria-label="Wind data source"
                 >
-                  <span
-                    className={`flex shrink-0 items-center pl-2.5 pr-1.5 ${footnoteText} font-semibold ${
-                      theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-                    }`}
-                  >
-                    {windDataLabel}
-                  </span>
+                  <span className={footerGroupLabel}>{windDataLabel}</span>
                   <button
                     type="button"
+                    aria-pressed={windFooter.source === 'epw'}
                     onClick={() => {
                       dismissOnboarding(ONBOARDING_KEYS.windDataSource);
                       windFooter.onSelectTmy();
                     }}
                     aria-label="Wind from weather file (TMY)"
-                    className={`${unitSegBase} ${
-                      windFooter.source === 'epw'
-                        ? theme === 'dark'
-                          ? 'bg-white text-gray-900 glow-sm font-bold'
-                          : 'bg-white text-gray-900 glow-sm font-bold'
-                        : theme === 'dark'
-                          ? 'text-gray-300 hover:text-white'
-                          : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                    className={`${unitSegBase} ${windFooter.source === 'epw' ? activeSeg : idleSeg}`}
                   >
                     TMY
                   </button>
                   <button
                     type="button"
+                    aria-pressed={windFooter.source === 'iem'}
                     onClick={() => {
                       dismissOnboarding(ONBOARDING_KEYS.windDataSource);
                       windFooter.onSelectStation();
                     }}
                     aria-label="Wind from mesonet station archive"
-                    className={`${unitSegBase} ${
-                      windFooter.source === 'iem'
-                        ? theme === 'dark'
-                          ? 'bg-white text-gray-900 glow-sm font-bold'
-                          : 'bg-white text-gray-900 glow-sm font-bold'
-                        : theme === 'dark'
-                          ? 'text-gray-300 hover:text-white'
-                          : 'text-gray-600 hover:text-gray-900'
-                    }`}
+                    className={`${unitSegBase} ${windFooter.source === 'iem' ? activeSeg : idleSeg}`}
                   >
                     Station
                   </button>
@@ -592,8 +550,8 @@ export function SiteFooter({
                 onClick={() => setDonateModalOpen(true)}
                 className={`inline-flex ${donateChipH} min-h-0 max-w-full items-center justify-center rounded-full px-2.5 text-left ${footnoteText} font-semibold transition-colors duration-200 ${
                   theme === 'dark'
-                    ? 'bg-gray-800 text-gray-200 hover:bg-gray-700 hover:text-white'
-                    : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                    ? 'bg-gray-700 text-gray-100 hover:bg-gray-600 hover:text-white'
+                    : 'bg-white text-gray-800 glow-sm hover:text-gray-950'
                 }`}
               >
                 Donate

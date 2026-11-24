@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useCallback, useMemo, useEffect, useSyncExternalStore } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect, useSyncExternalStore, startTransition } from 'react';
+import { createPortal } from 'react-dom';
+import { ChartTooltipHost } from './components/ChartTooltipHost';
 import { MapSelector } from './components/MapSelector';
 import { BasemapStyleToggle, readBasemapStyle, writeBasemapStyle, type BasemapStyle } from './components/BasemapLayer';
 import { SunPath } from './components/SunPath';
@@ -17,17 +19,21 @@ import { Grid4x2StatsColumn } from './components/QuickStatsSidebar';
 import { SiteFooter, type SiteFooterExportCaption } from './components/SiteFooter';
 import {
   DEFAULT_GLOBAL_FILTER,
+  hasActiveGlobalFilter,
+  hourFilterIsPartial,
+  monthFilterIsPartial,
   type BarChartFillMode,
   type GlobalFilterState,
   type HeatmapCellStatistic,
 } from './lib/globalFilter';
+import { formatHourIsolationRange, formatMonthIsolationRange } from './lib/timeIsolationUi';
 import { SettingsModal } from './components/SettingsModal';
 import { exportDashboardArea, type ExportFormat, type ExportFrameSize } from './lib/exportCapture';
 import { ExportModeToolbar } from './components/ExportModeToolbar';
 import { SingleModeLayout } from './components/SingleModeLayout';
 import { ComparisonModeLayout } from './components/ComparisonModeLayout';
 import { TutorialLiveProvider } from './context/TutorialLiveContext';
-import { MapPin, ArrowLeft, Plus, Sun, BarChart2, Wind, ThermometerSun, Settings, X, Compass, BarChart3, Radar, Download, FileJson, CloudLightning, Info, MoreHorizontal } from 'lucide-react';
+import { MapPin, ArrowLeft, Plus, Sun, BarChart2, Wind, ThermometerSun, Settings, X, Compass, BarChart3, Radar, Download, FileJson, CloudLightning, Info, MoreHorizontal, RotateCcw, Filter } from 'lucide-react';
 import { DiscoverPulseShell } from './components/onboarding/DiscoverPulseShell';
 import { dismissOnboarding, ONBOARDING_KEYS } from './lib/onboardingStorage';
 import { CARTO_LIGHT_ALL_WATER_HEX, GRADIENTS } from './lib/constants';
@@ -411,7 +417,24 @@ export default function App() {
   const [showGradientModal, setShowGradientModal] = useState(false);
   const [newGradientName, setNewGradientName] = useState('');
   const [newGradientColors, setNewGradientColors] = useState<string[]>(['#ff0000', '#0000ff']);
-  const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
+  const [unitSystem, setUnitSystemState] = useState<UnitSystem>(() => {
+    try {
+      const saved = window.localStorage.getItem('climatecanvas.unitSystem');
+      return saved === 'imperial' ? 'imperial' : 'metric';
+    } catch {
+      return 'metric';
+    }
+  });
+  const setUnitSystem = useCallback((next: UnitSystem) => {
+    try {
+      window.localStorage.setItem('climatecanvas.unitSystem', next);
+    } catch {
+      // ignore storage errors
+    }
+    startTransition(() => {
+      setUnitSystemState(next);
+    });
+  }, []);
   const [dstDisplayEnabled, setDstDisplayEnabled] = useState(false);
   const [mapLibraryMode, setMapLibraryMode] = useState<'historical' | 'future'>('historical');
   const [mapBasemapStyle, setMapBasemapStyle] = useState<BasemapStyle>(readBasemapStyle);
@@ -425,7 +448,22 @@ export default function App() {
     setDstDisplayEnabled(selectedFiles.some(f => f.metadata.daylightSavings === 'yes'));
   }, [selectedFiles]);
   const [heatmapTextColor, setHeatmapTextColor] = useState<string>(CHART_TEXT_AUTO);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setThemeState] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = window.localStorage.getItem('climatecanvas.theme');
+      return saved === 'dark' ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+  const setTheme = useCallback((next: 'light' | 'dark') => {
+    try {
+      window.localStorage.setItem('climatecanvas.theme', next);
+    } catch {
+      // ignore storage errors
+    }
+    setThemeState(next);
+  }, []);
 
   const windIemGlobal = useWindIemGlobalPrefs();
 
@@ -639,7 +677,9 @@ export default function App() {
   /** Low/Ave/High applies to 12×24 explorer-style heatmaps only; comparison mode always includes those cards. */
   const dashboardHasHeatmap1224 = useMemo(() => {
     if (viewMode === 'comparison') return true;
-    return slots.some(s => s.type === 'explorer' || s.type === 'wind' || s.type === 'utci');
+    return slots.some(
+      s => s.type === 'explorer' || s.type === 'wind' || s.type === 'utci' || s.type === 'naturalVentilation'
+    );
   }, [viewMode, slots]);
 
   useEffect(() => {
@@ -970,54 +1010,49 @@ export default function App() {
   };
 
   if (selectedFiles.length === 0 || isSelectingFile) {
+    const mapDark = theme === 'dark';
     return (
       <div
         className="relative flex h-dvh w-full flex-col overflow-hidden font-sans"
-        style={{ backgroundColor: '#fcfbf8' }}
+        style={{ backgroundColor: mapDark ? '#121211' : '#ffffff' }}
       >
         {selectedFiles.length > 0 && (
-          <div className="absolute left-3 right-3 top-3 z-[2000] flex flex-col gap-2 sm:left-4 sm:right-auto sm:max-w-md">
-            <div className="rounded-2xl bg-white/95 px-4 py-3 glow-lg backdrop-blur-sm">
-              {isSelectingFile ? (
-                <p className="text-xs font-bold uppercase tracking-wider text-gray-500">
-                  {selectedFiles.length > 1 ? 'Add or change comparison site' : 'Add another site'}
-                </p>
-              ) : null}
-              <p className="mt-0.5 text-base font-bold tracking-[-0.01em] text-gray-900">
-                {isSelectingFile ? 'Pick a location on the map' : 'Loaded weather file'}
-              </p>
-              <ul className="mt-2 space-y-1.5">
-                {selectedFiles.map((file, index) => (
-                  <li key={`${file.metadata.city}-${index}`} className="flex items-start gap-2 text-[13px] leading-snug text-gray-700">
-                    <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-                    <span className="min-w-0">
-                      <span className="font-semibold text-gray-900">{weatherPlaceLine(file) || file.metadata.city}</span>
-                      {weatherFileTypeLine(file) ? (
-                        <span className="text-gray-500"> · {weatherFileTypeLine(file)}</span>
-                      ) : null}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSelectingFile(false)}
-                  className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white glow-sm hover:bg-gray-800"
+          <div
+            className={`relative z-[2000] flex w-full shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2 shadow-sm ${
+              mapDark ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-900'
+            }`}
+          >
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <span
+                className={`text-[11px] font-bold uppercase tracking-wider ${
+                  mapDark ? 'text-gray-400' : 'text-gray-500'
+                }`}
+              >
+                {selectedFiles.length > 1 ? 'Add comparison site:' : 'Adding to:'}
+              </span>
+              {selectedFiles.map((file, index) => (
+                <span
+                  key={`${file.metadata.city}-${index}`}
+                  className={`inline-flex max-w-[240px] items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    mapDark ? 'bg-gray-800 text-gray-100' : 'bg-gray-100 text-gray-800'
+                  }`}
                 >
-                  Back to dashboard
-                </button>
-                {isSelectingFile ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsSelectingFile(false)}
-                    className="rounded-full bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-200"
-                  >
-                    Cancel
-                  </button>
-                ) : null}
-              </div>
+                  <MapPin className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                  <span className="truncate">{weatherPlaceLine(file) || file.metadata.city}</span>
+                </span>
+              ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setIsSelectingFile(false)}
+              className={`shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold glow-sm transition-colors ${
+                mapDark
+                  ? 'bg-gray-100 text-gray-900 hover:bg-white'
+                  : 'bg-gray-900 text-white hover:bg-gray-800'
+              }`}
+            >
+              Back to dashboard
+            </button>
           </div>
         )}
         <div className="relative z-0 min-h-0 flex-1">
@@ -1031,7 +1066,11 @@ export default function App() {
             basemapStyle={mapBasemapStyle}
           />
         </div>
-        <div className="relative z-[5000] flex w-full shrink-0 items-center gap-2 bg-[#fcfbf8] px-2 py-1.5 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] sm:px-3">
+        <div
+          className={`relative z-[5000] flex w-full shrink-0 items-center gap-2 px-2 py-1.5 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] sm:px-3 ${
+            mapDark ? 'bg-[#121211]' : 'bg-white'
+          }`}
+        >
           <BasemapStyleToggle
             value={mapBasemapStyle}
             onChange={style => {
@@ -1109,7 +1148,7 @@ export default function App() {
       className={`flex h-dvh w-full flex-col overflow-hidden font-sans transition-[background-color,color] duration-200 ease-out ${
         theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
       }`}
-      style={theme === 'dark' ? undefined : { backgroundColor: '#fcfbf8' }}
+      style={theme === 'dark' ? undefined : { backgroundColor: '#ffffff' }}
     >
       <div id="tutorial-header-dock" className="relative z-20 flex shrink-0 flex-col">
       {/* Top Navigation Bar */}
@@ -1156,7 +1195,7 @@ export default function App() {
                     ? (theme === 'dark'
                       ? 'bg-gray-600 text-gray-100 glow-md z-10'
                       : 'bg-white text-gray-900 glow-md z-10')
-                    : (theme === 'dark' ? 'bg-gray-700/70 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200/80')
+                    : (theme === 'dark' ? 'bg-gray-700/70 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-600 glow-sm hover:text-gray-900')
                 }`}
                 onClick={() => {
                   if (viewMode === 'single') {
@@ -1222,7 +1261,7 @@ export default function App() {
                   dismissOnboarding(ONBOARDING_KEYS.addLocation);
                   setIsSelectingFile(true);
                 }}
-                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-colors sm:h-9 sm:px-3.5 sm:text-[13px] ${theme === 'dark' ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200/80 hover:text-gray-900'}`}
+                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-all sm:h-9 sm:px-3.5 sm:text-[13px] ${theme === 'dark' ? 'bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white' : 'bg-white text-gray-600 glow-sm hover:text-gray-900 hover:glow-md'}`}
               >
                 <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> Add
               </button>
@@ -1234,21 +1273,21 @@ export default function App() {
           {selectedFiles.length > 1 && (
             <div
               id="tutorial-nav-viewmode"
-              className={`flex shrink-0 items-center gap-0.5 rounded-full p-1 ${theme === 'dark' ? 'bg-gray-700/70' : 'bg-gray-100'}`}
+              className={`flex shrink-0 items-center gap-0.5 rounded-full p-1 ${theme === 'dark' ? 'bg-gray-700/70' : 'bg-white glow-sm'}`}
             >
               <button
                 onClick={() => {
                   setViewMode('single');
                   setShowDifference(false);
                 }}
-                className={`min-w-0 shrink rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 sm:text-xs ${
+                className={`min-w-0 shrink rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 sm:text-xs ${
                   viewMode === 'single'
                     ? theme === 'dark'
                       ? 'bg-gray-500 text-white glow-sm'
-                      : 'bg-white text-gray-900 glow-sm'
+                      : 'bg-white text-gray-900 shadow-[0_1px_4px_rgba(15,23,42,0.12),0_0_8px_rgba(15,23,42,0.08)]'
                     : theme === 'dark'
                       ? 'text-gray-400 hover:text-gray-200'
-                      : 'text-gray-500 hover:text-gray-700'
+                      : 'text-gray-400 hover:text-gray-700'
                 }`}
               >
                 Single
@@ -1258,14 +1297,14 @@ export default function App() {
                   setViewMode('comparison');
                   setShowDifference(true);
                 }}
-                className={`min-w-0 shrink rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 sm:text-xs ${
+                className={`min-w-0 shrink rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:px-3.5 sm:text-xs ${
                   viewMode === 'comparison'
                     ? theme === 'dark'
                       ? 'bg-gray-500 text-white glow-sm'
-                      : 'bg-white text-gray-900 glow-sm'
+                      : 'bg-white text-gray-900 shadow-[0_1px_4px_rgba(15,23,42,0.12),0_0_8px_rgba(15,23,42,0.08)]'
                     : theme === 'dark'
                       ? 'text-gray-400 hover:text-gray-200'
-                      : 'text-gray-500 hover:text-gray-700'
+                      : 'text-gray-400 hover:text-gray-700'
                 }`}
               >
                 Compare
@@ -1280,7 +1319,7 @@ export default function App() {
             >
               <div
                 className={`inline-flex h-9 shrink-0 items-stretch gap-0.5 rounded-full p-1 sm:h-10 ${
-                  theme === 'dark' ? 'bg-gray-700/70' : 'bg-gray-100'
+                  theme === 'dark' ? 'bg-gray-700/70' : 'bg-white glow-sm'
                 }`}
                 role="group"
                 aria-label="Dashboard layout"
@@ -1295,14 +1334,14 @@ export default function App() {
                       aria-label={ariaLabel}
                       aria-pressed={active}
                       title={title}
-                      className={`flex min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
+                      className={`flex min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 dark:focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800 sm:min-w-10 sm:px-2.5 ${
                         active
                           ? theme === 'dark'
                             ? 'bg-gray-500 text-gray-100 glow-sm'
-                            : 'bg-white text-gray-900 glow-sm'
+                            : 'bg-white text-gray-900 shadow-[0_1px_4px_rgba(15,23,42,0.12),0_0_8px_rgba(15,23,42,0.08)]'
                           : theme === 'dark'
                             ? 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-200'
-                            : 'text-gray-500 hover:bg-white/60 hover:text-gray-800'
+                            : 'text-gray-400 hover:text-gray-800'
                       }`}
                     >
                       <Icon className="h-[18px] w-[26px] sm:h-5 sm:w-7" />
@@ -1373,12 +1412,82 @@ export default function App() {
                       </button>
                     );
                   })}
+                  <div className={`my-1 h-px ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`} />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setSlotsByLayout(prev => ({
+                        ...prev,
+                        [layoutMode]: defaultSlotsForLayout(layoutMode),
+                      }));
+                      setLayoutPickerOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-medium transition-colors ${
+                      theme === 'dark'
+                        ? 'text-gray-300 hover:bg-gray-700/70 hover:text-white'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <RotateCcw className="h-3.5 w-6 shrink-0" aria-hidden />
+                    <span>Reset layout</span>
+                  </button>
                 </div>
               )}
             </div>
           )}
 
           <div className="mx-0.5 hidden w-1 shrink-0 xs:block sm:mx-1" aria-hidden />
+
+          {!exportMode && hasActiveGlobalFilter(globalFilter) && (
+            <div
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 text-[11px] font-semibold glow-sm ${
+                theme === 'dark'
+                  ? 'bg-orange-500/20 text-orange-200'
+                  : 'bg-orange-50 text-orange-800'
+              }`}
+              title="Global filters are active across all charts"
+            >
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(true)}
+                className="inline-flex items-center gap-1 hover:underline"
+              >
+                <Filter className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="hidden sm:inline">
+                  {[
+                    monthFilterIsPartial(globalFilter)
+                      ? formatMonthIsolationRange([globalFilter.startMonth, globalFilter.endMonth])
+                      : null,
+                    hourFilterIsPartial(globalFilter)
+                      ? formatHourIsolationRange([globalFilter.startHour, globalFilter.endHour])
+                      : null,
+                    globalFilter.temperatureMode !== 'off' ? 'Temp' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+                <span className="sm:hidden">Filtered</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Reset global filters"
+                title="Reset all global filters"
+                onClick={() =>
+                  setGlobalFilter({
+                    ...DEFAULT_GLOBAL_FILTER,
+                    temperatureLoC: dryBulbExtent.minC,
+                    temperatureHiC: dryBulbExtent.maxC,
+                  })
+                }
+                className={`inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors ${
+                  theme === 'dark' ? 'hover:bg-orange-400/25' : 'hover:bg-orange-200/70'
+                }`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
 
           {exportMode ? (
             <ExportModeToolbar
@@ -1397,16 +1506,24 @@ export default function App() {
             <button
               id="tutorial-nav-settings"
               type="button"
+              aria-label="Global settings"
               onClick={() => setShowSettingsModal(true)}
-              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+              className={`relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
               title="Global settings"
             >
               <Settings className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden />
+              {hasActiveGlobalFilter(globalFilter) && (
+                <span
+                  className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-orange-500 ring-2 ring-white dark:ring-gray-700"
+                  aria-hidden
+                />
+              )}
             </button>
             {!exportMode && (
               <button
                 id="tutorial-nav-export"
                 type="button"
+                aria-label="Export layout"
                 data-export-ui
                 onClick={() => setExportMode(true)}
                 className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
@@ -1422,116 +1539,140 @@ export default function App() {
 
       </div>
 
-      {/* Gradient Creator Modal */}
-      {showGradientModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+      {/* Gradient Creator Modal — portaled above CardModal (z-[9999]) with live preview & backdrop/Escape close */}
+      {showGradientModal &&
+        createPortal(
           <div
-            className={`w-full max-w-xs rounded-3xl p-5 glow-xl sm:max-w-sm ${
-              theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'
-            }`}
+            className="fixed inset-0 z-[10010] flex items-center justify-center bg-black/50 p-2 backdrop-blur-[1px]"
+            onMouseDown={e => {
+              if (e.target === e.currentTarget) setShowGradientModal(false);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setShowGradientModal(false);
+            }}
           >
-            <h3 className="mb-3 text-lg font-bold tracking-[-0.01em]">Create custom gradient</h3>
-            <div className="space-y-3">
-              <div>
-                <label
-                  className={`mb-1 block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}
-                >
-                  Name
-                </label>
-                <input
-                  type="text"
-                  value={newGradientName}
-                  onChange={e => setNewGradientName(e.target.value)}
-                  className={`w-full rounded-full px-4 py-2 text-sm transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
-                    theme === 'dark'
-                      ? 'bg-gray-900/50 text-gray-100 placeholder:text-gray-500'
-                      : 'bg-gray-100 text-gray-900 placeholder:text-gray-400'
-                  }`}
-                  placeholder="e.g., My Cool Gradient"
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Create custom gradient"
+              className={`w-full max-w-xs rounded-3xl p-5 glow-xl sm:max-w-sm ${
+                theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'
+              }`}
+            >
+              <h3 className="mb-3 text-lg font-bold tracking-[-0.01em]">Create custom gradient</h3>
+              <div className="space-y-3">
+                <div
+                  className="h-5 w-full rounded-full glow-sm"
+                  style={{ background: `linear-gradient(to right, ${newGradientColors.join(', ')})` }}
+                  aria-label="Gradient preview"
                 />
-              </div>
-              <div>
-                <label
-                  className={`mb-1 block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}
-                >
-                  Colors
-                </label>
-                <div className="space-y-2">
-                  {newGradientColors.map((color, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input 
-                        type="color" 
-                        value={color}
-                        onChange={e => {
-                          const newColors = [...newGradientColors];
-                          newColors[i] = e.target.value;
-                          setNewGradientColors(newColors);
-                        }}
-                        className="h-8 w-8 cursor-pointer rounded-full border-0 p-0"
-                      />
-                      <input 
-                        type="text" 
-                        value={color}
-                        onChange={e => {
-                          const newColors = [...newGradientColors];
-                          newColors[i] = e.target.value;
-                          setNewGradientColors(newColors);
-                        }}
-                        className={`flex-1 rounded-full px-3 py-1.5 text-sm font-mono transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
-                          theme === 'dark'
-                            ? 'bg-gray-900/50 text-gray-100'
-                            : 'bg-gray-100 text-gray-900'
-                        }`}
-                      />
-                      {newGradientColors.length > 2 && (
-                        <button 
-                          type="button"
-                          onClick={() => setNewGradientColors(prev => prev.filter((_, idx) => idx !== i))}
-                          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 transition-colors duration-200 ${
-                            theme === 'dark' ? 'hover:bg-red-950/50 hover:text-red-400' : 'hover:bg-red-50 hover:text-red-600'
-                          }`}
-                          aria-label="Remove color"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button 
-                    onClick={() => setNewGradientColors(prev => [...prev, '#ffffff'])}
-                    className={`flex items-center gap-1 text-xs font-bold transition-colors duration-200 ${
-                      theme === 'dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-600 hover:text-gray-800'
-                    }`}
+                <div>
+                  <label
+                    className={`mb-1 block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}
                   >
-                    <Plus className="w-3 h-3" /> Add Color
-                  </button>
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newGradientName}
+                    onChange={e => setNewGradientName(e.target.value)}
+                    className={`w-full rounded-full px-4 py-2 text-sm transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
+                      theme === 'dark'
+                        ? 'bg-gray-900/50 text-gray-100 placeholder:text-gray-500'
+                        : 'bg-gray-100 text-gray-900 placeholder:text-gray-400'
+                    }`}
+                    placeholder="e.g., My Cool Gradient"
+                  />
+                </div>
+                <div>
+                  <label
+                    className={`mb-1 block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}
+                  >
+                    Colors
+                  </label>
+                  <div className="space-y-2">
+                    {newGradientColors.map((color, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          aria-label={`Color stop ${i + 1}`}
+                          value={color}
+                          onChange={e => {
+                            const newColors = [...newGradientColors];
+                            newColors[i] = e.target.value;
+                            setNewGradientColors(newColors);
+                          }}
+                          className="h-8 w-8 cursor-pointer rounded-full border-0 p-0"
+                        />
+                        <input
+                          type="text"
+                          aria-label={`Color stop ${i + 1} hex`}
+                          value={color}
+                          onChange={e => {
+                            const newColors = [...newGradientColors];
+                            newColors[i] = e.target.value;
+                            setNewGradientColors(newColors);
+                          }}
+                          className={`flex-1 rounded-full px-3 py-1.5 text-sm font-mono transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
+                            theme === 'dark'
+                              ? 'bg-gray-900/50 text-gray-100'
+                              : 'bg-gray-100 text-gray-900'
+                          }`}
+                        />
+                        {newGradientColors.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => setNewGradientColors(prev => prev.filter((_, idx) => idx !== i))}
+                            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 transition-colors duration-200 ${
+                              theme === 'dark' ? 'hover:bg-red-950/50 hover:text-red-400' : 'hover:bg-red-50 hover:text-red-600'
+                            }`}
+                            aria-label="Remove color"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setNewGradientColors(prev => [...prev, '#ffffff'])}
+                      className={`flex items-center gap-1 text-xs font-bold transition-colors duration-200 ${
+                        theme === 'dark' ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      <Plus className="w-3 h-3" /> Add Color
+                    </button>
+                  </div>
                 </div>
               </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowGradientModal(false)}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 ${
+                    theme === 'dark'
+                      ? 'text-gray-300 hover:bg-gray-700/80 hover:text-white'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!newGradientName.trim() || newGradientColors.length < 2}
+                  onClick={handleAddGradient}
+                  className={`rounded-full px-6 py-2 text-sm font-bold text-white glow-md transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-45 ${
+                    theme === 'dark' ? 'bg-sky-600 hover:bg-sky-500' : 'bg-gray-800 hover:bg-gray-900'
+                  }`}
+                >
+                  Create
+                </button>
+              </div>
             </div>
-            <div className="mt-8 flex justify-end gap-3">
-              <button 
-                type="button"
-                onClick={() => setShowGradientModal(false)}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 ${
-                  theme === 'dark'
-                    ? 'text-gray-300 hover:bg-gray-700/80 hover:text-white'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
-                }`}
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleAddGradient}
-                className={`rounded-full px-6 py-2 text-sm font-bold text-white glow-md transition-colors duration-200 ${
-                  theme === 'dark' ? 'bg-sky-600 hover:bg-sky-500' : 'bg-gray-800 hover:bg-gray-900'
-                }`}
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* Dashboard Area — main charts flex-1; footer strip shrink-0 so pills never overlap cards */}
       <div 
@@ -1539,7 +1680,7 @@ export default function App() {
         data-export-mode={exportMode ? '' : undefined}
         className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[background-color] duration-200 ease-out ${exportMode ? 'bg-white' : ''}`}
         style={{
-          backgroundColor: exportMode ? '#ffffff' : theme === 'dark' ? '#121211' : '#fcfbf8',
+          backgroundColor: exportMode ? '#ffffff' : theme === 'dark' ? '#121211' : '#ffffff',
         }}
       >
         <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden px-2 pt-2 pb-0 sm:px-3 sm:pt-3 ${exportMode ? 'bg-white' : ''}`}>
@@ -1674,6 +1815,7 @@ export default function App() {
         </div>
       </div>
 
+      <ChartTooltipHost theme={theme} />
     </div>
   );
 }

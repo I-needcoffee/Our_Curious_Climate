@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { Settings2 } from 'lucide-react';
+import { ArrowLeftRight, Settings2 } from 'lucide-react';
 import { EPWVariable, ParsedEPW } from '../lib/epwParser';
 import { weatherLocationTypeCaption } from '../lib/weatherCaption';
 import type {
@@ -100,9 +100,9 @@ function PillSelect({
     tone === 'baseline'
       ? theme === 'dark'
         ? 'bg-gray-700 text-gray-100'
-        : 'bg-gray-100 text-gray-900'
+        : 'bg-white text-gray-900'
       : theme === 'dark'
-        ? 'bg-gray-950 text-gray-50'
+        ? 'bg-gray-950 text-gray-50 ring-1 ring-gray-600'
         : 'bg-gray-900 text-white';
 
   const caret =
@@ -221,7 +221,7 @@ function PillSelect({
             title={selectedLabel}
           >
             {options.map((f, i) => (
-              <option key={i} value={i} className="bg-white text-gray-900">
+              <option key={i} value={i} className={theme === 'dark' ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'}>
                 {pillSelectOptionLabel(f)}
               </option>
             ))}
@@ -282,7 +282,7 @@ function PairSharedToolbar({
   return (
     <div
       className={`m-1.5 mb-0 shrink-0 rounded-2xl px-2 py-1 ${
-        theme === 'dark' ? 'bg-gray-900/40' : 'bg-gray-50'
+        theme === 'dark' ? 'bg-gray-900/40' : 'bg-white glow-sm'
       }`}
     >
       {children}
@@ -569,20 +569,26 @@ export function ComparisonModeLayout({
   const windVarLabel = `${windColorDef.name} (${convertUnitForLegend(windColorDef.unit, unitSystem)})`;
   const roseVarLabel = `${roseColorDef.name} (${convertUnitForLegend(roseColorDef.unit, unitSystem)})`;
 
+  const mergedPairLegend = (varId: string) => {
+    const b = variableLegendDomain(baseline.variables, varId, unitSystem, false, baseline.data, undefined);
+    const c = variableLegendDomain(compare.variables, varId, unitSystem, false, compare.data, undefined);
+    return {
+      ...b,
+      cMin: Math.min(b.cMin, c.cMin),
+      cMax: Math.max(b.cMax, c.cMax),
+    };
+  };
   const explorerPairLegend = useMemo(
-    () =>
-      variableLegendDomain(baseline.variables, expVar, unitSystem, false, baseline.data, undefined),
-    [baseline.variables, baseline.data, expVar, unitSystem]
+    () => mergedPairLegend(expVar),
+    [baseline.variables, baseline.data, compare.variables, compare.data, expVar, unitSystem]
   );
   const windPairLegend = useMemo(
-    () =>
-      variableLegendDomain(baseline.variables, windVar, unitSystem, false, baseline.data, undefined),
-    [baseline.variables, baseline.data, windVar, unitSystem]
+    () => mergedPairLegend(windVar),
+    [baseline.variables, baseline.data, compare.variables, compare.data, windVar, unitSystem]
   );
   const rosePairLegend = useMemo(
-    () =>
-      variableLegendDomain(baseline.variables, roseVar, unitSystem, false, baseline.data, undefined),
-    [baseline.variables, baseline.data, roseVar, unitSystem]
+    () => mergedPairLegend(roseVar),
+    [baseline.variables, baseline.data, compare.variables, compare.data, roseVar, unitSystem]
   );
   /** Same six speed classes the roses draw, so the shared legend is stepped like the single-card one. */
   const rosePairBandFills = useMemo(() => {
@@ -644,23 +650,51 @@ export function ComparisonModeLayout({
 
       <section className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-3 overflow-visible px-1.5 pb-2 lg:w-1/2 lg:flex-none lg:overflow-y-auto lg:overflow-x-hidden">
         <div
-          className="z-10 -mx-0.5 mb-0.5 grid shrink-0 grid-cols-2 gap-2 px-0.5 pb-1.5 pt-1 sm:gap-3 lg:sticky lg:top-0"
+          className={`sticky top-0 z-20 -mx-1.5 mb-0.5 grid shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 px-1.5 pb-2 pt-1.5 backdrop-blur-md sm:gap-2.5 ${
+            theme === 'dark' ? 'bg-[#121211]/90' : 'bg-white/95'
+          }`}
         >
           <div className="flex min-w-0 justify-center">
             <PillSelect
               label="Baseline"
               value={baselineIndex}
-              onChange={onBaselineIndex}
+              onChange={next => {
+                if (next === compareIndex && files.length > 1) {
+                  onCompareIndex(baselineIndex);
+                }
+                onBaselineIndex(next);
+              }}
               options={files}
               tone="baseline"
               theme={theme}
             />
           </div>
+          <button
+            type="button"
+            aria-label="Swap baseline and comparison sites"
+            title="Swap baseline and comparison"
+            onClick={() => {
+              onBaselineIndex(compareIndex);
+              onCompareIndex(baselineIndex);
+            }}
+            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full glow-sm transition-colors active:scale-95 ${
+              theme === 'dark'
+                ? 'bg-gray-800 text-gray-200 hover:bg-gray-700'
+                : 'bg-white text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden />
+          </button>
           <div className="flex min-w-0 justify-center">
             <PillSelect
               label="Comparison"
               value={compareIndex}
-              onChange={onCompareIndex}
+              onChange={next => {
+                if (next === baselineIndex && files.length > 1) {
+                  onBaselineIndex(compareIndex);
+                }
+                onCompareIndex(next);
+              }}
               options={files}
               tone="comparison"
               theme={theme}
@@ -679,6 +713,9 @@ export function ComparisonModeLayout({
                 display="icon"
                 typeBadge
               />
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                Color
+              </span>
               <VariableChartSelect
                 value={sunColorVar}
                 onChange={setSunColorVar}
@@ -696,6 +733,9 @@ export function ComparisonModeLayout({
                   </optgroup>
                 ))}
               </VariableChartSelect>
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                Size
+              </span>
               <VariableChartSelect
                 value={sunRadiusVar}
                 onChange={setSunRadiusVar}
@@ -812,7 +852,7 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:flex-row">
               <div
                 ref={explorerLegendTrack.leftPaneRef}
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
@@ -922,7 +962,7 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:flex-row">
               <div
                 ref={utciLegendTrack.leftPaneRef}
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
@@ -1041,7 +1081,7 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:flex-row">
               <div
                 ref={windLegendTrack.leftPaneRef}
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"
@@ -1149,7 +1189,7 @@ export function ComparisonModeLayout({
             </div>
           </PairSharedToolbar>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:flex-row">
               <div
                 ref={roseLegendTrack.leftPaneRef}
                 className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:min-h-[320px]"

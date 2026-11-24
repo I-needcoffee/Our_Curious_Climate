@@ -20,9 +20,9 @@ export const LEGEND_WRAP_CLASS = 'flex w-full select-none flex-col gap-0.5 px-0.
 export const LEGEND_BAR_CLASS =
   'relative h-[14px] w-full overflow-hidden rounded-full glow-sm [--legend-label:9.5px] @md:h-4 @md:[--legend-label:10px] @2xl:h-[18px] @2xl:[--legend-label:11px] export:h-[18px] export:[--legend-label:11px] @lg:export:h-5 @lg:export:[--legend-label:12px]';
 export const LEGEND_IN_BAR_LABEL_CLASS = 'font-semibold leading-none tabular-nums';
-/** One-line footnote under the legend: quiet ink so it reads after the chart. */
+/** One-line footnote under the legend: quiet ink with WCAG AA legibility. */
 export const LEGEND_FOOTNOTE_CLASS =
-  'm-0 truncate text-[10px] leading-snug text-gray-400 export:text-[11px] dark:text-gray-500';
+  'm-0 truncate text-[10px] leading-snug text-gray-500 export:text-[11px] dark:text-gray-400';
 
 function legendSurface(theme: 'light' | 'dark') {
   return theme === 'dark' ? '#111827' : '#ffffff';
@@ -102,13 +102,8 @@ export function InteractiveLegend({
   }
 
   const stepped = !!stepFills && stepFills.length > 0;
-  /**
-   * Most legends are washed to the same 60% as the bar charts. Sky cover stays solid so 0 is
-   * pure white and the overcast end stays the dark gray. Stepped wind-rose bands use the wash
-   * so they match the wind-speed card.
-   */
-  const fillOpacity =
-    !isDifference && gradientId === 'cloud-cover-gray' ? 1 : LEGEND_FILL_OPACITY;
+  /** Keep all legend colors (heatmaps, SunPath, and Wind Rose bands) true to the chart colors at full opacity. */
+  const fillOpacity = 1;
 
   const barBg = legendSurface(theme);
   /** Keep end labels inside the rounded bar ends. */

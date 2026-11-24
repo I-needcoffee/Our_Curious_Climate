@@ -226,7 +226,7 @@ export function WindStationPickerModal({
       ? 'bg-gray-800 text-gray-100'
       : 'bg-white text-gray-900';
 
-  const canContinue = userPickedStation && !!selected?.stationId;
+  const canContinue = !!selected?.stationId;
 
   return createPortal(
     <div

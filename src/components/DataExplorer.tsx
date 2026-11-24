@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState, useMemo } from 'react';
 import { useIsMobileMaxSm } from '../hooks/useIsMobileMaxSm';
 import { useTutorialLiveOptional } from '../context/TutorialLiveContext';
 import * as d3 from 'd3';
@@ -91,7 +91,8 @@ import {
   EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS,
   fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
-import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { HEATMAP_CELL_FONT_WEIGHT, blendCellWithOverlay, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { attachChartTooltip } from '../lib/chartTooltip';
 import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 
 const EMPTY_VARIABLES_FALLBACK: EPWVariable = {
@@ -143,7 +144,7 @@ interface DataExplorerProps {
   pairSuppressFooterLegend?: boolean;
 }
 
-export function DataExplorer({ 
+export const DataExplorer = React.memo(function DataExplorer({ 
   data, compareData, showDifference, stackedComparison, variables, defaultVariableId, onRemove, onChangeType, gradients, filter,
   heatmapCellStatistic = 'mean',
   barChartFillMode = 'solid',
@@ -165,34 +166,7 @@ export function DataExplorer({
   const svgRef = useRef<SVGSVGElement>(null);
   const compareSvgRef = useRef<SVGSVGElement>(null);
   const outerRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 400 });
   const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
-
-  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (!outerRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-      
-      resizeTimeoutRef.current = setTimeout(() => {
-        for (let entry of entries) {
-          const newWidth = Math.round(entry.contentRect.width);
-          
-          setDimensions(prev => {
-            if (prev.width === newWidth) return prev;
-            return { width: newWidth };
-          });
-        }
-      }, 100);
-    });
-    observer.observe(outerRef.current);
-    return () => {
-      observer.disconnect();
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-    };
-  }, []);
   const [internalAggregation, setInternalAggregation] = useState<'hour' | 'day' | 'week' | 'month'>('month');
   const aggregation = explorerShared?.aggregation ?? internalAggregation;
   const setAggregation = explorerShared?.setAggregation ?? setInternalAggregation;
@@ -240,7 +214,7 @@ export function DataExplorer({
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip, theme);
   const removeBtnRevealClass = isMobile
     ? 'pointer-events-auto opacity-100'
     : 'pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
@@ -322,7 +296,7 @@ export function DataExplorer({
   }, [aggregation, colorVar, colorVarDef.category, showDifference, compareData, heatmapCellStatistic, useCumulativePrecip]);
 
   useEffect(() => {
-    if (!svgRef.current || dimensions.width === 0) return;
+    if (!svgRef.current) return;
 
     const compareByHour = compareData ? indexEpwByEquivalentHour(compareData) : null;
     const compareRowFor = (row: EPWDataRow) =>
@@ -551,7 +525,16 @@ export function DataExplorer({
         return isMonthMatch && isHourMatch ? 1 : 0.2;
       });
 
-    cells
+    const nightOverlayRgba = solarNightOverlayRgba(theme);
+    const cellIsNight = (d: any) =>
+      solarNightOverlayEnabled &&
+      isSolarNightEpwStation(
+        metadata!.lat,
+        metadata!.lng,
+        solarNightParamsFromHeatmapDatum(d, metadata!.timeZone)
+      );
+
+    const cellRects = cells
       .append("rect")
       .attr("width", d =>
         explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width
@@ -559,9 +542,26 @@ export function DataExplorer({
       .attr("height", d => rowInnerHeight(d.y))
       .attr("rx", 2)
       .attr("ry", 2)
-      .style("fill", d => heatmapFill(d.value))
-      .append("title")
-      .text(d => d.tooltip);
+      .style("fill", d => heatmapFill(d.value));
+
+    attachChartTooltip(
+      cellRects,
+      (d: any) => {
+        const lines = String(d.tooltip ?? '').split('\n').filter(Boolean);
+        return {
+          title: lines[0] ?? colorVarDef.name,
+          swatch: heatmapFill(d.value),
+          rows: lines.slice(1).map(line => {
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+              return { label: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+            }
+            return { label: colorVarDef.name, value: line };
+          }),
+        };
+      },
+      { hoverStroke: axisInk, hoverStrokeWidth: 1.5 }
+    );
 
     if (solarNightOverlayEnabled) {
       cells
@@ -572,18 +572,10 @@ export function DataExplorer({
         .attr("height", d => rowInnerHeight(d.y))
         .attr("rx", 2)
         .attr("ry", 2)
-        .style("fill", solarNightOverlayRgba(theme))
+        .style("fill", nightOverlayRgba)
         .style("stroke", "none")
         .style("pointer-events", "none")
-        .style("opacity", d =>
-          isSolarNightEpwStation(
-            metadata!.lat,
-            metadata!.lng,
-            solarNightParamsFromHeatmapDatum(d, metadata!.timeZone)
-          )
-            ? 1
-            : 0
-        );
+        .style("opacity", d => (cellIsNight(d) ? 1 : 0));
     }
 
     // Overlay text for month and week aggregations if cells are large enough
@@ -593,7 +585,11 @@ export function DataExplorer({
         .attr("y", d => rowInnerHeight(d.y) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", heatmapCellInk(heatmapTextColor))
+        .style("fill", d => {
+          const base = heatmapFill(d.value);
+          const effective = cellIsNight(d) ? blendCellWithOverlay(base, nightOverlayRgba) : base;
+          return heatmapCellInk(heatmapTextColor, effective);
+        })
         .style("font-size", `${type.cellValuePx}px`)
         .style("font-weight", HEATMAP_CELL_FONT_WEIGHT)
         .style("pointer-events", "none")
@@ -632,8 +628,8 @@ export function DataExplorer({
             .attr('width', span.width)
             .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
             .attr('fill', 'none')
-            .attr('stroke', '#1f2937')
-            .attr('stroke-width', 3)
+            .attr('stroke', axisInk)
+            .attr('stroke-width', 2.5)
             .attr('rx', 2)
             .attr('ry', 2)
             .style('pointer-events', 'none');
@@ -1007,30 +1003,62 @@ export function DataExplorer({
         .attr("stroke-linejoin", "round")
         .attr("d", lineCompare);
 
+      const barPeriodLabel = (d: any) => {
+        if (aggregation === 'month') {
+          const m = Math.max(0, Math.min(11, (d.month ?? 1) - 1));
+          return monthNames[m] ?? 'Period';
+        }
+        if (aggregation === 'week') return `Week ${Math.max(1, Math.round(d.x0 / 7) + 1)}`;
+        return `Day ${Math.round(d.x0)}`;
+      };
+
       // Add dots colored to match their baseline/comparison series (never the Δ diverging scale)
-      barChartG.selectAll(".dot-primary")
+      const primDots = barChartG.selectAll(".dot-primary")
         .data(pairLineData)
         .join("circle")
         .attr("class", "dot-primary")
         .attr("cx", d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
         .attr("cy", d => yScaleBar(yOfPrimary(d)))
         .attr("r", 3)
-        .attr("fill", lineBaseline)
-        .append("title")
-        .text(d => `Baseline (${useCumulativePrecip ? 'total' : statLabel}): ${yOfPrimary(d).toFixed(1)} ${cUnit}`);
+        .attr("fill", lineBaseline);
+      attachChartTooltip(primDots, (d: any) => ({
+        title: `${barPeriodLabel(d)} · ${colorVarDef.name}`,
+        swatch: lineBaseline,
+        rows: [
+          { label: `Baseline (${useCumulativePrecip ? 'total' : statLabel})`, value: `${yOfPrimary(d).toFixed(1)} ${cUnit}` },
+          { label: `Comparison (${useCumulativePrecip ? 'total' : statLabel})`, value: `${yOfCompare(d).toFixed(1)} ${cUnit}` },
+          { label: 'Δ (Cmp − Base)', value: `${(yOfCompare(d) - yOfPrimary(d)) >= 0 ? '+' : ''}${(yOfCompare(d) - yOfPrimary(d)).toFixed(1)} ${cUnit}` },
+        ],
+      }));
 
-      barChartG.selectAll(".dot-compare")
+      const cmpDots = barChartG.selectAll(".dot-compare")
         .data(pairLineData)
         .join("circle")
         .attr("class", "dot-compare")
         .attr("cx", d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
         .attr("cy", d => yScaleBar(yOfCompare(d)))
         .attr("r", 3)
-        .attr("fill", lineComparison)
-        .append("title")
-        .text(d => `Comparison (${useCumulativePrecip ? 'total' : statLabel}): ${yOfCompare(d).toFixed(1)} ${cUnit}`);
+        .attr("fill", lineComparison);
+      attachChartTooltip(cmpDots, (d: any) => ({
+        title: `${barPeriodLabel(d)} · ${colorVarDef.name}`,
+        swatch: lineComparison,
+        rows: [
+          { label: `Comparison (${useCumulativePrecip ? 'total' : statLabel})`, value: `${yOfCompare(d).toFixed(1)} ${cUnit}` },
+          { label: `Baseline (${useCumulativePrecip ? 'total' : statLabel})`, value: `${yOfPrimary(d).toFixed(1)} ${cUnit}` },
+          { label: 'Δ (Cmp − Base)', value: `${(yOfCompare(d) - yOfPrimary(d)) >= 0 ? '+' : ''}${(yOfCompare(d) - yOfPrimary(d)).toFixed(1)} ${cUnit}` },
+        ],
+      }));
 
     } else {
+      const barPeriodLabel = (d: any) => {
+        if (aggregation === 'month') {
+          const m = Math.max(0, Math.min(11, (d.month ?? 1) - 1));
+          return monthNames[m] ?? 'Period';
+        }
+        if (aggregation === 'week') return `Week ${Math.max(1, Math.round(d.x0 / 7) + 1)}`;
+        return `Day ${Math.round(d.x0)}`;
+      };
+
       // Draw standard Bar Chart
       const fgGroups = barChartG.selectAll(".fg-group")
         .data(validData)
@@ -1083,16 +1111,31 @@ export function DataExplorer({
         }
       });
 
-      fgGroups.append("title").text(d => {
+      attachChartTooltip(fgGroups, (d: any) => {
         if (useCumulativePrecip) {
-          return `Cumulative total: ${d.valueSelected!.toFixed(2)} ${cUnit}`;
+          return {
+            title: `${barPeriodLabel(d)} · ${colorVarDef.name}`,
+            swatch: colorScale(d.valueSelected!),
+            rows: [{ label: 'Cumulative total', value: `${d.valueSelected!.toFixed(2)} ${cUnit}` }],
+          };
         }
         const yv = explorerBarStatisticY(heatmapCellStatistic, {
           valueSelected: d.valueSelected!,
           minSelected: d.minSelected,
           maxSelected: d.maxSelected,
         });
-        return `Selected (${statLabel}): ${yv.toFixed(1)} ${cUnit}; bar span min–max`;
+        const rows = [{ label: `Selected (${statLabel})`, value: `${yv.toFixed(1)} ${cUnit}` }];
+        if (typeof d.minSelected === 'number' && Number.isFinite(d.minSelected)) {
+          rows.push({ label: 'Bar low', value: `${d.minSelected.toFixed(1)} ${cUnit}` });
+        }
+        if (typeof d.maxSelected === 'number' && Number.isFinite(d.maxSelected)) {
+          rows.push({ label: 'Bar high', value: `${d.maxSelected.toFixed(1)} ${cUnit}` });
+        }
+        return {
+          title: `${barPeriodLabel(d)} · ${colorVarDef.name}`,
+          swatch: colorScale(yv),
+          rows,
+        };
       });
     }
 
@@ -1136,10 +1179,11 @@ export function DataExplorer({
     aggregation,
     gradients,
     filter,
-    unitSystem,
+    cUnit,
+    cMin,
+    cMax,
     heatmapTextColor,
     theme,
-    dimensions.width,
     metadata,
     pairSuppressHeader,
     comparePane,
@@ -1150,8 +1194,11 @@ export function DataExplorer({
     useCumulativePrecip,
   ]);
 
-  // Calculate local stats for filtered data
-  const stats = (() => {
+  // Calculate local stats lazily only when the Stats modal is open
+  const stats = useMemo(() => {
+    if (!showStatsModal) {
+      return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
+    }
     const filteredData = data.filter(d => rowPassesGlobalFilters(d, filter));
     const isCircularDeg = colorVar === 'windDirection';
     const isTemp = colorVarDef.category === 'Temperature';
@@ -1193,7 +1240,7 @@ export function DataExplorer({
       total: isTemp || isCircularDeg ? NaN : convertValue(d3.sum(validVals), colorVarDef.unit, true),
       count: validVals.length,
     };
-  })();
+  }, [showStatsModal, data, compareData, showDifference, filter, colorVar, colorVarDef.category, colorVarDef.unit, convertValue]);
 
   return (
     <div 
@@ -1263,7 +1310,7 @@ export function DataExplorer({
                 </div>
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -1365,7 +1412,7 @@ export function DataExplorer({
                 )}
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -1495,7 +1542,7 @@ export function DataExplorer({
               <button 
                 type="button"
                 onClick={() => setShowGradientModal(true)}
-                className="text-[11px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
+                className="text-[11px] font-bold text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white uppercase tracking-tight"
               >
                 + Create
               </button>
@@ -1569,4 +1616,4 @@ export function DataExplorer({
       </div>
     </div>
   );
-}
+});

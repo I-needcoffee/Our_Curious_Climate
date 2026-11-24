@@ -1,4 +1,4 @@
-﻿import { useEffect, useId, useRef, useState, useMemo } from 'react';
+﻿import React, { useEffect, useId, useRef, useState, useMemo } from 'react';
 import { useIsMobileMaxSm } from '../hooks/useIsMobileMaxSm';
 import { useTutorialLiveOptional } from '../context/TutorialLiveContext';
 import * as d3 from 'd3';
@@ -100,9 +100,11 @@ import {
   fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
 import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { attachChartTooltip } from '../lib/chartTooltip';
 import { epwEquivalentHourKey, indexEpwByEquivalentHour } from '../lib/epwClockMatch';
 import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 import {
+  formatUtciCategoryLabel,
   formatUtciCategoryRange,
   getUtciCategoryForValue,
   getUtciComfortPeriodById,
@@ -341,7 +343,7 @@ function UtciOptimizeScenarioLegend({ theme }: { theme: 'light' | 'dark' }) {
   );
 }
 
-export function UtciExplorer({
+export const UtciExplorer = React.memo(function UtciExplorer({
   data,
   compareData,
   showDifference,
@@ -557,10 +559,10 @@ export function UtciExplorer({
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip, theme);
   const removeBtnRevealClass = isMobile
-    ? 'pointer-events-auto absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-100'
-    : 'pointer-events-none absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
+    ? 'pointer-events-auto opacity-100'
+    : 'pointer-events-none opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
   // chart type switching handled by ChartTypeMenu
 
   const tutorialLive = useTutorialLiveOptional();
@@ -775,34 +777,7 @@ export function UtciExplorer({
   );
 
   const outerRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 400 });
   const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
-
-  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (!outerRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-      
-      resizeTimeoutRef.current = setTimeout(() => {
-        for (let entry of entries) {
-          const newWidth = Math.round(entry.contentRect.width);
-          
-          setDimensions(prev => {
-            if (prev.width === newWidth) return prev;
-            return { width: newWidth };
-          });
-        }
-      }, 100);
-    });
-    observer.observe(outerRef.current);
-    return () => {
-      observer.disconnect();
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-    };
-  }, []);
 
   // Pre-calculate UTCI for all data points to avoid recalculating on every render/aggregation change
   const utciData: UtciDataRow[] = useMemo(() => {
@@ -902,7 +877,7 @@ export function UtciExplorer({
   }, [isDiffMode, utciData, compareUtciData]);
 
   useEffect(() => {
-    if (!svgRef.current || dimensions.width === 0) return;
+    if (!svgRef.current) return;
     const compareUtciByHour = isDiffMode ? indexEpwByEquivalentHour(compareUtciData) : null;
 
     const renderUtci = (svgEl: any, currentData: any[], title: string | null, isCompare: boolean) => {
@@ -1317,7 +1292,7 @@ export function UtciExplorer({
         return `translate(${xp.x}, ${hourRowTop(d.y)})`;
       });
 
-    cells.append("rect")
+    const cellRects = cells.append("rect")
       .attr("width", d =>
         explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width
       )
@@ -1342,13 +1317,28 @@ export function UtciExplorer({
           winningScenarioId: optimizeMode ? d.dominantScenarioId ?? null : null,
           env: utciEnv,
         });
-      })
-      .append("title")
-      .text(d =>
-        !showDifference && Array.isArray(d.cellRows) && d.cellRows.length > 0
-          ? `${d.tooltip}\nClick to compare protection scenarios`
-          : d.tooltip
-      );
+      });
+
+    attachChartTooltip(
+      cellRects,
+      (d: any) => {
+        const lines = String(d.tooltip ?? '').split('\n').filter(Boolean);
+        const clickable = !showDifference && Array.isArray(d.cellRows) && d.cellRows.length > 0;
+        return {
+          title: lines[0] ?? 'Outdoor Comfort',
+          swatch: utciCellFill(d),
+          rows: lines.slice(1).map(line => {
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+              return { label: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+            }
+            return { label: 'Info', value: line };
+          }),
+          hint: clickable ? 'Click cell to compare sun/wind scenarios' : undefined,
+        };
+      },
+      { hoverStroke: axisInk, hoverStrokeWidth: 1.5 }
+    );
 
     const solarNightOverlayEnabled =
       showExposureMap &&
@@ -1417,7 +1407,7 @@ export function UtciExplorer({
         .attr("y", d => rowInnerHeight(d.y) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", heatmapCellInk(heatmapTextColor))
+        .style("fill", d => heatmapCellInk(heatmapTextColor, utciCellFill(d)))
         .style("font-size", `${type.cellValuePx}px`)
         .style("font-weight", HEATMAP_CELL_FONT_WEIGHT)
         .style("pointer-events", "none")
@@ -1463,8 +1453,8 @@ export function UtciExplorer({
             .attr('width', span.width)
             .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
             .attr('fill', 'none')
-            .attr('stroke', '#1f2937')
-            .attr('stroke-width', 3)
+            .attr('stroke', axisInk)
+            .attr('stroke-width', 2.5)
             .attr('rx', 2)
             .attr('ry', 2)
             .style('pointer-events', 'none');
@@ -1485,10 +1475,11 @@ export function UtciExplorer({
               .attr('width', span.width)
               .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
               .attr('fill', 'none')
-              .attr('stroke', '#1f2937')
-              .attr('stroke-width', 3)
-              .attr('rx', 2)
-              .attr('ry', 2)
+              .attr('stroke', axisInk)
+              .attr('stroke-opacity', 0.8)
+              .attr('stroke-width', 1.5)
+              .attr('rx', 6)
+              .attr('ry', 6)
               .style('pointer-events', 'none');
           }
         }
@@ -1871,19 +1862,47 @@ export function UtciExplorer({
         }
       });
 
-      fgGroups.append("title")
-        .text(d => {
-          if (colorMode === 'comfortTime') {
-            return `Selected Hours Comfort Time: ${((d.comfortRatioSelected ?? 0) * 100).toFixed(1)}%`;
-          }
-          const shown = explorerBarStatisticY(heatmapCellStatistic, {
-            valueSelected: d.valueSelected!,
-            minSelected: d.minSelected,
-            maxSelected: d.maxSelected,
-          });
-          const metricValue = unitSystem === 'imperial' ? ((shown - 32) * 5) / 9 : shown;
-          return `Selected Hours ${statLabel} UTCI: ${shown.toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(metricValue)}`;
+      const barPeriodLabel = (d: any) => {
+        if (aggregation === 'month') {
+          const m = Math.max(0, Math.min(11, (d.month ?? 1) - 1));
+          return monthNames[m] ?? 'Period';
+        }
+        if (aggregation === 'week') return `Week ${Math.max(1, Math.round(d.x0 / 7) + 1)}`;
+        return `Day ${Math.round(d.x0)}`;
+      };
+
+      attachChartTooltip(fgGroups, (d: any) => {
+        if (colorMode === 'comfortTime') {
+          return {
+            title: `${barPeriodLabel(d)} · Outdoor Comfort`,
+            swatch: OUTDOOR_COMFORT_GREEN_HEX,
+            rows: [
+              { label: 'Comfort time', value: `${((d.comfortRatioSelected ?? 0) * 100).toFixed(1)}%` },
+            ],
+          };
+        }
+        const shown = explorerBarStatisticY(heatmapCellStatistic, {
+          valueSelected: d.valueSelected!,
+          minSelected: d.minSelected,
+          maxSelected: d.maxSelected,
         });
+        const metricValue = unitSystem === 'imperial' ? ((shown - 32) * 5) / 9 : shown;
+        const rows = [
+          { label: `${statLabel} UTCI`, value: `${shown.toFixed(1)} ${utciUnit}` },
+          { label: 'Stress category', value: formatUtciCategoryLabel(getUtciCategoryForValue(metricValue)) },
+        ];
+        if (typeof d.minSelected === 'number' && Number.isFinite(d.minSelected)) {
+          rows.push({ label: 'Bar low', value: `${d.minSelected.toFixed(1)} ${utciUnit}` });
+        }
+        if (typeof d.maxSelected === 'number' && Number.isFinite(d.maxSelected)) {
+          rows.push({ label: 'Bar high', value: `${d.maxSelected.toFixed(1)} ${utciUnit}` });
+        }
+        return {
+          title: `${barPeriodLabel(d)} · UTCI`,
+          swatch: getFillColor(shown, d.comfortRatioSelected ?? 0),
+          rows,
+        };
+      });
     }
 
     // Y Axis for Bar Chart
@@ -1962,7 +1981,6 @@ export function UtciExplorer({
     gradientId,
     gradients,
     filter,
-    dimensions.width,
     renderScale,
     svgHeight,
     unitSystem,
@@ -1985,8 +2003,18 @@ export function UtciExplorer({
     metadata,
   ]);
 
-  // Calculate local stats for filtered data
-  const stats = (() => {
+  // Calculate local stats lazily only when the Stats modal is open
+  const stats = useMemo(() => {
+    if (!showStatsModal) {
+      return {
+        avg: NaN,
+        min: NaN,
+        max: NaN,
+        count: 0,
+        comfortRatio: NaN,
+        categoryPercentages: [] as { category: string; percentage: number; color: string }[],
+      };
+    }
     const focusPeriod =
       tutorialEnabled && tutorialFocusPeriodId
         ? getUtciComfortPeriodById(tutorialFocusPeriodId)
@@ -2040,7 +2068,17 @@ export function UtciExplorer({
       comfortRatio: validFiltered.length ? (d3.mean(validFiltered, d => d.isComfortable) ?? 0) : NaN,
       categoryPercentages
     };
-  })();
+  }, [
+    showStatsModal,
+    tutorialEnabled,
+    tutorialFocusPeriodId,
+    utciData,
+    compareUtciData,
+    isDiffMode,
+    filter,
+    siteLatitude,
+    unitSystem,
+  ]);
 
   return (
     <div 
@@ -2083,7 +2121,7 @@ export function UtciExplorer({
                 Comparison · {paneCity ?? '\u2014'}
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -2163,7 +2201,7 @@ export function UtciExplorer({
                 </div>
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -2217,7 +2255,7 @@ export function UtciExplorer({
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Comfort ratio</div>
-            <div className="text-base font-medium" style={{ color: OUTDOOR_COMFORT_GREEN_HEX }}>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700'}`}>
               {Number.isFinite(stats.comfortRatio) ? `${(stats.comfortRatio * 100).toFixed(1)}%` : '—'}
             </div>
           </div>
@@ -2551,6 +2589,12 @@ export function UtciExplorer({
         activeIncludeSun={includeSun}
         activeIncludeWind={includeWind}
         optimizeMode={optimizeMode}
+        onSelectScenario={(sun, wind) => {
+          setOptimizeMode(false);
+          setIncludeSun(sun);
+          setIncludeWind(wind);
+          setCellInspect(null);
+        }}
         anchorRef={outerRef}
       />
 
@@ -2631,4 +2675,4 @@ export function UtciExplorer({
       </div>
     </div>
   );
-}
+});

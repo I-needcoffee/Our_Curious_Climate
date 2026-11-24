@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { useIsMobileMaxSm } from '../hooks/useIsMobileMaxSm';
 import { useTutorialLiveOptional } from '../context/TutorialLiveContext';
 import * as d3 from 'd3';
 import Slider from 'rc-slider';
@@ -43,6 +44,7 @@ import {
 import { defaultGradientIdForVariable } from '../lib/defaultGradientForVariable';
 import { sequentialHeatmapColorFn } from '../lib/heatmapColorAdjust';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
+import { attachChartTooltip } from '../lib/chartTooltip';
 import { symmetricDiffBound } from '../lib/symmetricDiffDomain';
 import { gradientsForVariable } from '../lib/availableGradientsForVariable';
 import { useWindIemGlobalPrefs } from '../lib/iem/globalWindIemPrefsStore';
@@ -138,7 +140,7 @@ function roseScaleTicks(maxHours: number): number[] {
 
 const EMPTY_EPW_ROWS: EPWDataRow[] = [];
 
-export function WindRose({
+export const WindRose = React.memo(function WindRose({
   data: epwData,
   compareData: epwCompareRaw,
   showDifference,
@@ -245,65 +247,46 @@ export function WindRose({
     () => gradientsForVariable(colorVar, variables, gradients),
     [colorVar, variables, gradients]
   );
+  const isMobile = useIsMobileMaxSm();
+  // Store thresholds in canonical SI (°C, m/s) to avoid double rebuilds and rounding drift on unit toggles
   const [tempFilterEnabled, setTempFilterEnabled] = useState(false);
-  const [tempThreshold, setTempThreshold] = useState(unitSystem === 'imperial' ? 70 : 21);
+  const [tempThresholdC, setTempThresholdC] = useState(21);
   const [tempFilterType, setTempFilterType] = useState<'above' | 'below'>('above');
-  
+
   const [speedFilterEnabled, setSpeedFilterEnabled] = useState(false);
-  const [speedThreshold, setSpeedThreshold] = useState(unitSystem === 'imperial' ? 10 : 4.5);
+  const [speedThresholdMs, setSpeedThresholdMs] = useState(4.5);
   const [speedFilterType, setSpeedFilterType] = useState<'above' | 'below'>('above');
   const [monthRange, setMonthRange] = useState<HourMonthRange>([1, 12]);
   const [hourRange, setHourRange] = useState<HourMonthRange>([0, 23]);
   const [scaleMaxOverride, setScaleMaxOverride] = useState<number | null>(null);
 
-  const prevUnitSystem = useRef(unitSystem);
-  useEffect(() => {
-    if (prevUnitSystem.current !== unitSystem) {
-      if (unitSystem === 'imperial') {
-        setTempThreshold(t => Math.round(t * 9/5 + 32));
-        setSpeedThreshold(s => Math.round(s * 2.23694));
-      } else {
-        setTempThreshold(t => Math.round((t - 32) * 5/9));
-        setSpeedThreshold(s => Math.round(s / 2.23694));
-      }
-      prevUnitSystem.current = unitSystem;
-    }
-  }, [unitSystem]);
+  const displayTempThreshold =
+    unitSystem === 'imperial' ? Math.round((tempThresholdC * 9) / 5 + 32) : Math.round(tempThresholdC);
+  const displaySpeedThreshold =
+    unitSystem === 'imperial' ? Math.round(speedThresholdMs * 2.23693629 * 10) / 10 : Math.round(speedThresholdMs * 10) / 10;
+
+  const hasLocalWindRoseFilter =
+    tempFilterEnabled ||
+    speedFilterEnabled ||
+    monthRange[0] !== 1 ||
+    monthRange[1] !== 12 ||
+    hourRange[0] !== 0 ||
+    hourRange[1] !== 23;
+
+  const resetLocalWindRoseFilters = () => {
+    setTempFilterEnabled(false);
+    setSpeedFilterEnabled(false);
+    setMonthRange([1, 12]);
+    setHourRange([0, 23]);
+  };
 
   const outerRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 400 });
   const renderScale = useSvgRenderScale(roseRef, WIND_ROSE_VIEWBOX_W, WIND_ROSE_VIEWBOX_H);
   /** Header legend inputs derived during the SVG render (bucket fills + outer-ring note). */
   const [legendState, setLegendState] = useState<{ note: string; bandFills: string[] }>({
     note: '',
     bandFills: [],
   });
-
-  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (!outerRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-      
-      resizeTimeoutRef.current = setTimeout(() => {
-        for (let entry of entries) {
-          const newWidth = Math.round(entry.contentRect.width);
-          
-          setDimensions(prev => {
-            if (prev.width === newWidth) return prev;
-            return { width: newWidth };
-          });
-        }
-      }, 100);
-    });
-    observer.observe(outerRef.current);
-    return () => {
-      observer.disconnect();
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-    };
-  }, []);
 
   const convertValue = (val: number | null | undefined, unit: string, isDelta: boolean = false) =>
     convertDisplayValue(val, unit, unitSystem, isDelta);
@@ -334,23 +317,16 @@ export function WindRose({
       if (tempFilterEnabled) {
         const tempC = resolveWindRowDryBulbC(d, dryBulbLookup, rowMetadata);
         if (tempC === null) return false;
-        const temp = convertValue(tempC, '°C');
-        if (tempFilterType === 'above') {
-          isTempMatch = temp > tempThreshold;
-        } else {
-          isTempMatch = temp < tempThreshold;
-        }
+        isTempMatch = tempFilterType === 'above' ? tempC > tempThresholdC : tempC < tempThresholdC;
       }
 
       let isSpeedMatch = true;
       if (speedFilterEnabled) {
-        const speed = convertValue(d.windSpeed as number, 'm/s');
-        if (!Number.isFinite(speed)) {
+        const speedMs = d.windSpeed as number;
+        if (!Number.isFinite(speedMs)) {
           isSpeedMatch = false;
-        } else if (speedFilterType === 'above') {
-          isSpeedMatch = speed > speedThreshold;
         } else {
-          isSpeedMatch = speed < speedThreshold;
+          isSpeedMatch = speedFilterType === 'above' ? speedMs > speedThresholdMs : speedMs < speedThresholdMs;
         }
       }
 
@@ -366,12 +342,11 @@ export function WindRose({
       monthRange,
       hourRange,
       tempFilterEnabled,
-      tempThreshold,
+      tempThresholdC,
       tempFilterType,
       speedFilterEnabled,
-      speedThreshold,
+      speedThresholdMs,
       speedFilterType,
-      unitSystem,
       epwDryBulbLookup,
       metadata,
     ]
@@ -387,12 +362,11 @@ export function WindRose({
       monthRange,
       hourRange,
       tempFilterEnabled,
-      tempThreshold,
+      tempThresholdC,
       tempFilterType,
       speedFilterEnabled,
-      speedThreshold,
+      speedThresholdMs,
       speedFilterType,
-      unitSystem,
       compareEpwDryBulbLookup,
       compareMetadata,
       metadata,
@@ -421,12 +395,11 @@ export function WindRose({
     compareData,
     filter,
     tempFilterEnabled,
-    tempThreshold,
+    tempThresholdC,
     tempFilterType,
     speedFilterEnabled,
-    speedThreshold,
+    speedThresholdMs,
     speedFilterType,
-    unitSystem,
     epwDryBulbLookup,
     compareEpwDryBulbLookup,
     metadata,
@@ -482,7 +455,7 @@ export function WindRose({
     ) : null;
 
   useEffect(() => {
-    if (!roseRef.current || dimensions.width === 0) return;
+    if (!roseRef.current) return;
 
     const gradientDef = gradients.find(g => g.id === gradientId) || gradients[0];
     
@@ -680,7 +653,7 @@ export function WindRose({
         .endAngle(d => ((d.angle + binSize / 2) * Math.PI) / 180);
 
       const unitWord = hourWeight < 1 ? 'hrs/yr' : 'hours';
-      roseG
+      const wedgesSel = roseG
         .selectAll('.rose-wedge')
         .data(visibleWedges)
         .join('path')
@@ -690,26 +663,39 @@ export function WindRose({
           const midVal = (d.extent[0] + d.extent[1]) / 2;
           return colorScale(midVal);
         })
-        .style('opacity', 0.6)
+        .style('opacity', 1)
         .style('stroke', '#ffffff')
-        .style('stroke-width', '0.5px')
-        .append('title')
-        .text(d => {
+        .style('stroke-width', '0.5px');
+
+      attachChartTooltip(
+        wedgesSel,
+        (d: any) => {
           const over = d.totalCount > scaleMax;
+          const midVal = (d.extent[0] + d.extent[1]) / 2;
           const rangeText =
             d.bucketIndex === 0
               ? `≤ ${d.extent[1].toFixed(1)} ${cUnit}`
               : d.bucketIndex === numBuckets - 1
                 ? `≥ ${d.extent[0].toFixed(1)} ${cUnit}`
-                : `${d.extent[0].toFixed(1)} - ${d.extent[1].toFixed(1)} ${cUnit}`;
+                : `${d.extent[0].toFixed(1)} – ${d.extent[1].toFixed(1)} ${cUnit}`;
           const countDisplay = hourWeight < 1 ? d.count.toFixed(1) : Math.round(d.count);
-          return `Direction: ${Math.round(d.angle)}°\nRange: ${rangeText}\nCount: ${countDisplay} ${unitWord}${
-            over ? `\nDirection total ${Math.round(d.totalCount)} ${unitWord} exceeds outer circle (${Math.round(scaleMax)} h)` : ''
-          }`;
-        });
+          const rows = [
+            { label: colorVarDef.name, value: rangeText },
+            { label: 'Frequency', value: `${countDisplay} ${unitWord}` },
+            { label: 'Direction total', value: `${Math.round(d.totalCount)} ${unitWord}` },
+          ];
+          return {
+            title: `Wind from ${Math.round(d.angle)}°`,
+            swatch: colorScale(midVal),
+            rows,
+            hint: over ? `Exceeds outer ring (${Math.round(scaleMax)} h)` : undefined,
+          };
+        },
+        { hoverStroke: axisInk, hoverStrokeWidth: 1.5 }
+      );
 
       const overflowChevrons = bins.filter(b => binHitsDrawCap(b.totalCount));
-      roseG
+      const overflowSel = roseG
         .selectAll('.rose-overflow')
         .data(overflowChevrons)
         .join('path')
@@ -732,9 +718,15 @@ export function WindRose({
         .style('fill', axisInk)
         .style('stroke', roseCardFill(theme))
         .style('stroke-width', '1.2px')
-        .style('opacity', 0.9)
-        .append('title')
-        .text(d => `${Math.round(d.totalCount)} ${unitWord} exceeds outer circle (${Math.round(scaleMax)} h)`);
+        .style('opacity', 0.9);
+
+      attachChartTooltip(overflowSel, (d: any) => ({
+        title: `Wind from ${Math.round(d.angle)}°`,
+        rows: [
+          { label: 'Direction total', value: `${Math.round(d.totalCount)} ${unitWord}` },
+          { label: 'Outer ring scale', value: `${Math.round(scaleMax)} h` },
+        ],
+      }));
 
       roseG
         .selectAll('.rose-label')
@@ -749,6 +741,8 @@ export function WindRose({
         .style('font-size', d => `${d % 4 === 0 ? cardinalPx : d % 2 === 0 ? intercardinalPx : secondaryPx}px`)
         .style('font-weight', d => (d % 4 === 0 ? '700' : d % 2 === 0 ? '600' : '500'))
         .text(d => COMPASS_POINTS[d]);
+
+      roseG.selectAll('.rose-grid-label').raise();
 
       return bins.some(b => b.totalCount > scaleMax + 0.5);
     };
@@ -785,7 +779,7 @@ export function WindRose({
       }
       return { note: hoursScaleNote, bandFills: nextBandFills };
     });
-  }, [filteredData, filteredCompareData, stackedComparison, data, compareData, showDifference, variables, colorVar, colorVarDef, gradientId, gradients, filter, dimensions.width, renderScale, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours, primaryHourWeight, compareHourWeight]);
+  }, [filteredData, filteredCompareData, stackedComparison, data, compareData, showDifference, variables, colorVar, colorVarDef, gradientId, gradients, filter, renderScale, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours, primaryHourWeight, compareHourWeight]);
 
   const selectedPill = theme === 'dark' ? 'bg-gray-100 text-gray-900' : 'bg-gray-900 text-white';
   const idlePill = 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600';
@@ -880,15 +874,30 @@ export function WindRose({
                 <span
                   id={tutorialChromeAnchors ? 'tutorial-card-data-control' : undefined}
                   className={chartToolbarTitleClass(theme)}
-                  title="Wind Direction"
+                  title={`Wind Direction (${cUnit})`}
                 >
-                  Wind Direction
+                  Wind Direction ({cUnit})
                 </span>
+                {hasLocalWindRoseFilter && (
+                  <button
+                    type="button"
+                    onClick={resetLocalWindRoseFilters}
+                    title="Local wind rose filter active — click to reset"
+                    className={`inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold ${
+                      theme === 'dark'
+                        ? 'bg-orange-500/20 text-orange-300 hover:bg-orange-500/30'
+                        : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                    }`}
+                  >
+                    <span>Filtered</span>
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                )}
               </div>
               <div
                 className={`absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-1 transition-opacity duration-200 ease-out ${
-                  showSettings
-                    ? 'opacity-100'
+                  showSettings || isMobile
+                    ? 'pointer-events-auto opacity-100'
                     : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
                 }`}
               >
@@ -986,19 +995,22 @@ export function WindRose({
                         </button>
                       </div>
                       <div className="px-2">
-                        <Slider 
-                          min={unitSystem === 'imperial' ? 0 : -20} 
-                          max={unitSystem === 'imperial' ? 120 : 50} 
-                          value={tempThreshold} 
-                          onChange={(v) => setTempThreshold(v as number)}
+                        <Slider
+                          min={unitSystem === 'imperial' ? 0 : -20}
+                          max={unitSystem === 'imperial' ? 120 : 50}
+                          value={displayTempThreshold}
+                          onChange={(v) => {
+                            const n = v as number;
+                            setTempThresholdC(unitSystem === 'imperial' ? ((n - 32) * 5) / 9 : n);
+                          }}
                           trackStyle={{ backgroundColor: sliderTrack }}
                           railStyle={{ backgroundColor: sliderRail }}
                           handleStyle={{ ...sliderHandle }}
                         />
                         <div className="flex justify-between mt-1">
-                          <span className="text-[11px] text-gray-400">{unitSystem === 'imperial' ? '0°F' : '-20°C'}</span>
-                          <span className={`text-xs font-bold ${valueInk}`}>{tempThreshold}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
-                          <span className="text-[11px] text-gray-400">{unitSystem === 'imperial' ? '120°F' : '50°C'}</span>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">{unitSystem === 'imperial' ? '0°F' : '-20°C'}</span>
+                          <span className={`text-xs font-bold ${valueInk}`}>{displayTempThreshold}{unitSystem === 'imperial' ? '°F' : '°C'}</span>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">{unitSystem === 'imperial' ? '120°F' : '50°C'}</span>
                         </div>
                       </div>
                     </div>
@@ -1032,19 +1044,23 @@ export function WindRose({
                         </button>
                       </div>
                       <div className="px-2">
-                        <Slider 
-                          min={0} 
-                          max={unitSystem === 'imperial' ? 45 : 20} 
-                          value={speedThreshold} 
-                          onChange={(v) => setSpeedThreshold(v as number)}
+                        <Slider
+                          min={0}
+                          max={unitSystem === 'imperial' ? 45 : 20}
+                          step={0.5}
+                          value={displaySpeedThreshold}
+                          onChange={(v) => {
+                            const n = v as number;
+                            setSpeedThresholdMs(unitSystem === 'imperial' ? n / 2.23693629 : n);
+                          }}
                           trackStyle={{ backgroundColor: sliderTrack }}
                           railStyle={{ backgroundColor: sliderRail }}
                           handleStyle={{ ...sliderHandle }}
                         />
                         <div className="flex justify-between mt-1">
-                          <span className="text-[11px] text-gray-400">0</span>
-                          <span className={`text-xs font-bold ${valueInk}`}>{speedThreshold}{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
-                          <span className="text-[11px] text-gray-400">{unitSystem === 'imperial' ? '45' : '20'}</span>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">0</span>
+                          <span className={`text-xs font-bold ${valueInk}`}>{displaySpeedThreshold} {unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">{unitSystem === 'imperial' ? '45' : '20'}</span>
                         </div>
                       </div>
                     </div>
@@ -1239,4 +1255,4 @@ export function WindRose({
       </div>
     </div>
   );
-}
+});

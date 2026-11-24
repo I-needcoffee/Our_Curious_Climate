@@ -56,6 +56,11 @@ export function hourFilterIsPartial(f: Pick<GlobalFilterState, 'startHour' | 'en
   return true;
 }
 
+/** True when any global month, hour, or dry-bulb temperature filter is active. */
+export function hasActiveGlobalFilter(f: GlobalFilterState): boolean {
+  return monthFilterIsPartial(f) || hourFilterIsPartial(f) || f.temperatureMode !== 'off';
+}
+
 /**
  * Inclusive hour filter as one or two half-open [start, endExclusive) segments
  * for heatmap outlines (supports midnight wrap).

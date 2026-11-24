@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useIsMobileMaxSm } from '../hooks/useIsMobileMaxSm';
 import { useTutorialLiveOptional } from '../context/TutorialLiveContext';
 import * as d3 from 'd3';
@@ -41,6 +41,7 @@ import {
 } from '../lib/chartToolbarLayout';
 import { EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS } from '../lib/explorerChartSvgLayout';
 import { CHART_TEXT_AUTO, chartAxisInk } from '../lib/chartInk';
+import { attachChartTooltip } from '../lib/chartTooltip';
 import { epwEquivalentHourKey, indexEpwByEquivalentHour, isFiniteNumber } from '../lib/epwClockMatch';
 import { ringLabelGapPx, ringLabelPlacement, ringLabelReserve } from '../lib/ringLabels';
 import { ExportHeaderCaption, exportCaptionLinesWithUnit, exportCaptionShort } from './ExportHeaderCaption';
@@ -101,7 +102,7 @@ interface SunPathProps {
   tutorialChromeAnchors?: boolean;
 }
 
-export function SunPath({
+export const SunPath = React.memo(function SunPath({
   metadata,
   compareMetadata,
   data,
@@ -246,31 +247,21 @@ export function SunPath({
     [colorVar, variables, gradients]
   );
   const isMobile = useIsMobileMaxSm();
-  /** Mobile cannot hover; tutorial mode also pins the strip. */
+  /** Mobile/touch cannot hover; tutorial mode also pins the strip. */
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip, theme);
   const removeBtnRevealClass = isMobile
     ? 'absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-100 pointer-events-auto'
     : 'absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity duration-200 ease-out group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto';
-  // chart type switching handled by ChartTypeMenu
+  // Store local temperature thresholds in canonical °C to avoid double renders & rounding drift on unit toggles
   const [tempFilterEnabled, setTempFilterEnabled] = useState(false);
   const [tempFilterType, setTempFilterType] = useState<'helpful' | 'harmful'>('helpful');
-  const [helpfulThreshold, setHelpfulThreshold] = useState(unitSystem === 'imperial' ? 68 : 20);
-  const [harmfulThreshold, setHarmfulThreshold] = useState(unitSystem === 'imperial' ? 77 : 25);
-
-  const prevUnitSystem = useRef(unitSystem);
-  useEffect(() => {
-    if (prevUnitSystem.current !== unitSystem) {
-      if (unitSystem === 'imperial') {
-        setHelpfulThreshold(t => Math.round(t * 9/5 + 32));
-        setHarmfulThreshold(t => Math.round(t * 9/5 + 32));
-      } else {
-        setHelpfulThreshold(t => Math.round((t - 32) * 5/9));
-        setHarmfulThreshold(t => Math.round((t - 32) * 5/9));
-      }
-      prevUnitSystem.current = unitSystem;
-    }
-  }, [unitSystem]);
+  const [helpfulThresholdC, setHelpfulThresholdC] = useState(20);
+  const [harmfulThresholdC, setHarmfulThresholdC] = useState(25);
+  const displayThreshold = (c: number) =>
+    unitSystem === 'imperial' ? Math.round(((c * 9) / 5 + 32) * 10) / 10 : Math.round(c * 10) / 10;
+  const parseDisplayThresholdToC = (v: number) =>
+    unitSystem === 'imperial' ? ((v - 32) * 5) / 9 : v;
 
   // Group variables by category
   const groupedVariables = variables.reduce((acc, variable) => {
@@ -293,42 +284,34 @@ export function SunPath({
 
   const radiusUnit = convertUnit(radiusVarDef.unit);
 
-  // Calculate local stats for filtered data
-  const filteredData = data.filter(d => {
-    if (!rowPassesGlobalFilters(d, filter)) return false;
+  const filteredData = useMemo(() => {
+    return data.filter(d => {
+      if (!rowPassesGlobalFilters(d, filter)) return false;
 
-    let isTempMatch = true;
-    if (tempFilterEnabled) {
-      const temp = convertValue(d.dryBulbTemperature as number, '°C');
-      if (!Number.isFinite(temp)) {
-        isTempMatch = false;
-      } else if (tempFilterType === 'helpful') {
-        isTempMatch = temp < helpfulThreshold;
-      } else {
-        isTempMatch = temp > harmfulThreshold;
+      if (tempFilterEnabled) {
+        const tempC = d.dryBulbTemperature as number;
+        if (!Number.isFinite(tempC)) return false;
+        if (tempFilterType === 'helpful') return tempC < helpfulThresholdC;
+        return tempC > harmfulThresholdC;
       }
-    }
+      return true;
+    });
+  }, [data, filter, tempFilterEnabled, tempFilterType, helpfulThresholdC, harmfulThresholdC]);
 
-    return isTempMatch;
-  });
+  const filteredCompareData = useMemo(() => {
+    if (!compareData || !compareData.length) return [];
+    return compareData.filter(d => {
+      if (!rowPassesGlobalFilters(d, filter)) return false;
 
-const filteredCompareData = (compareData || []).filter(d => {
-    if (!rowPassesGlobalFilters(d, filter)) return false;
-
-    let isTempMatch = true;
-    if (tempFilterEnabled) {
-      const temp = convertValue(d.dryBulbTemperature as number, '°C');
-      if (!Number.isFinite(temp)) {
-        isTempMatch = false;
-      } else if (tempFilterType === 'helpful') {
-        isTempMatch = temp < helpfulThreshold;
-      } else {
-        isTempMatch = temp > harmfulThreshold;
+      if (tempFilterEnabled) {
+        const tempC = d.dryBulbTemperature as number;
+        if (!Number.isFinite(tempC)) return false;
+        if (tempFilterType === 'helpful') return tempC < helpfulThresholdC;
+        return tempC > harmfulThresholdC;
       }
-    }
-
-    return isTempMatch;
-  });
+      return true;
+    });
+  }, [compareData, filter, tempFilterEnabled, tempFilterType, helpfulThresholdC, harmfulThresholdC]);
 
   /** Radius scale domain: min/max of the radius column over the filtered global selection; in compare, union of both files. */
   const radiusValueExtent = useMemo(() => {
@@ -392,7 +375,10 @@ const filteredCompareData = (compareData || []).filter(d => {
     });
   }, [tutorialEnabled, tutorialReport, aggregation, colorVar, variables, radiusVar, radiusVarDef?.name]);
 
-  const stats = (() => {
+  const stats = useMemo(() => {
+    if (!showStatsModal) {
+      return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
+    }
     const isCircular = colorVar === 'windDirection';
     const isTemp = colorVarDef.category === 'Temperature';
     if (showDifference && compareData) {
@@ -409,8 +395,8 @@ const filteredCompareData = (compareData || []).filter(d => {
       if (!diffs.length) return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
       return {
         avg: convertValue(d3.mean(diffs), colorVarDef.unit, true),
-        min: convertValue(d3.min(diffs), colorVarDef.unit, true),
-        max: convertValue(d3.max(diffs), colorVarDef.unit, true),
+        min: convertValue(d3.min<number>(diffs), colorVarDef.unit, true),
+        max: convertValue(d3.max<number>(diffs), colorVarDef.unit, true),
         total: isTemp || isCircular ? NaN : convertValue(d3.sum(diffs), colorVarDef.unit, true),
         count: diffs.length,
       };
@@ -422,12 +408,12 @@ const filteredCompareData = (compareData || []).filter(d => {
     if (!validVals.length) return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
     return {
       avg: convertValue(isCircular ? circularMeanDeg(validVals) : d3.mean(validVals), colorVarDef.unit),
-      min: convertValue(d3.min(validVals), colorVarDef.unit),
-      max: convertValue(d3.max(validVals), colorVarDef.unit),
+      min: convertValue(d3.min<number>(validVals), colorVarDef.unit),
+      max: convertValue(d3.max<number>(validVals), colorVarDef.unit),
       total: isTemp || isCircular ? NaN : convertValue(d3.sum(validVals), colorVarDef.unit, true),
       count: validVals.length,
     };
-  })();
+  }, [showStatsModal, colorVar, colorVarDef.category, colorVarDef.unit, showDifference, compareData, filteredData, unitSystem]);
 
   useEffect(() => {
     if (!svgRef.current) return;
@@ -513,12 +499,16 @@ const filteredCompareData = (compareData || []).filter(d => {
     let points: any[] = [];
     
     if (aggregation === 'hour') {
+      const primaryByTimeMs = new Map<number, EPWDataRow>();
+      for (const r of data) {
+        if (r?.date) primaryByTimeMs.set(r.date.getTime(), r);
+      }
       points = currentData.map((d, i) => {
         const pos = SunCalc.getPosition(d.date, locMeta.lat, locMeta.lng);
         const altitude = pos.altitude * 180 / Math.PI;
         const azimuth = (pos.azimuth * 180 / Math.PI + 180) % 360; // Convert to 0=N, 90=E
         const t = d.date.getTime();
-        const primaryRow = (data.find(r => r.date.getTime() === t) as EPWDataRow | undefined) ?? (data[i] as EPWDataRow | undefined);
+        const primaryRow = primaryByTimeMs.get(t) ?? (data[i] as EPWDataRow | undefined);
         const compareRow = compareByHour?.get(epwEquivalentHourKey(d));
         
         let val: number;
@@ -649,13 +639,13 @@ const filteredCompareData = (compareData || []).filter(d => {
       
       let isTempMatch = true;
       if (tempFilterEnabled) {
-        const temp = convertValue(d.dryBulbTemperature as number, '°C');
-        if (!Number.isFinite(temp)) {
+        const tempC = d.dryBulbTemperature as number;
+        if (!Number.isFinite(tempC)) {
           isTempMatch = false;
         } else if (tempFilterType === 'helpful') {
-          isTempMatch = temp < helpfulThreshold;
+          isTempMatch = tempC < helpfulThresholdC;
         } else {
-          isTempMatch = temp > harmfulThreshold;
+          isTempMatch = tempC > harmfulThresholdC;
         }
       }
 
@@ -828,7 +818,7 @@ const filteredCompareData = (compareData || []).filter(d => {
       .style("pointer-events", "none");
 
     // 5. Draw selected points (top layer)
-    g.selectAll(".data-point-selected")
+    const selectedDots = g.selectAll(".data-point-selected")
       .data(selectedPoints)
       .join("circle")
       .attr("class", "data-point-selected")
@@ -838,13 +828,31 @@ const filteredCompareData = (compareData || []).filter(d => {
       .style("fill", d => colorScale(d._val))
       .style("stroke", "none")
       .style("opacity", 1)
-      .style("mix-blend-mode", "normal")
-      .append("title")
-      .text(d => {
-        const prefix = aggregation === 'hour' ? '' : `Avg (${d._count} samples)\n`;
-        const val = d._val;
-        return `${prefix}${formatEpwStationDateTime(d)}\nAlt: ${d.altitude.toFixed(1)}°\nAz: ${d.azimuth.toFixed(1)}°\n${colorVarDef.name}${showDifference ? ' Diff' : ''}: ${val.toFixed(1)} ${cUnit}`;
-      });
+      .style("mix-blend-mode", "normal");
+
+    attachChartTooltip(
+      selectedDots,
+      (d: any) => {
+        const radDisplay = convertValue(d._rVal, radiusVarDef.unit);
+        return {
+          title: formatEpwStationDateTime(d),
+          subtitle: aggregation === 'hour' ? undefined : `Avg of ${d._count} samples`,
+          swatch: colorScale(d._val),
+          rows: [
+            {
+              label: `${colorVarDef.name}${showDifference ? ' Δ' : ''}`,
+              value: `${Number.isFinite(d._val) ? d._val.toFixed(1) : '—'} ${cUnit}`,
+            },
+            {
+              label: `${radiusVarDef.name} (size)`,
+              value: `${Number.isFinite(radDisplay) ? radDisplay.toFixed(1) : '—'} ${radiusUnit}`,
+            },
+            { label: 'Sun position', value: `Alt ${d.altitude.toFixed(1)}° · Az ${d.azimuth.toFixed(1)}°` },
+          ],
+        };
+      },
+      { hoverStroke: axisInk, hoverStrokeWidth: 1.5 }
+    );
 
     if (title) {
          const titleMargin = 12 * sizeScale;
@@ -867,7 +875,7 @@ const filteredCompareData = (compareData || []).filter(d => {
   } else {
       renderChart(svgRef.current, data, null, false, pw, ph);
   }
-  }, [metadata, compareMetadata, data, compareData, showDifference, stackedComparison, pairComparisonHorizontal, variables, colorVar, radiusVar, gradientId, radiusMin, radiusMax, aggregation, gradients, filter, slotSize.primary.w, slotSize.primary.h, slotSize.compare.w, slotSize.compare.h, unitSystem, theme, exportMode, heatmapTextColor, tempFilterEnabled, tempFilterType, helpfulThreshold, harmfulThreshold, colorVarDef, radiusValueExtent]);
+  }, [metadata, compareMetadata, data, compareData, showDifference, stackedComparison, pairComparisonHorizontal, variables, colorVar, radiusVar, gradientId, radiusMin, radiusMax, aggregation, gradients, filter, slotSize.primary.w, slotSize.primary.h, slotSize.compare.w, slotSize.compare.h, unitSystem, theme, exportMode, heatmapTextColor, tempFilterEnabled, tempFilterType, helpfulThresholdC, harmfulThresholdC, colorVarDef, radiusValueExtent]);
 
   /** Compare page: two-pane sun path — legend under both charts, centered (matches other compare cards). */
   const sunComparePairLegendInFooter = Boolean(
@@ -883,7 +891,7 @@ const filteredCompareData = (compareData || []).filter(d => {
       gradients={gradients}
       theme={theme}
       isDifference={showDifference}
-      footnote="Arcs, high to low: summer solstice, equinox, winter solstice."
+      footnote={`Color: ${colorVarDef.name} (${cUnit}) · Size: ${radiusVarDef.name} (${radiusUnit}) · Arcs: solstice & equinox.`}
     />
   );
 
@@ -961,6 +969,21 @@ const filteredCompareData = (compareData || []).filter(d => {
                     theme={theme}
                     domId={tutorialChromeAnchors ? 'tutorial-card-sunpath-radius' : undefined}
                   />
+                  {tempFilterEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setTempFilterEnabled(false)}
+                      title="Local temperature filter active — click to clear"
+                      className={`inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[10px] font-semibold ${
+                        theme === 'dark'
+                          ? 'bg-orange-500/20 text-orange-300 hover:bg-orange-500/30'
+                          : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                      }`}
+                    >
+                      <span>Filtered</span>
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  )}
                 </div>
                 {onRemove && (
                   <div className={removeBtnRevealClass}>
@@ -976,7 +999,7 @@ const filteredCompareData = (compareData || []).filter(d => {
                 )}
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -1130,9 +1153,10 @@ const filteredCompareData = (compareData || []).filter(d => {
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setShowGradientModal(true)}
-                    className="text-[11px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
+                    className="text-[11px] font-bold text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white uppercase tracking-tight"
                   >
                     + Create
                   </button>
@@ -1181,12 +1205,14 @@ const filteredCompareData = (compareData || []).filter(d => {
                     <div className="relative flex-1">
                       <input
                         type="number"
-                        value={tempFilterType === 'helpful' ? helpfulThreshold : harmfulThreshold}
+                        value={displayThreshold(tempFilterType === 'helpful' ? helpfulThresholdC : harmfulThresholdC)}
                         onChange={e => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n)) return;
                           if (tempFilterType === 'helpful') {
-                            setHelpfulThreshold(Number(e.target.value));
+                            setHelpfulThresholdC(parseDisplayThresholdToC(n));
                           } else {
-                            setHarmfulThreshold(Number(e.target.value));
+                            setHarmfulThresholdC(parseDisplayThresholdToC(n));
                           }
                         }}
                         className={`w-full text-sm rounded-full focus:ring-2 focus:ring-gray-400 block px-3.5 py-2.5 transition-all outline-none border-0 ${theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
@@ -1244,4 +1270,4 @@ const filteredCompareData = (compareData || []).filter(d => {
       )}
     </div>
   );
-}
+});

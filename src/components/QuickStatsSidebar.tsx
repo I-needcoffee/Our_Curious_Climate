@@ -3,7 +3,7 @@ import type { EPWDataRow, EPWMetadata } from '../lib/epwParser';
 import type { UnitSystem } from '../App';
 import { convertUnit, convertValue, UNIT_C, UNIT_F } from '../lib/unitConversion';
 import type { GlobalFilterState } from '../lib/globalFilter';
-import { rowPassesGlobalFilters } from '../lib/globalFilter';
+import { hasActiveGlobalFilter, rowPassesGlobalFilters } from '../lib/globalFilter';
 import {
   formatAstronomicalSeasonLabel,
   hemisphereFromLatitude,
@@ -11,7 +11,6 @@ import {
 } from '../lib/seasons';
 import {
   computeUtciForEpwRow,
-  utciRowOutsideModelRange,
   UTCI_CLOCK_WINDOWS,
   UTCI_HOUR_WINDOW_NOTE_SHORT,
   type UtciRowOpts,
@@ -50,13 +49,8 @@ function inHourRange(hour: number, startInclusive: number, endExclusive: number)
   return hour >= startInclusive && hour < endExclusive;
 }
 
-
 function utciComfortableC(utciC: number) {
   return utciC >= 9 && utciC <= 26;
-}
-
-function computeUtciC(row: EPWDataRow, opts: UtciRowOpts) {
-  return computeUtciForEpwRow(row, opts)?.utci ?? null;
 }
 
 function ratio(n: number, d: number) {
@@ -69,9 +63,15 @@ function pct(n: number, d: number, digits = 1) {
   return Number.isFinite(r) ? `${formatNumber(r * 100, digits)} %` : '—';
 }
 
-function computeQuickStatsFromRows(
+/** Standard ASHRAE balance-point temperature for HDD/CDD: 18.333°C (65°F). */
+const DEGREE_DAY_BASE_C = 18.333333333333332;
+
+/**
+ * Unit-independent SI + UTCI summary. Decoupled from `unitSystem` so toggling Metric ↔ Imperial
+ * never re-runs 8,760 hours of SunCalc + UTCI math.
+ */
+function computeQuickStatsSi(
   rows: EPWDataRow[] | undefined,
-  unitSystem: UnitSystem,
   metadata?: EPWMetadata | null,
   filter?: GlobalFilterState
 ) {
@@ -90,29 +90,16 @@ function computeQuickStatsFromRows(
         }
       : { radiantMode: 'station' };
 
-  const tempsC = data.map(r => r.dryBulbTemperature as number).filter(v => v != null && Number.isFinite(v));
-  const dni = data.map(r => r.directNormalRadiation as number).filter(v => v != null && Number.isFinite(v));
-  const ghi = data.map(r => r.globalHorizontalRadiation as number).filter(v => v != null && Number.isFinite(v));
-  const useDirectNormal = dni.length > 0;
-  const peakSource = useDirectNormal ? dni : ghi;
-  const peakRadSi = max(peakSource);
-  const peakRad = Number.isFinite(peakRadSi) ? convertValue(peakRadSi, 'Wh/m²', unitSystem) : NaN;
-  const radUnit = convertUnit('Wh/m²', unitSystem);
-  const peakRadHint = useDirectNormal ? 'Direct normal' : 'Global horizontal';
-  const humid = data.map(r => r.relativeHumidity as number).filter(v => v != null && Number.isFinite(v));
-  const cloudTenths = data.map(r => r.totalSkyCover as number).filter(v => v != null && Number.isFinite(v));
-
-  const hiC = max(tempsC);
-  const loC = min(tempsC);
-  const avgC = mean(tempsC);
-
-  const hi = unitSystem === 'imperial' ? cToF(hiC) : hiC;
-  const lo = unitSystem === 'imperial' ? cToF(loC) : loC;
-  const avg = unitSystem === 'imperial' ? cToF(avgC) : avgC;
-  const tUnit = unitSystem === 'imperial' ? UNIT_F : UNIT_C;
-
-  const avgHumid = mean(humid);
-  const avgCloudPct = mean(cloudTenths) * 10;
+  const tempsC: number[] = [];
+  const dni: number[] = [];
+  const ghi: number[] = [];
+  const humid: number[] = [];
+  const cloudTenths: number[] = [];
+  const windMs: number[] = [];
+  let precipMmSum = 0;
+  let precipCount = 0;
+  let hddCSum = 0;
+  let cddCSum = 0;
 
   let comfortAllN = 0;
   let comfortAllD = 0;
@@ -133,10 +120,46 @@ function computeQuickStatsFromRows(
   let utciOutOfRange = 0;
 
   for (const r of data) {
-    if (utciRowOutsideModelRange(r, utciOpts)) utciOutOfRange += 1;
-    const utciC = computeUtciC(r, utciOpts);
-    if (utciC == null) continue;
-    const ok = utciComfortableC(utciC);
+    const tdb = r.dryBulbTemperature as number;
+    if (tdb != null && Number.isFinite(tdb)) {
+      tempsC.push(tdb);
+      if (tdb < DEGREE_DAY_BASE_C) hddCSum += (DEGREE_DAY_BASE_C - tdb) / 24;
+      else if (tdb > DEGREE_DAY_BASE_C) cddCSum += (tdb - DEGREE_DAY_BASE_C) / 24;
+    }
+    const dRad = r.directNormalRadiation as number;
+    if (dRad != null && Number.isFinite(dRad)) dni.push(dRad);
+    const gRad = r.globalHorizontalRadiation as number;
+    if (gRad != null && Number.isFinite(gRad)) ghi.push(gRad);
+    const rh = r.relativeHumidity as number;
+    if (rh != null && Number.isFinite(rh)) humid.push(rh);
+    const sky = r.totalSkyCover as number;
+    if (sky != null && Number.isFinite(sky)) cloudTenths.push(sky);
+    const ws = r.windSpeed as number;
+    if (ws != null && Number.isFinite(ws)) windMs.push(ws);
+    const precip = r.liquidPrecipitationDepth as number;
+    if (precip != null && Number.isFinite(precip) && precip >= 0) {
+      precipMmSum += precip;
+      precipCount += 1;
+    }
+
+    // Single UTCI evaluation per hour (avoids calling SunCalc/MRT twice per row).
+    const hasCoreInputs =
+      tdb != null &&
+      Number.isFinite(tdb) &&
+      rh != null &&
+      Number.isFinite(rh) &&
+      ws != null &&
+      Number.isFinite(ws) &&
+      gRad != null &&
+      Number.isFinite(gRad);
+
+    const utciRes = hasCoreInputs ? computeUtciForEpwRow(r, utciOpts) : null;
+    if (hasCoreInputs && utciRes == null) {
+      utciOutOfRange += 1;
+      continue;
+    }
+    if (utciRes == null) continue;
+    const ok = utciComfortableC(utciRes.utci);
 
     comfortAllD += 1;
     if (ok) comfortAllN += 1;
@@ -168,14 +191,21 @@ function computeQuickStatsFromRows(
     }
   }
 
+  const useDirectNormal = dni.length > 0;
+  const peakRadSi = max(useDirectNormal ? dni : ghi);
+
   return {
-    highTemp: `${formatNumber(hi, 1)} ${tUnit}`,
-    lowTemp: `${formatNumber(lo, 1)} ${tUnit}`,
-    avgTemp: `${formatNumber(avg, 1)} ${tUnit}`,
-    peakRad: `${formatNumber(peakRad, 0)} ${radUnit}`,
-    peakRadHint,
-    avgHumidity: `${formatNumber(avgHumid, 0)} %`,
-    avgCloudCover: `${formatNumber(avgCloudPct, 0)} %`,
+    hiC: max(tempsC),
+    loC: min(tempsC),
+    avgC: mean(tempsC),
+    hddC: tempsC.length > 0 ? hddCSum : NaN,
+    cddC: tempsC.length > 0 ? cddCSum : NaN,
+    peakRadSi,
+    peakRadHint: useDirectNormal ? 'Direct normal' : 'Global horizontal',
+    avgHumid: mean(humid),
+    avgCloudPct: mean(cloudTenths) * 10,
+    avgWindMs: mean(windMs),
+    totalPrecipMm: precipCount > 0 ? precipMmSum : NaN,
     comfortAll: pct(comfortAllN, comfortAllD),
     comfort7am7pmAnnual: pct(comfortDayN, comfortDayD),
     comfortDayParts: {
@@ -193,11 +223,54 @@ function computeQuickStatsFromRows(
   };
 }
 
+function formatQuickStats(si: ReturnType<typeof computeQuickStatsSi>, unitSystem: UnitSystem) {
+  const imp = unitSystem === 'imperial';
+  const tUnit = imp ? UNIT_F : UNIT_C;
+  const hi = imp ? cToF(si.hiC) : si.hiC;
+  const lo = imp ? cToF(si.loC) : si.loC;
+  const avg = imp ? cToF(si.avgC) : si.avgC;
+  const peakRad = Number.isFinite(si.peakRadSi)
+    ? convertValue(si.peakRadSi, 'Wh/m²', unitSystem)
+    : NaN;
+  const radUnit = convertUnit('Wh/m²', unitSystem);
+  const avgWind = Number.isFinite(si.avgWindMs)
+    ? convertValue(si.avgWindMs, 'm/s', unitSystem)
+    : NaN;
+  const windUnit = convertUnit('m/s', unitSystem);
+  const precip = Number.isFinite(si.totalPrecipMm)
+    ? convertValue(si.totalPrecipMm, 'mm', unitSystem)
+    : NaN;
+  const precipUnit = convertUnit('mm', unitSystem);
+  const hdd = Number.isFinite(si.hddC) ? (imp ? si.hddC * (9 / 5) : si.hddC) : NaN;
+  const cdd = Number.isFinite(si.cddC) ? (imp ? si.cddC * (9 / 5) : si.cddC) : NaN;
+  const ddBaseLabel = imp ? '65°F' : '18.3°C';
+
+  return {
+    highTemp: `${formatNumber(hi, 1)} ${tUnit}`,
+    lowTemp: `${formatNumber(lo, 1)} ${tUnit}`,
+    avgTemp: `${formatNumber(avg, 1)} ${tUnit}`,
+    peakRad: `${formatNumber(peakRad, 0)} ${radUnit}`,
+    peakRadHint: si.peakRadHint,
+    avgHumidity: `${formatNumber(si.avgHumid, 0)} %`,
+    avgCloudCover: `${formatNumber(si.avgCloudPct, 0)} %`,
+    avgWind: `${formatNumber(avgWind, 1)} ${windUnit}`,
+    totalPrecip: Number.isFinite(precip) ? `${formatNumber(precip, imp ? 1 : 0)} ${precipUnit}` : '—',
+    hdd: Number.isFinite(hdd) ? `${Math.round(hdd).toLocaleString()} dd` : '—',
+    cdd: Number.isFinite(cdd) ? `${Math.round(cdd).toLocaleString()} dd` : '—',
+    ddBaseLabel,
+    comfortAll: si.comfortAll,
+    comfort7am7pmAnnual: si.comfort7am7pmAnnual,
+    comfortDayParts: si.comfortDayParts,
+    comfort7to19BySeason: si.comfort7to19BySeason,
+    utciOutOfRange: si.utciOutOfRange,
+  };
+}
+
 /**
  * 4×2 layout: stacked sidebar matching card row heights; weather stats top, comfort stats bottom.
  * Comfort aside uses `id="grid4x2-comfort-stats"` for export grouping with the bottom-right chart.
  */
-export function Grid4x2StatsColumn({
+export const Grid4x2StatsColumn = React.memo(function Grid4x2StatsColumn({
   theme,
   rows,
   unitSystem,
@@ -216,19 +289,22 @@ export function Grid4x2StatsColumn({
   filter?: GlobalFilterState;
 }) {
   const effectiveLat = metadata?.lat ?? siteLatitude;
-  const stats = useMemo(
-    () => computeQuickStatsFromRows(rows, unitSystem, metadata, filter),
-    [rows, unitSystem, metadata, filter]
+  const isFiltered = filter ? hasActiveGlobalFilter(filter) : false;
+
+  const siStats = useMemo(
+    () => computeQuickStatsSi(rows, metadata, filter),
+    [rows, metadata, filter]
   );
+  const stats = useMemo(() => formatQuickStats(siStats, unitSystem), [siStats, unitSystem]);
 
   const dark = theme === 'dark';
   const cardShell = `rounded-2xl ${dark ? 'bg-gray-800' : 'bg-white'} ${exportMode ? '' : 'glow-lg'}`;
-  const heading = `truncate text-[10px] font-bold uppercase tracking-wider @[14rem]:text-[11px] ${dark ? 'text-gray-400' : 'text-gray-500'}`;
+  const heading = `truncate text-[10px] font-bold uppercase tracking-wider @[14rem]:text-[11px] ${dark ? 'text-gray-300' : 'text-gray-600'}`;
   const groupLabel = `truncate text-[10px] font-semibold uppercase tracking-wide ${dark ? 'text-gray-400' : 'text-gray-500'}`;
-  const labelInk = dark ? 'text-gray-400' : 'text-gray-500';
-  const mutedInk = dark ? 'text-gray-500' : 'text-gray-400';
+  const labelInk = dark ? 'text-gray-300' : 'text-gray-600';
+  const mutedInk = dark ? 'text-gray-400' : 'text-gray-500';
   const valueInk = dark ? 'text-gray-100' : 'text-gray-900';
-  const groupBg = dark ? 'bg-gray-700/40' : 'bg-gray-50';
+  const groupBg = dark ? 'bg-gray-700/40' : 'bg-white glow-sm';
   const group = `flex w-full min-w-0 flex-col items-start gap-1 rounded-xl px-2.5 py-1.5 @[14rem]:py-2 ${groupBg}`;
 
   const Value = ({ value, emphasis = false }: { value: string; emphasis?: boolean }) => {
@@ -237,7 +313,7 @@ export function Grid4x2StatsColumn({
     return (
       <span className="inline-flex shrink-0 items-baseline gap-0.5 whitespace-nowrap leading-none tabular-nums">
         <span
-          className={`${emphasis ? 'text-sm font-semibold @[14rem]:text-base' : 'text-xs font-medium @[14rem]:text-[13px]'} leading-none ${valueInk}`}
+          className={`${emphasis ? 'text-sm font-semibold @[14rem]:text-[15px]' : 'text-xs font-medium @[14rem]:text-[13px]'} leading-none ${valueInk}`}
         >
           {num}
         </span>
@@ -255,7 +331,7 @@ export function Grid4x2StatsColumn({
   const DetailLabel = ({ name, detail }: { name: string; detail: string }) => (
     <>
       {name}
-      <span className={`hidden @[18rem]:inline ${mutedInk}`}> {detail}</span>
+      <span className={`hidden @[16rem]:inline ${mutedInk}`}> {detail}</span>
     </>
   );
 
@@ -274,11 +350,13 @@ export function Grid4x2StatsColumn({
     value,
     title,
     hint,
+    emphasis = false,
   }: {
     label: React.ReactNode;
     value: string;
     title?: string;
     hint?: string;
+    emphasis?: boolean;
   }) => (
     <div className="flex max-w-full min-w-0 flex-col gap-0.5">
       <div className="grid max-w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-1.5">
@@ -288,7 +366,7 @@ export function Grid4x2StatsColumn({
         >
           {label}
         </span>
-        <Value value={value} />
+        <Value value={value} emphasis={emphasis} />
       </div>
       {hint ? <span className={`truncate text-[10px] leading-none ${mutedInk}`}>{hint}</span> : null}
     </div>
@@ -297,22 +375,37 @@ export function Grid4x2StatsColumn({
   const panelInner =
     'flex min-h-0 w-full flex-1 flex-col gap-1.5 overflow-y-auto p-2.5 @[14rem]:gap-2 @[14rem]:p-3 [&>*]:shrink-0';
 
+  const periodHeading = isFiltered ? 'Filtered weather' : 'Annual weather';
+  const periodWord = isFiltered ? 'Filtered' : 'Annual';
+
   return (
     <div className="contents">
       <aside className={`@container col-start-2 row-start-1 flex min-h-0 min-w-0 flex-col ${cardShell}`}>
         <div className={panelInner}>
-          <p className={heading}>Annual weather</p>
+          <p className={heading}>{periodHeading}</p>
           <div className={group}>
             <p className={groupLabel}>Temperature</p>
+            <Row label="Average" value={stats.avgTemp} emphasis />
             <Row label="High" value={stats.highTemp} />
             <Row label="Low" value={stats.lowTemp} />
-            <Row label="Average" value={stats.avgTemp} />
           </div>
           <div className={group}>
             <p className={groupLabel}>Sun &amp; sky</p>
             <Row label="Peak radiation" hint={stats.peakRadHint} value={stats.peakRad} />
-            <Row label="Avg humidity" hint="Relative humidity" value={stats.avgHumidity} />
-            <Row label="Avg cloud cover" hint="Total sky cover" value={stats.avgCloudCover} />
+            <Row label="Avg humidity" value={stats.avgHumidity} />
+            <Row label="Avg cloud cover" value={stats.avgCloudCover} />
+          </div>
+          <div className={group}>
+            <p className={groupLabel}>Wind &amp; moisture</p>
+            <Row label="Avg wind" value={stats.avgWind} />
+            <Row label="Precipitation" value={stats.totalPrecip} />
+          </div>
+          <div className={group}>
+            <p className={groupLabel} title={`Degree days relative to ${stats.ddBaseLabel} base`}>
+              Degree days ({stats.ddBaseLabel})
+            </p>
+            <Row label="Heating (HDD)" value={stats.hdd} />
+            <Row label="Cooling (CDD)" value={stats.cdd} />
           </div>
         </div>
       </aside>
@@ -332,12 +425,12 @@ export function Grid4x2StatsColumn({
             </p>
           ) : null}
           <div className={group}>
-            <Row label="Time in comfort" value={stats.comfortAll} />
+            <Row label="Time in comfort" value={stats.comfortAll} emphasis />
           </div>
 
           <div className={group}>
             <p className={groupLabel}>{UTCI_CLOCK_WINDOWS.day.label}</p>
-            <Row label="Annual" value={stats.comfort7am7pmAnnual} />
+            <Row label={periodWord} value={stats.comfort7am7pmAnnual} />
             {(['spring', 'summer', 'fall', 'winter'] as const).map(season => (
               <React.Fragment key={season}>
                 <Row
@@ -350,7 +443,7 @@ export function Grid4x2StatsColumn({
           </div>
 
           <div className={group}>
-            <p className={groupLabel}>Annual by time of day</p>
+            <p className={groupLabel}>{periodWord} by time of day</p>
             <Row label={<DetailLabel name="Morning" detail={UTCI_CLOCK_WINDOWS.morning.label} />} title={`Morning · ${UTCI_CLOCK_WINDOWS.morning.label}`} value={stats.comfortDayParts.morning} />
             <Row label={<DetailLabel name="Midday" detail={UTCI_CLOCK_WINDOWS.midday.label} />} title={`Midday · ${UTCI_CLOCK_WINDOWS.midday.label}`} value={stats.comfortDayParts.midday} />
             <Row label={<DetailLabel name="Afternoon" detail={UTCI_CLOCK_WINDOWS.afternoon.label} />} title={`Afternoon · ${UTCI_CLOCK_WINDOWS.afternoon.label}`} value={stats.comfortDayParts.afternoon} />
@@ -360,5 +453,4 @@ export function Grid4x2StatsColumn({
       </aside>
     </div>
   );
-}
-
+});

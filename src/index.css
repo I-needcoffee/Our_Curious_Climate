@@ -84,7 +84,7 @@
     inset: var(--discover-pulse-inset);
     border-radius: inherit;
     pointer-events: none;
-    animation: discover-pulse-ring 2.8s ease-in-out 5 forwards;
+    animation: discover-pulse-ring 2.8s ease-in-out 2 forwards;
   }
 
   /** @deprecated — use DiscoverPulseShell / .discover-pulse-wrap */
@@ -102,7 +102,14 @@
     inset: var(--discover-pulse-inset);
     border-radius: inherit;
     pointer-events: none;
-    animation: discover-pulse-ring 2.8s ease-in-out infinite;
+    animation: discover-pulse-ring 2.8s ease-in-out 2 forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .discover-pulse-wrap::after,
+    .discover-pulse-glow::after {
+      animation: none;
+    }
   }
 
   .hide-scrollbar {
@@ -114,56 +121,56 @@
   }
 
   /*
-   * Soft outer glows define surfaces instead of outline strokes. `shadow-hard-*` are legacy
-   * aliases kept so existing call sites pick up the borderless look.
+   * Soft dark-grey outer glows define white-on-white surfaces instead of outline strokes.
+   * `shadow-hard-*` are legacy aliases kept so existing call sites pick up the borderless look.
    */
   .glow-sm,
   .shadow-hard-sm {
     box-shadow:
-      0 1px 2px rgba(15, 23, 42, 0.05),
-      0 0 10px rgba(15, 23, 42, 0.07);
+      0 1px 3px rgba(15, 23, 42, 0.11),
+      0 0 10px rgba(15, 23, 42, 0.14);
   }
   .glow-md,
   .shadow-hard-md {
     box-shadow:
-      0 1px 3px rgba(15, 23, 42, 0.05),
-      0 0 18px rgba(15, 23, 42, 0.08);
+      0 2px 6px rgba(15, 23, 42, 0.13),
+      0 0 18px rgba(15, 23, 42, 0.17);
   }
   .glow-lg,
   .shadow-hard-lg {
     box-shadow:
-      0 2px 6px rgba(15, 23, 42, 0.04),
-      0 0 26px rgba(15, 23, 42, 0.085);
+      0 3px 10px rgba(15, 23, 42, 0.11),
+      0 0 24px rgba(15, 23, 42, 0.16);
   }
   .glow-xl,
   .shadow-hard-xl {
     box-shadow:
-      0 10px 30px rgba(15, 23, 42, 0.12),
-      0 0 48px rgba(15, 23, 42, 0.12);
+      0 12px 32px rgba(15, 23, 42, 0.18),
+      0 0 48px rgba(15, 23, 42, 0.18);
   }
 
   .dark .glow-sm,
   .dark .shadow-hard-sm {
     box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.35),
-      0 0 10px rgba(0, 0, 0, 0.35);
+      0 1px 3px rgba(0, 0, 0, 0.42),
+      0 0 11px rgba(0, 0, 0, 0.42);
   }
   .dark .glow-md,
   .dark .shadow-hard-md {
     box-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.38),
-      0 0 18px rgba(0, 0, 0, 0.4);
+      0 2px 6px rgba(0, 0, 0, 0.45),
+      0 0 18px rgba(0, 0, 0, 0.48);
   }
   .dark .glow-lg,
   .dark .shadow-hard-lg {
     box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.4),
-      0 0 26px rgba(0, 0, 0, 0.45);
+      0 3px 10px rgba(0, 0, 0, 0.45),
+      0 0 26px rgba(0, 0, 0, 0.5);
   }
   .dark .glow-xl,
   .dark .shadow-hard-xl {
     box-shadow:
-      0 10px 30px rgba(0, 0, 0, 0.5),
-      0 0 48px rgba(0, 0, 0, 0.5);
+      0 10px 30px rgba(0, 0, 0, 0.55),
+      0 0 48px rgba(0, 0, 0, 0.55);
   }
 }

@@ -88,13 +88,15 @@ type ChipAccent = 'neutral' | 'blue';
 function chartToolbarChipTone(theme: Theme, active: boolean, accent: ChipAccent): string {
   if (active) {
     if (accent === 'blue') {
-      return theme === 'dark' ? 'bg-blue-900/50 text-blue-200' : 'bg-blue-100 text-blue-700';
+      return theme === 'dark' ? 'bg-blue-900/50 text-blue-200' : 'bg-blue-50 text-blue-700 glow-sm';
     }
-    return theme === 'dark' ? 'bg-gray-600 text-white' : 'bg-gray-200 text-gray-900';
+    return theme === 'dark'
+      ? 'bg-gray-600 text-white glow-sm'
+      : 'bg-white text-gray-950 glow-sm';
   }
   return theme === 'dark'
-    ? 'bg-gray-700/70 text-gray-300 hover:bg-gray-700 hover:text-white'
-    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900';
+    ? 'bg-gray-800/80 text-gray-300 glow-sm hover:bg-gray-700 hover:text-white'
+    : 'bg-white text-gray-500 glow-sm hover:text-gray-950';
 }
 
 /** Text pill in the hover toolbar strip (e.g. "Stats"). */
@@ -124,11 +126,36 @@ export function chartToolbarRemoveButtonClass(theme: Theme): string {
   }`;
 }
 
-/** Collapsible strip under the title row holding period pills + Stats / settings. */
-export function chartToolbarRevealClassFor(expanded: boolean): string {
-  return expanded
-    ? 'pointer-events-auto max-h-[48px] overflow-visible opacity-100 pt-1 transition-[max-height,opacity] duration-200 ease-out'
-    : 'pointer-events-none max-h-0 overflow-hidden opacity-0 transition-[max-height,opacity] duration-200 ease-out group-hover:pointer-events-auto group-hover:max-h-[48px] group-hover:opacity-100 focus-within:pointer-events-auto focus-within:max-h-[48px] focus-within:opacity-100';
+/**
+ * Toolbar strip holding period pills + Stats / settings.
+ * - When `expanded` (touch/mobile or tutorial), sits inline in normal flow.
+ * - On desktop hover, floats cleanly as a glassmorphic overlay pill right beneath the title row
+ *   so hovering NEVER shifts the chart downward or triggers ResizeObserver SVG rebuilds.
+ * - Uses `:focus-visible` (not `:focus-within`) so clicking H/D/W/M keeps the bar open while
+ *   still hovering, and hides it the moment the pointer leaves the card (without clicking elsewhere).
+ */
+export function chartToolbarRevealClassFor(expanded: boolean, theme: Theme = 'light'): string {
+  if (expanded) {
+    return 'pointer-events-auto overflow-visible opacity-100 pt-1';
+  }
+  const surface =
+    theme === 'dark'
+      ? 'bg-gray-800/95 text-gray-100 glow-lg'
+      : 'bg-white/95 text-gray-900 glow-lg';
+  return `chart-hover-toolbar pointer-events-none absolute left-2 right-2 top-[28px] z-30 rounded-full px-1.5 py-1 backdrop-blur-md opacity-0 transition-opacity duration-150 ease-out group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 @lg:top-[30px] @2xl:top-[34px] ${surface}`;
+}
+
+/**
+ * Blurs the clicked button inside a floating hover toolbar so mouse clicks don't pin the bar open
+ * after the user moves their pointer off the card.
+ */
+export function dismissFloatingHoverToolbar(target: EventTarget | null): void {
+  const el = target instanceof Element ? target : null;
+  if (!el) return;
+  const btn = el.closest('button');
+  if (btn instanceof HTMLElement) {
+    btn.blur();
+  }
 }
 
 /** "Baseline · City" / "Comparison · City" pill above each compare pane. */

@@ -6,16 +6,7 @@ import { CHART_TOOLBAR_TITLE_TEXT_CLASS, chartToolbarTitleClass } from '../lib/c
 const CHEVRON_GLYPH_PX = 12;
 const CHEVRON_GAP_AFTER_TEXT_PX = 4;
 
-export function VariableChartSelect({
-  value,
-  onChange,
-  selectedLabel,
-  theme,
-  children,
-  domId,
-  fillRow = true,
-  toolbarTitle = false,
-}: {
+interface VariableChartSelectProps {
   value: string;
   onChange: (next: string) => void;
   selectedLabel: string;
@@ -25,18 +16,21 @@ export function VariableChartSelect({
   fillRow?: boolean;
   /** Same layout as UTCI / Wind rose title (flex-1, h-6, truncate). */
   toolbarTitle?: boolean;
-}) {
-  const uid = useId().replace(/:/g, '');
-  const selectId = domId ? `${domId}-select` : `var-chart-select-${uid}`;
-  const dark = theme === 'dark';
+}
 
-  if (toolbarTitle) {
+export function VariableChartSelect(props: VariableChartSelectProps) {
+  const uid = useId().replace(/:/g, '');
+  const selectId = props.domId ? `${props.domId}-select` : `var-chart-select-${uid}`;
+
+  if (props.toolbarTitle) {
     return (
       <div
-        id={domId}
-        className={`${chartToolbarTitleClass(theme)} relative gap-0.5`}
+        id={props.domId}
+        className={`${chartToolbarTitleClass(props.theme)} relative gap-0.5 rounded-full px-1.5 -mx-1.5 transition-colors ${
+          props.theme === 'dark' ? 'hover:bg-white/10' : 'hover:bg-gray-100'
+        }`}
       >
-        <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
+        <span className="min-w-0 flex-1 truncate">{props.selectedLabel}</span>
         <ChevronDown
           className="h-3 w-3 shrink-0 opacity-60 @lg:h-3.5 @lg:w-3.5"
           strokeWidth={2.25}
@@ -44,17 +38,32 @@ export function VariableChartSelect({
         />
         <select
           id={selectId}
-          value={value}
-          title={selectedLabel}
-          aria-label={selectedLabel}
-          onChange={e => onChange(e.target.value)}
-          className="absolute inset-0 z-[1] cursor-pointer appearance-none bg-transparent opacity-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-0 dark:focus-visible:ring-gray-500"
+          value={props.value}
+          title={props.selectedLabel}
+          aria-label={props.selectedLabel}
+          onChange={e => props.onChange(e.target.value)}
+          className="absolute inset-0 z-[1] cursor-pointer rounded-full appearance-none bg-transparent opacity-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-0 dark:focus-visible:ring-gray-500"
         >
-          {children}
+          {props.children}
         </select>
       </div>
     );
   }
+
+  return <MeasuredVariableChartSelect {...props} selectId={selectId} />;
+}
+
+function MeasuredVariableChartSelect({
+  value,
+  onChange,
+  selectedLabel,
+  theme,
+  children,
+  domId,
+  fillRow = true,
+  selectId,
+}: VariableChartSelectProps & { selectId: string }) {
+  const dark = theme === 'dark';
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);

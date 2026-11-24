@@ -1,11 +1,11 @@
-import { useEffect, useId, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useId, useRef, useState, useMemo } from 'react';
 import { useIsMobileMaxSm } from '../hooks/useIsMobileMaxSm';
 import * as d3 from 'd3';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import { EPWDataRow } from '../lib/epwParser';
 import { X, Settings2 } from 'lucide-react';
-import { GradientDef, LEGEND_FOOTNOTE_CLASS } from './InteractiveLegend';
+import { GradientDef, InteractiveLegend, LEGEND_FOOTNOTE_CLASS } from './InteractiveLegend';
 import { AggregationToolbar } from './AggregationToolbar';
 import type { ChartType } from '../App';
 import { UnitSystem } from '../App';
@@ -68,6 +68,7 @@ import {
   fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
 import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { attachChartTooltip } from '../lib/chartTooltip';
 import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 import {
   DEFAULT_NV_CRITERIA,
@@ -118,7 +119,7 @@ interface NvDataRow extends EPWDataRow {
   tempC: number;
 }
 
-export function NaturalVentilationExplorer({
+export const NaturalVentilationExplorer = React.memo(function NaturalVentilationExplorer({
   data,
   filter,
   unitSystem,
@@ -136,7 +137,6 @@ export function NaturalVentilationExplorer({
   const barGradientSvgId = explorerChartValueGradientId(useId());
   const svgRef = useRef<SVGSVGElement>(null);
   const outerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 400 });
   const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
 
   const [aggregation, setAggregation] = useState<'hour' | 'day' | 'week' | 'month'>('month');
@@ -161,29 +161,10 @@ export function NaturalVentilationExplorer({
 
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip, theme);
   const removeBtnRevealClass = isMobile
-    ? 'pointer-events-auto absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-100'
-    : 'pointer-events-none absolute right-0 top-1/2 flex shrink-0 -translate-y-1/2 opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
-
-  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (!outerRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-      resizeTimeoutRef.current = setTimeout(() => {
-        for (const entry of entries) {
-          const newWidth = Math.round(entry.contentRect.width);
-          setDimensions(prev => (prev.width === newWidth ? prev : { width: newWidth }));
-        }
-      }, 100);
-    });
-    observer.observe(outerRef.current);
-    return () => {
-      observer.disconnect();
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-    };
-  }, []);
+    ? 'pointer-events-auto opacity-100'
+    : 'pointer-events-none opacity-0 transition-opacity duration-200 ease-out group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
 
   const nvData: NvDataRow[] = useMemo(() => {
     return data.map(d => {
@@ -263,7 +244,7 @@ export function NaturalVentilationExplorer({
   };
 
   useEffect(() => {
-    if (!svgRef.current || dimensions.width === 0) return;
+    if (!svgRef.current) return;
 
     const currentData = nvData;
     if (!currentData.length) return;
@@ -454,16 +435,33 @@ export function NaturalVentilationExplorer({
         return `translate(${xp.x}, ${hourRowTop(d.y)})`;
       });
 
-    cells
+    const cellRects = cells
       .append('rect')
       .attr('width', d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width)
       .attr('height', d => rowInnerHeight(d.y))
       .attr('rx', 2)
       .attr('ry', 2)
       .style('fill', nvCellFill)
-      .style('opacity', d => heatmapCellOpacity(d.month, d.y))
-      .append('title')
-      .text(d => d.tooltip);
+      .style('opacity', d => heatmapCellOpacity(d.month, d.y));
+
+    attachChartTooltip(
+      cellRects,
+      (d: any) => {
+        const lines = String(d.tooltip ?? '').split('\n').filter(Boolean);
+        return {
+          title: lines[0] ?? 'Natural Ventilation',
+          swatch: nvCellFill(d),
+          rows: lines.slice(1).map(line => {
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+              return { label: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+            }
+            return { label: 'Info', value: line };
+          }),
+        };
+      },
+      { hoverStroke: axisInk, hoverStrokeWidth: 1.5 }
+    );
 
     if ((aggregation === 'month' || aggregation === 'week') && type.showCellValues) {
       const cellLabels = cells
@@ -472,7 +470,7 @@ export function NaturalVentilationExplorer({
         .attr('y', d => rowInnerHeight(d.y) / 2)
         .attr('dy', '0.35em')
         .attr('text-anchor', 'middle')
-        .style('fill', heatmapCellInk(heatmapTextColor))
+        .style('fill', d => heatmapCellInk(heatmapTextColor, nvCellFill(d)))
         .style('font-size', `${type.cellValuePx}px`)
         .style('font-weight', HEATMAP_CELL_FONT_WEIGHT)
         .style('pointer-events', 'none')
@@ -508,8 +506,8 @@ export function NaturalVentilationExplorer({
             .attr('width', span.width)
             .attr('height', hourRowTop(hourSeg.endHourExclusive) - hourRowTop(hourSeg.startHour))
             .attr('fill', 'none')
-            .attr('stroke', '#1f2937')
-            .attr('stroke-width', 3)
+            .attr('stroke', axisInk)
+            .attr('stroke-width', 2.5)
             .attr('rx', 2)
             .attr('ry', 2)
             .style('pointer-events', 'none');
@@ -741,11 +739,39 @@ export function NaturalVentilationExplorer({
       }
     });
 
-    fgGroups.append('title').text(d => {
-      if (colorMode === 'suitableHours') {
-        return `Selected hours suitable: ${((d.suitableRatioSelected ?? 0) * 100).toFixed(1)}%`;
+    const barPeriodLabel = (d: any) => {
+      if (aggregation === 'month') {
+        const m = Math.max(0, Math.min(11, (d.month ?? 1) - 1));
+        return MONTH_NAMES[m] ?? 'Period';
       }
-      return `Selected hours avg temp: ${(d.valueSelected ?? 0).toFixed(1)}${tempUnit}`;
+      if (aggregation === 'week') return `Week ${Math.max(1, Math.round(d.x0 / 7) + 1)}`;
+      return `Day ${Math.round(d.x0)}`;
+    };
+
+    attachChartTooltip(fgGroups, (d: any) => {
+      if (colorMode === 'suitableHours') {
+        return {
+          title: `${barPeriodLabel(d)} · Natural Ventilation`,
+          swatch: NATURAL_VENTILATION_SUITABLE_BLUE_HEX,
+          rows: [
+            { label: 'Suitable hours', value: `${((d.suitableRatioSelected ?? 0) * 100).toFixed(1)}%` },
+          ],
+        };
+      }
+      const rows = [
+        { label: 'Selected temp', value: `${(d.valueSelected ?? 0).toFixed(1)} ${tempUnit}` },
+      ];
+      if (typeof d.minSelected === 'number' && Number.isFinite(d.minSelected)) {
+        rows.push({ label: 'Bar low', value: `${d.minSelected.toFixed(1)} ${tempUnit}` });
+      }
+      if (typeof d.maxSelected === 'number' && Number.isFinite(d.maxSelected)) {
+        rows.push({ label: 'Bar high', value: `${d.maxSelected.toFixed(1)} ${tempUnit}` });
+      }
+      return {
+        title: `${barPeriodLabel(d)} · Dry Bulb`,
+        swatch: getFillColor(d.valueSelected ?? 0, d.suitableRatioSelected ?? 0),
+        rows,
+      };
     });
 
     const yAxisBar = d3
@@ -795,7 +821,6 @@ export function NaturalVentilationExplorer({
     aggregation,
     colorMode,
     filter,
-    dimensions.width,
     renderScale,
     svgHeight,
     unitSystem,
@@ -884,7 +909,7 @@ export function NaturalVentilationExplorer({
                 )}
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -1156,19 +1181,43 @@ export function NaturalVentilationExplorer({
         </div>
       </CardModal>
 
-      {colorMode === 'suitableHours' && (
-        <div className={`${EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS} min-w-0`}>
-          <UtciComfortTimeLegendStrip
+      <div className={`${EXPLORER_LEGEND_ABOVE_CHART_WRAP_CLASS} min-w-0`}>
+        {colorMode === 'suitableHours' ? (
+          <>
+            <UtciComfortTimeLegendStrip
+              theme={theme}
+              highColor={NATURAL_VENTILATION_SUITABLE_BLUE_HEX}
+            />
+            {legendFootnote ? (
+              <p className={LEGEND_FOOTNOTE_CLASS}>
+                {legendFootnote}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <InteractiveLegend
+            variable={{
+              id: 'dryBulbTemperature',
+              name: 'Dry Bulb Temperature',
+              unit: tempUnit,
+              min: cToDisplay(tempGradientMinC),
+              max: cToDisplay(tempGradientMaxC),
+              category: 'Temperature',
+            }}
+            gradientId="nv-temp"
+            setGradientId={() => {}}
+            gradients={[
+              {
+                id: 'nv-temp',
+                name: 'Temperature',
+                colors: [...TEMPERATURE_COMFORT_GRADIENT_COLORS],
+              },
+            ]}
             theme={theme}
-            highColor={NATURAL_VENTILATION_SUITABLE_BLUE_HEX}
+            footnote={legendFootnote}
           />
-          {legendFootnote ? (
-            <p className={LEGEND_FOOTNOTE_CLASS}>
-              {legendFootnote}
-            </p>
-          ) : null}
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden px-1 py-0.5">
         <div className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
@@ -1181,4 +1230,4 @@ export function NaturalVentilationExplorer({
       </div>
     </div>
   );
-}
+});

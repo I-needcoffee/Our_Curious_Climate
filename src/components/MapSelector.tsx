@@ -1,7 +1,7 @@
 import { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback, startTransition, type CSSProperties } from 'react';
 import { MapContainer, Marker, Popup, useMap, useMapEvents, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, Upload, ExternalLink, CloudLightning, Loader2 } from 'lucide-react';
+import { Search, Upload, ExternalLink, CloudLightning, Loader2, X } from 'lucide-react';
 import L from 'leaflet';
 import { parseEPW, ParsedEPW, attachParsedEpwSource } from '../lib/epwParser';
 import { CARTO_LIGHT_ALL_WATER_HEX } from '../lib/constants';
@@ -946,9 +946,9 @@ function FutureUsCountyPopupContent({
   );
 }
 
-/** Circle that slides open on desktop hover. Width is capped and eased; it does not snap to auto. */
+/** Circle that slides open on desktop hover. Uses soft outer glow instead of a border line. */
 const mapIconPillBase =
-  'group inline-flex h-9 min-w-9 max-w-9 shrink-0 items-center overflow-hidden rounded-full border text-xs font-semibold shadow-hard-md transition-[max-width,background-color,color,border-color] duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 motion-reduce:transition-none sm:h-10 sm:min-w-10 sm:max-w-10 sm:text-sm';
+  'group inline-flex h-9 min-w-9 max-w-9 shrink-0 items-center overflow-hidden rounded-full border-0 text-xs font-semibold glow-md transition-[max-width,background-color,color,box-shadow] duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 motion-reduce:transition-none sm:h-10 sm:min-w-10 sm:max-w-10 sm:text-sm';
 
 const mapIconPillOpen =
   '[@media(hover:hover)]:hover:max-w-[var(--pill-open)] [@media(hover:hover)]:focus-visible:max-w-[var(--pill-open)] sm:[@media(hover:hover)]:hover:max-w-[var(--pill-open)] sm:[@media(hover:hover)]:focus-visible:max-w-[var(--pill-open)]';
@@ -1054,8 +1054,8 @@ export function MapSelector({
   }, []);
 
   useEffect(() => {
-    // Try to get user's actual location
-    if ("geolocation" in navigator) {
+    // Only request geolocation on cold landing (never yank the map away when adding a comparison site)
+    if (!initialCenter && "geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const lat = Number(position.coords.latitude);
@@ -1637,7 +1637,7 @@ export function MapSelector({
           <div className="flex flex-col items-center gap-4">
             <div className="w-10 h-10 border-4 border-orange-600 border-t-transparent rounded-full animate-spin" />
             <p className="text-gray-700 font-medium">
-              Processing ZIP Archive... {loadingProgress > 0 ? `${loadingProgress}%` : ''}
+              {loadingProgress > 0 ? `Loading weather file… ${loadingProgress}%` : 'Loading weather file…'}
             </p>
           </div>
         </div>
@@ -1724,7 +1724,7 @@ export function MapSelector({
 
       <div className="pointer-events-none absolute top-4 left-1/2 z-[1000] flex w-full max-w-3xl -translate-x-1/2 flex-col items-center gap-2 px-4">
         <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-row">
-        <div className="pointer-events-auto flex h-9 min-w-0 items-center rounded-full border border-gray-200 bg-white px-1 shadow-hard-md sm:h-10 sm:flex-1">
+        <div className="pointer-events-auto flex h-9 min-w-0 items-center rounded-full bg-white px-1 glow-md sm:h-10 sm:flex-1">
           <div className="relative flex h-full min-w-0 flex-1 flex-row items-center">
             {locating ? (
               <Loader2
@@ -1739,7 +1739,7 @@ export function MapSelector({
             )}
             <input
               type="text"
-              placeholder="City, airport, or landmark"
+              placeholder="Search city, airport, or landmark (Enter)"
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => {
@@ -1750,8 +1750,26 @@ export function MapSelector({
               }}
               aria-describedby="map-search-hint"
               disabled={locating || loadingDb}
-              className="h-full min-w-0 flex-1 border-none bg-transparent py-0 pl-9 pr-3 text-sm text-gray-700 outline-none transition-all focus:ring-0 disabled:opacity-60"
+              className="h-full min-w-0 flex-1 border-none bg-transparent py-0 pl-9 pr-2 text-sm text-gray-700 outline-none transition-all focus:ring-0 disabled:opacity-60"
             />
+            {search.trim().length > 0 && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch('')}
+                className="mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleLocationSearch()}
+              disabled={locating || loadingDb || !search.trim()}
+              className="mr-0.5 inline-flex h-7 shrink-0 items-center rounded-full bg-gray-900 px-3 text-xs font-semibold text-white transition-opacity hover:bg-gray-800 disabled:opacity-35"
+            >
+              Go
+            </button>
           </div>
           <p id="map-search-hint" className="sr-only">
             Enter a city, airport, landmark, or address, then press Enter. The map zooms to that location and frames the two closest weather stations.
@@ -1943,7 +1961,7 @@ export function MapSelector({
             zoom={mapZoom}
             className="h-full w-full"
             minZoom={2}
-            zoomControl={false}
+            zoomControl={true}
             style={{ background: basemapStyle === 'satellite' ? '#1c1917' : CARTO_LIGHT_ALL_WATER_HEX }}
           >
             <LocationFlyer center={mapCenter} zoom={mapZoom} />
@@ -2137,6 +2155,40 @@ export function MapSelector({
           </div>
         )}
       </div>
+
+      {!showFuture && (
+        <div
+          tabIndex={0}
+          aria-label="Map marker legend: TMY3 teardrop pin, TMYx sky-blue circle"
+          className="group/legend pointer-events-auto absolute bottom-3 left-3 z-[1000] hidden h-9 items-center overflow-hidden rounded-full bg-white/95 px-2.5 text-xs font-semibold text-gray-700 backdrop-blur-sm glow-md transition-all duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 sm:inline-flex"
+        >
+          <span className="inline-flex shrink-0 items-center">
+            <img
+              src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png"
+              alt=""
+              aria-hidden
+              className="h-4 w-2.5 shrink-0 object-contain"
+            />
+            <span className="inline-block max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-hover/legend:ml-1.5 group-hover/legend:max-w-[3.5rem] group-hover/legend:opacity-100 group-focus-visible/legend:ml-1.5 group-focus-visible/legend:max-w-[3.5rem] group-focus-visible/legend:opacity-100">
+              TMY3
+            </span>
+          </span>
+          <span
+            className="mx-1.5 h-3.5 w-px shrink-0 bg-gray-200/80 transition-[margin] duration-[350ms] group-hover/legend:mx-2.5 group-focus-visible/legend:mx-2.5"
+            aria-hidden
+          />
+          <span className="inline-flex shrink-0 items-center">
+            <span
+              className="inline-block h-3 w-3 shrink-0 rounded-full"
+              style={{ backgroundColor: '#bae6fd', border: '1.5px solid #0369a1' }}
+              aria-hidden
+            />
+            <span className="inline-block max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-hover/legend:ml-1.5 group-hover/legend:max-w-[3.5rem] group-hover/legend:opacity-100 group-focus-visible/legend:ml-1.5 group-focus-visible/legend:max-w-[3.5rem] group-focus-visible/legend:opacity-100">
+              TMYx
+            </span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

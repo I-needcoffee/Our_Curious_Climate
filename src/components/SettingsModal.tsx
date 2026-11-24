@@ -1,8 +1,13 @@
-import type { ReactNode } from 'react';
-import { X, Calendar, Clock, Palette, Sun, Moon, Settings, Filter, Thermometer, BarChart2, Type } from 'lucide-react';
+import { useEffect, type ReactNode } from 'react';
+import { X, Calendar, Clock, Palette, Sun, Moon, Settings, Filter, Thermometer, BarChart2, Type, RotateCcw } from 'lucide-react';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
-import type { BarChartFillMode, GlobalFilterState } from '../lib/globalFilter';
+import {
+  DEFAULT_GLOBAL_FILTER,
+  hasActiveGlobalFilter,
+  type BarChartFillMode,
+  type GlobalFilterState,
+} from '../lib/globalFilter';
 import type { UnitSystem } from '../App';
 import { CHART_TEXT_AUTO, chartAxisInk } from '../lib/chartInk';
 import { TemperatureIsolationRange } from './TemperatureIsolationRange';
@@ -89,9 +94,28 @@ export function SettingsModal({
   const rowLabel = 'flex items-center gap-2 text-sm font-semibold';
   const iconInk = dark ? 'text-gray-300' : 'text-gray-700';
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
+  const filterActive = hasActiveGlobalFilter(filter);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+    <div
+      className="fixed inset-0 z-[9995] flex items-center justify-center bg-black/50 p-3 backdrop-blur-[1px]"
+      onMouseDown={e => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Global settings"
         className={`max-h-[min(90vh,680px)] w-full max-w-lg overflow-y-auto rounded-3xl glow-xl ${
           dark ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
         }`}
@@ -101,16 +125,38 @@ export function SettingsModal({
             <Settings className={`h-5 w-5 ${iconInk}`} />
             <span>Settings</span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close settings"
-            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
-              dark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
-            }`}
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {filterActive && (
+              <button
+                type="button"
+                onClick={() =>
+                  onChangeFilter({
+                    ...DEFAULT_GLOBAL_FILTER,
+                    temperatureLoC: dryBulbExtentMinC,
+                    temperatureHiC: dryBulbExtentMaxC,
+                  })
+                }
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  dark
+                    ? 'bg-orange-500/20 text-orange-300 hover:bg-orange-500/30'
+                    : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                }`}
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                <span>Reset filters</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close settings"
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 transition-colors ${
+                dark ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
+              }`}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4 px-4 pb-5 pt-1">
@@ -283,8 +329,8 @@ export function SettingsModal({
               </div>
               {textAuto ? (
                 <p className={hint}>
-                  Axis labels follow the theme, and values printed on heatmap cells switch between black and white
-                  for the strongest contrast against each cell.
+                  Axis labels follow the light/dark theme, and heatmap cell values use one uniform dark ink for a calm,
+                  consistent grid.
                 </p>
               ) : (
                 <div className="flex items-center gap-3 px-2 pt-1">

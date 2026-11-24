@@ -45,6 +45,7 @@ export function UtciCellScenarioModal({
   activeIncludeSun,
   activeIncludeWind,
   optimizeMode = false,
+  onSelectScenario,
   anchorRef,
 }: {
   open: boolean;
@@ -57,6 +58,8 @@ export function UtciCellScenarioModal({
   activeIncludeWind: boolean;
   /** When true, highlight the Optimize winner instead of fixed sun/wind toggles. */
   optimizeMode?: boolean;
+  /** Optional click handler to apply a chosen Sun/Wind scenario directly to the chart. */
+  onSelectScenario?: (includeSun: boolean, includeWind: boolean) => void;
   anchorRef: RefObject<HTMLElement | null>;
 }) {
   if (!payload) return null;
@@ -95,16 +98,20 @@ export function UtciCellScenarioModal({
               : '—';
 
             return (
-              <div
+              <button
                 key={s.scenario.id}
-                className={`flex flex-col overflow-hidden rounded-2xl ${
+                type="button"
+                onClick={() => onSelectScenario?.(s.scenario.includeSun, s.scenario.includeWind)}
+                className={`flex flex-col overflow-hidden rounded-2xl text-left transition-transform ${
+                  onSelectScenario ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0' : ''
+                } ${
                   isActive
                     ? theme === 'dark'
                       ? 'bg-gray-900/60 shadow-[0_0_0_1px_rgba(59,130,246,0.35),0_0_24px_rgba(59,130,246,0.45)]'
                       : 'bg-white shadow-[0_0_0_1px_rgba(59,130,246,0.2),0_0_24px_rgba(59,130,246,0.35)]'
                     : theme === 'dark'
-                      ? 'bg-gray-900/40'
-                      : 'bg-gray-50'
+                      ? 'bg-gray-900/40 hover:bg-gray-900/70'
+                      : 'bg-gray-50 hover:bg-white hover:glow-sm'
                 }`}
               >
                 <div
@@ -180,18 +187,19 @@ export function UtciCellScenarioModal({
                     {isActive
                       ? optimizeMode
                         ? ' · Optimize pick'
-                        : ' · chart view'
+                        : ' · active'
                       : ''}
                   </p>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
 
         <p className={`m-0 text-xs leading-snug ${muted}`}>
-          Values use the same Low / Ave / High setting as the chart. Use sun/wind badges, Opt, or the
-          details comfort table to change what the 12×24 shows.
+          {onSelectScenario
+            ? 'Click any scenario card to apply that sun & wind exposure to the chart. Values match the active Low / Ave / High statistic.'
+            : 'Values use the same Low / Ave / High setting as the chart.'}
         </p>
       </div>
     </CardModal>

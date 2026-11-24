@@ -11,11 +11,13 @@ import {
   computeNvFilteredStatsBundle,
   DEFAULT_NV_CRITERIA,
   formatNvCriteriaSummary,
+  rowSuitableForNaturalVentilation,
 } from './naturalVentilationModel';
 import {
   computeOptimizedUtciCategoryShares,
   computeUtciCategoryShares,
   computeUtciComfortMatrix,
+  computeUtciWindEffectForRow,
   formatUtciCategoryLabel,
   getUtciComfortPeriodById,
   rowMatchesUtciComfortPeriod,
@@ -45,6 +47,56 @@ export type TutorialNvQuickStats = {
   presetStats: { id: string; shortLabel: string; suitableHours: number; suitablePct: number }[];
   activeBreakdown: ReturnType<typeof computeNvFilteredStatsBundle>['activeBreakdown'];
   activeCriteriaSummary: string;
+};
+
+export type WindDirectionSummary = {
+  label: string;
+  deg: number;
+  hours: number;
+  pct: number;
+  avgSpeedFormatted: string;
+};
+
+export type WindRoseMiniBin = {
+  label: string;
+  deg: number;
+  hours: number;
+  pct: number;
+};
+
+export type WindImpactBucket = {
+  hours: number;
+  pctOfWindy: number;
+  maxBinHours: number;
+  topDirections: { label: string; deg: number; pct: number; hours: number }[];
+  roseBins: WindRoseMiniBin[];
+  breakdown: { label: string; hours: number }[];
+  criteriaText: string;
+};
+
+export type TutorialWindInsights = {
+  totalHours: number;
+  windyHours: number;
+  calmHours: number;
+  calmPct: number;
+  avgSpeed: string;
+  peakSpeed: string;
+  calmThresholdLabel: string;
+  predominant: WindDirectionSummary[];
+  utci: {
+    helpful: WindImpactBucket;
+    harmful: WindImpactBucket;
+  };
+  nv: {
+    helpful: WindImpactBucket;
+    harmful: WindImpactBucket;
+  };
+  overlaySummary: {
+    variableName: string;
+    high: string;
+    avg: string;
+    low: string;
+  } | null;
 };
 
 function formatPercent(v: number, digits = 1): string {
@@ -402,6 +454,308 @@ export function computeTutorialUtciQuickStats(opts: {
     hoursCounted,
     comfortMatrix,
     isolationLabel: focusPeriod?.label ?? null,
+  };
+}
+
+const COMPASS_8 = [
+  { label: 'N', deg: 0 },
+  { label: 'NE', deg: 45 },
+  { label: 'E', deg: 90 },
+  { label: 'SE', deg: 135 },
+  { label: 'S', deg: 180 },
+  { label: 'SW', deg: 225 },
+  { label: 'W', deg: 270 },
+  { label: 'NW', deg: 315 },
+] as const;
+
+const COMPASS_16 = [
+  'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+  'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW',
+] as const;
+
+const CALM_WIND_THRESHOLD_MS = 0.5;
+const UTCI_WIND_IMPACT_DELTA_C = 0.5;
+
+function utciStressDistance(utciC: number): number {
+  if (utciC < 9) return 9 - utciC;
+  if (utciC > 26) return utciC - 26;
+  return 0;
+}
+
+/**
+ * Computes predominant wind directions plus physics-backed helpful (cooling comfort relief &
+ * natural ventilation) and harmful (cold wind chill & hot convective stress) wind insights.
+ */
+export function computeTutorialWindInsights(opts: {
+  rows: EPWDataRow[] | undefined;
+  filter: GlobalFilterState;
+  unitSystem: UnitSystem;
+  live: TutorialLiveSnapshot;
+  siteLatitude?: number | null;
+  siteLng?: number | null;
+  siteTimeZone?: number | null;
+}): TutorialWindInsights | null {
+  const { rows, filter, unitSystem, live, siteLatitude = null, siteLng = null, siteTimeZone = null } = opts;
+  if (!rows?.length) return null;
+
+  const filtered = filterRows(rows, filter);
+  if (!filtered.length) return null;
+
+  const site =
+    siteLatitude != null &&
+    siteLng != null &&
+    siteTimeZone != null &&
+    Number.isFinite(siteLatitude) &&
+    Number.isFinite(siteLng) &&
+    Number.isFinite(siteTimeZone)
+      ? { lat: siteLatitude, lng: siteLng, timeZone: siteTimeZone }
+      : null;
+  const env: UtciEnvironment = { radiantMode: 'station', site };
+
+  const sectors = COMPASS_8.map(s => ({
+    label: s.label,
+    deg: s.deg,
+    hours: 0,
+    speedSum: 0,
+    utciHelpful: 0,
+    utciHarmful: 0,
+    nvHelpful: 0,
+    nvHarmful: 0,
+  }));
+
+  const rose16 = COMPASS_16.map((label, idx) => ({
+    label,
+    deg: idx * 22.5,
+    utciHelpful: 0,
+    utciHarmful: 0,
+    nvHelpful: 0,
+    nvHarmful: 0,
+  }));
+
+  let totalHours = 0;
+  let calmHours = 0;
+  let windyHours = 0;
+  let speedSum = 0;
+  let peakSpeedVal = 0;
+
+  let utciHelpfulHours = 0;
+  let utciHelpfulIntoComfort = 0;
+  let utciHarmfulHours = 0;
+  let utciColdStressHours = 0;
+  let utciHeatStressHours = 0;
+
+  let nvHelpfulHours = 0;
+  let nvHarmfulHours = 0;
+  let nvTempFailHours = 0;
+  let nvHumidityFailHours = 0;
+
+  const missingSpeed = COLUMN.windSpeed?.missing ?? 999;
+  const missingDir = COLUMN.windDirection?.missing ?? 999;
+
+  for (const row of filtered) {
+    const spd = row.windSpeed as number;
+    if (typeof spd !== 'number' || Number.isNaN(spd) || spd === missingSpeed || spd < 0) continue;
+
+    totalHours += 1;
+    speedSum += spd;
+    if (spd > peakSpeedVal) peakSpeedVal = spd;
+
+    if (spd < CALM_WIND_THRESHOLD_MS) {
+      calmHours += 1;
+      continue;
+    }
+
+    const dir = row.windDirection as number;
+    const validDir = typeof dir === 'number' && !Number.isNaN(dir) && dir !== missingDir && dir >= 0 && dir <= 360;
+    const normDir = validDir ? ((dir % 360) + 360) % 360 : -1;
+    const sectorIdx = validDir ? Math.floor((normDir + 22.5) / 45) % 8 : -1;
+    const roseIdx = validDir ? Math.floor((normDir + 11.25) / 22.5) % 16 : -1;
+
+    windyHours += 1;
+    if (sectorIdx >= 0) {
+      sectors[sectorIdx].hours += 1;
+      sectors[sectorIdx].speedSum += spd;
+    }
+
+    // Lens 1: Outdoor Comfort (UTCI) wind effect
+    const effect = computeUtciWindEffectForRow(row, env);
+    if (effect) {
+      const dWind = utciStressDistance(effect.utciWithWind);
+      const dCalm = utciStressDistance(effect.utciSheltered);
+      const delta = dWind - dCalm;
+      if (delta <= -UTCI_WIND_IMPACT_DELTA_C) {
+        utciHelpfulHours += 1;
+        if (dWind === 0) utciHelpfulIntoComfort += 1;
+        if (sectorIdx >= 0) sectors[sectorIdx].utciHelpful += 1;
+        if (roseIdx >= 0) rose16[roseIdx].utciHelpful += 1;
+      } else if (delta >= UTCI_WIND_IMPACT_DELTA_C) {
+        utciHarmfulHours += 1;
+        if (effect.utciWithWind < 9) utciColdStressHours += 1;
+        else if (effect.utciWithWind > 26) utciHeatStressHours += 1;
+        if (sectorIdx >= 0) sectors[sectorIdx].utciHarmful += 1;
+        if (roseIdx >= 0) rose16[roseIdx].utciHarmful += 1;
+      }
+    }
+
+    // Lens 2: Natural Ventilation suitability
+    const nvSuitable = rowSuitableForNaturalVentilation(row, DEFAULT_NV_CRITERIA);
+    if (nvSuitable === true) {
+      nvHelpfulHours += 1;
+      if (sectorIdx >= 0) sectors[sectorIdx].nvHelpful += 1;
+      if (roseIdx >= 0) rose16[roseIdx].nvHelpful += 1;
+    } else if (nvSuitable === false) {
+      nvHarmfulHours += 1;
+      const tdb = row.dryBulbTemperature as number;
+      const rh = row.relativeHumidity as number;
+      if (Number.isFinite(tdb) && (tdb < DEFAULT_NV_CRITERIA.tempMinC || tdb > DEFAULT_NV_CRITERIA.tempMaxC)) {
+        nvTempFailHours += 1;
+      }
+      if (Number.isFinite(rh) && rh > DEFAULT_NV_CRITERIA.maxRhPct) {
+        nvHumidityFailHours += 1;
+      }
+      if (sectorIdx >= 0) sectors[sectorIdx].nvHarmful += 1;
+      if (roseIdx >= 0) rose16[roseIdx].nvHarmful += 1;
+    }
+  }
+
+  if (!totalHours) return null;
+
+  const directedWindyHours = sectors.reduce((acc, s) => acc + s.hours, 0);
+  const predominant: WindDirectionSummary[] = [...sectors]
+    .filter(s => s.hours > 0)
+    .sort((a, b) => b.hours - a.hours)
+    .slice(0, 3)
+    .map(s => ({
+      label: s.label,
+      deg: s.deg,
+      hours: s.hours,
+      pct: directedWindyHours > 0 ? (s.hours / directedWindyHours) * 100 : 0,
+      avgSpeedFormatted: formatValue(s.speedSum / s.hours, 'm/s', unitSystem),
+    }));
+
+  const buildBucket = (
+    bucketHours: number,
+    sectorKey: 'utciHelpful' | 'utciHarmful' | 'nvHelpful' | 'nvHarmful',
+    breakdown: { label: string; hours: number }[],
+    criteriaText: string
+  ): WindImpactBucket => {
+    const topDirections = [...sectors]
+      .filter(s => s[sectorKey] > 0)
+      .sort((a, b) => b[sectorKey] - a[sectorKey])
+      .slice(0, 3)
+      .map(s => ({
+        label: s.label,
+        deg: s.deg,
+        hours: s[sectorKey],
+        pct: bucketHours > 0 ? (s[sectorKey] / bucketHours) * 100 : 0,
+      }));
+
+    const roseBins: WindRoseMiniBin[] = rose16.map(b => ({
+      label: b.label,
+      deg: b.deg,
+      hours: b[sectorKey],
+      pct: bucketHours > 0 ? (b[sectorKey] / bucketHours) * 100 : 0,
+    }));
+
+    const maxBinHours = Math.max(1, ...roseBins.map(b => b.hours));
+
+    return {
+      hours: bucketHours,
+      pctOfWindy: windyHours > 0 ? (bucketHours / windyHours) * 100 : 0,
+      maxBinHours,
+      topDirections,
+      roseBins,
+      breakdown,
+      criteriaText,
+    };
+  };
+
+  // Optional compact summary when the chart's color overlay is a non-wind-speed variable
+  let overlaySummary: TutorialWindInsights['overlaySummary'] = null;
+  const colorId = live.colorVarId;
+  if (colorId && colorId !== 'windSpeed') {
+    const vals = numericSeries(filtered, colorId);
+    const meta = COLUMN[colorId];
+    if (vals.length && meta) {
+      overlaySummary = {
+        variableName: live.colorVarName || meta.name || colorId,
+        high: formatValue(d3.max(vals)!, meta.unit ?? '', unitSystem),
+        avg: formatValue(d3.mean(vals)!, meta.unit ?? '', unitSystem),
+        low: formatValue(d3.min(vals)!, meta.unit ?? '', unitSystem),
+      };
+    }
+  }
+
+  const utciHelpfulCriteria =
+    unitSystem === 'imperial'
+      ? 'Wind lowers UTCI heat stress by ≥ 0.9 °F toward comfort (48–79 °F).'
+      : 'Wind lowers UTCI heat stress by ≥ 0.5 °C toward comfort (9–26 °C).';
+
+  const utciHarmfulCriteria =
+    unitSystem === 'imperial'
+      ? 'Wind increases UTCI cold (< 48 °F) or heat (> 79 °F) stress by ≥ 0.9 °F.'
+      : 'Wind increases UTCI cold (< 9 °C) or heat (> 26 °C) stress by ≥ 0.5 °C.';
+
+  const nvHelpfulCriteria =
+    unitSystem === 'imperial'
+      ? 'Breeze arrives while outdoor air is within 60–80 °F and ≤ 70% RH.'
+      : 'Breeze arrives while outdoor air is within 15.6–26.7 °C and ≤ 70% RH.';
+
+  const nvHarmfulCriteria =
+    unitSystem === 'imperial'
+      ? 'Breeze arrives outside 60–80 °F or above 70% RH (draft / moisture risk).'
+      : 'Breeze arrives outside 15.6–26.7 °C or above 70% RH (draft / moisture risk).';
+
+  return {
+    totalHours,
+    windyHours,
+    calmHours,
+    calmPct: (calmHours / totalHours) * 100,
+    avgSpeed: formatValue(speedSum / totalHours, 'm/s', unitSystem),
+    peakSpeed: formatValue(peakSpeedVal, 'm/s', unitSystem),
+    calmThresholdLabel:
+      unitSystem === 'imperial'
+        ? `< ${convertValue(CALM_WIND_THRESHOLD_MS, 'm/s', 'imperial').toFixed(1)} mph`
+        : `< ${CALM_WIND_THRESHOLD_MS} m/s`,
+    predominant,
+    utci: {
+      helpful: buildBucket(
+        utciHelpfulHours,
+        'utciHelpful',
+        [
+          { label: 'Brings into comfort', hours: utciHelpfulIntoComfort },
+          { label: 'Reduces heat stress', hours: Math.max(0, utciHelpfulHours - utciHelpfulIntoComfort) },
+        ],
+        utciHelpfulCriteria
+      ),
+      harmful: buildBucket(
+        utciHarmfulHours,
+        'utciHarmful',
+        [
+          { label: 'Cold wind chill', hours: utciColdStressHours },
+          { label: 'Hot stress wind', hours: utciHeatStressHours },
+        ],
+        utciHarmfulCriteria
+      ),
+    },
+    nv: {
+      helpful: buildBucket(
+        nvHelpfulHours,
+        'nvHelpful',
+        [{ label: 'Temp & RH in range', hours: nvHelpfulHours }],
+        nvHelpfulCriteria
+      ),
+      harmful: buildBucket(
+        nvHarmfulHours,
+        'nvHarmful',
+        [
+          { label: 'Temp out of range', hours: nvTempFailHours },
+          { label: 'Humidity > 70% RH', hours: nvHumidityFailHours },
+        ],
+        nvHarmfulCriteria
+      ),
+    },
+    overlaySummary,
   };
 }
 

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { BarChart2, GripVertical, Sun, ThermometerSun, Wind } from 'lucide-react';
+import { BarChart2, Fan, GripVertical, Sun, ThermometerSun, Wind } from 'lucide-react';
 import { WindRoseGlyph } from './WindRoseGlyph';
 import { ChartType, ChartConfig, LayoutMode, UnitSystem } from '../App';
 import type { EPWDataRow } from '../lib/epwParser';
@@ -186,7 +186,8 @@ export function SingleModeLayout({
       >
         {showHandle && (
           <div
-            id="tutorial-slot-reorder-handle"
+            id={globalIndex === 0 ? 'tutorial-slot-reorder-handle' : undefined}
+            data-reorder-handle="true"
             draggable
             onDragStart={e => onDragStart(e, globalIndex)}
             onDragEnd={onDragEnd}
@@ -347,6 +348,7 @@ const EMPTY_SLOT_CHOICES: { type: ChartType; label: string; Icon: EmptySlotIcon 
   { type: 'sunpath', label: 'Sun Path', Icon: Sun },
   { type: 'explorer', label: 'Data Explorer', Icon: BarChart2 },
   { type: 'utci', label: 'UTCI Comfort', Icon: ThermometerSun },
+  { type: 'naturalVentilation', label: 'Natural Ventilation', Icon: Fan },
   { type: 'wind', label: 'Wind Explorer', Icon: Wind },
   { type: 'windrose', label: 'Wind Rose', Icon: WindRoseGlyph },
 ];
@@ -368,7 +370,7 @@ function EmptySlot({
     <div className="flex h-full min-h-0 w-full flex-1 flex-col p-2">
       <div
         className={`flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl px-4 py-6 ${
-          theme === 'dark' ? 'bg-gray-900/25' : 'bg-gray-50'
+          theme === 'dark' ? 'bg-gray-900/25' : 'bg-white glow-sm'
         }`}
       >
         <p

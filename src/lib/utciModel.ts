@@ -196,6 +196,41 @@ export function computeUtciForEpwRow(
   }
 }
 
+/**
+ * Evaluates UTCI with actual wind vs sheltered (0.5 m/s) in a single radiant pass so wind
+ * comfort impact (helpful cooling vs harmful wind chill / convective heat) is fast and consistent.
+ */
+export function computeUtciWindEffectForRow(
+  row: EPWDataRow,
+  env: UtciEnvironment = {}
+): { utciWithWind: number; utciSheltered: number } | null {
+  const tdb = row.dryBulbTemperature as number;
+  const rh = row.relativeHumidity as number;
+  const windSpeed = row.windSpeed as number;
+  const ghr = row.globalHorizontalRadiation as number;
+  if ([tdb, rh, windSpeed, ghr].some(v => v == null || Number.isNaN(v))) return null;
+  if (windSpeed <= 0.5) return null;
+
+  const tr = meanRadiantForRow(row, { ...env, includeSun: true });
+  if (tr == null || !Number.isFinite(tr)) return null;
+  const dtr = tr - tdb;
+  if (tdb < -50 || tdb > 50 || dtr < -30 || dtr > 70 || rh < 0 || rh > 100) return null;
+
+  // Clamp extreme gusts (>17 m/s) to the UTCI polynomial's upper wind bound so strong cold/hot
+  // gales are still evaluated for thermal stress direction instead of dropped.
+  const vWind = Math.min(17, Math.max(0.5, windSpeed));
+  try {
+    const rWind = tc.models.utci(tdb, tr, vWind, rh, 'SI', false, true);
+    const rCalm = tc.models.utci(tdb, tr, 0.5, rh, 'SI', false, true);
+    const uWind = typeof rWind === 'number' ? rWind : rWind?.utci;
+    const uCalm = typeof rCalm === 'number' ? rCalm : rCalm?.utci;
+    if (!Number.isFinite(uWind) || !Number.isFinite(uCalm)) return null;
+    return { utciWithWind: uWind as number, utciSheltered: uCalm as number };
+  } catch {
+    return null;
+  }
+}
+
 function monthInGlobalRange(month: number, f: GlobalFilterState): boolean {
   if (f.startMonth <= f.endMonth) {
     return month >= f.startMonth && month <= f.endMonth;

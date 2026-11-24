@@ -207,10 +207,24 @@ export function explorerSvgTypography(renderScale: number, cellInnerHeightPx: nu
   };
 }
 
+/** Fast deterministic text-width estimate (avoids synchronous SVG `getComputedTextLength` layout thrashing). */
+function estimateSvgLabelWidth(text: string, fontSize: number): number {
+  let units = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === '.' || ch === ',' || ch === ' ' || ch === ':') units += 0.34;
+    else if (ch === '-' || ch === '−' || ch === '+') units += 0.48;
+    else if (ch === '%' || ch === 'W' || ch === 'M') units += 0.86;
+    else if (ch >= 'A' && ch <= 'Z') units += 0.72;
+    else units += 0.62;
+  }
+  return units * fontSize;
+}
+
 /**
  * Shrinks heatmap cell labels uniformly so the widest one fits inside its cell, or clears them when
- * that would render below the legibility floor. All labels are measured before any is restyled so
- * the browser lays out once.
+ * that would render below the legibility floor. Uses deterministic glyph width estimates so
+ * rendering 6+ heatmaps in parallel never forces synchronous SVG layout reflows.
  */
 export function fitHeatmapCellLabels<D>(
   labels: Selection<SVGTextElement, D, any, any>,
@@ -220,7 +234,9 @@ export function fitHeatmapCellLabels<D>(
 ): void {
   let fit = 1;
   labels.each(function (d) {
-    const len = this.getComputedTextLength();
+    const txt = this.textContent ?? '';
+    if (!txt) return;
+    const len = estimateSvgLabelWidth(txt, basePx);
     if (len > 0) fit = Math.min(fit, (cellWidth(d) * 0.88) / len);
   });
   if (fit >= 1) return;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState, useMemo } from 'react';
 import { useIsMobileMaxSm } from '../hooks/useIsMobileMaxSm';
 import { useTutorialLiveOptional } from '../context/TutorialLiveContext';
 import * as d3 from 'd3';
@@ -94,7 +94,8 @@ import {
   explorerSvgTypography,
   fitHeatmapCellLabels,
 } from '../lib/explorerChartSvgLayout';
-import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { HEATMAP_CELL_FONT_WEIGHT, blendCellWithOverlay, chartAxisInk, heatmapCellInk } from '../lib/chartInk';
+import { attachChartTooltip } from '../lib/chartTooltip';
 import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 
 interface WindExplorerProps {
@@ -180,7 +181,7 @@ function averageWindVector(values: EPWDataRow[], compareData?: EPWDataRow[], _da
 
 const EMPTY_EPW_ROWS: EPWDataRow[] = [];
 
-export function WindExplorer({
+export const WindExplorer = React.memo(function WindExplorer({
   data: epwData,
   compareData: epwCompareRaw,
   showDifference,
@@ -276,63 +277,28 @@ export function WindExplorer({
   );
   const isMobile = useIsMobileMaxSm();
   const expandChromeStrip = !exportMode && (tutorialChromeAnchors || isMobile);
-  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip);
+  const chartToolbarRevealClass = chartToolbarRevealClassFor(expandChromeStrip, theme);
   const removeBtnRevealClass = isMobile
     ? 'pointer-events-auto opacity-100'
     : 'pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
-  // chart type switching handled by ChartTypeMenu
 
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 400 });
   const { renderScale, svgHeight } = useExplorerSvgFrame(svgRef);
 
-  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    if (!outerRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-      
-      resizeTimeoutRef.current = setTimeout(() => {
-        for (let entry of entries) {
-          const newWidth = Math.round(entry.contentRect.width);
-          
-          setDimensions(prev => {
-            if (prev.width === newWidth) return prev;
-            return { width: newWidth };
-          });
-        }
-      }, 100);
-    });
-    observer.observe(outerRef.current);
-    return () => {
-      observer.disconnect();
-      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
-    };
-  }, []);
-
+  // Store thresholds in canonical SI (°C, m/s) to avoid double rebuilds and rounding drift on unit toggles
   const [tempFilterEnabled, setTempFilterEnabled] = useState(false);
-  const [tempThreshold, setTempThreshold] = useState(unitSystem === 'imperial' ? 70 : 21);
+  const [tempThresholdC, setTempThresholdC] = useState(21);
   const [tempFilterType, setTempFilterType] = useState<'above' | 'below'>('above');
-  
+
   const [speedFilterEnabled, setSpeedFilterEnabled] = useState(false);
-  const [speedThreshold, setSpeedThreshold] = useState(unitSystem === 'imperial' ? 10 : 4.5);
+  const [speedThresholdMs, setSpeedThresholdMs] = useState(4.5);
   const [speedFilterType, setSpeedFilterType] = useState<'above' | 'below'>('above');
 
-  const prevUnitSystem = useRef(unitSystem);
-  useEffect(() => {
-    if (prevUnitSystem.current !== unitSystem) {
-      if (unitSystem === 'imperial') {
-        setTempThreshold(t => Math.round(t * 9/5 + 32));
-        setSpeedThreshold(s => Math.round(s * 2.23694));
-      } else {
-        setTempThreshold(t => Math.round((t - 32) * 5/9));
-        setSpeedThreshold(s => Math.round(s / 2.23694));
-      }
-      prevUnitSystem.current = unitSystem;
-    }
-  }, [unitSystem]);
+  const displayTempThreshold =
+    unitSystem === 'imperial' ? Math.round(((tempThresholdC * 9) / 5 + 32) * 10) / 10 : Math.round(tempThresholdC * 10) / 10;
+  const displaySpeedThreshold =
+    unitSystem === 'imperial' ? Math.round(speedThresholdMs * 2.23693629 * 10) / 10 : Math.round(speedThresholdMs * 10) / 10;
 
   const convertValue = useCallback(
     (val: number | null | undefined, unit: string, isDelta: boolean = false) =>
@@ -344,30 +310,30 @@ export function WindExplorer({
     switch (type) {
       case 'summer':
         setTempFilterEnabled(true);
-        setTempThreshold(unitSystem === 'imperial' ? 75 : 24);
+        setTempThresholdC(24);
         setTempFilterType('above');
         setSpeedFilterEnabled(true);
-        setSpeedThreshold(unitSystem === 'imperial' ? 3.4 : 1.5);
+        setSpeedThresholdMs(1.5);
         setSpeedFilterType('above');
         break;
       case 'winter':
         setTempFilterEnabled(true);
-        setTempThreshold(unitSystem === 'imperial' ? 50 : 10);
+        setTempThresholdC(10);
         setTempFilterType('below');
         setSpeedFilterEnabled(true);
-        setSpeedThreshold(unitSystem === 'imperial' ? 4.5 : 2.0);
+        setSpeedThresholdMs(2.0);
         setSpeedFilterType('above');
         break;
       case 'pedestrian':
         setTempFilterEnabled(false);
         setSpeedFilterEnabled(true);
-        setSpeedThreshold(unitSystem === 'imperial' ? 11.2 : 5.0);
+        setSpeedThresholdMs(5.0);
         setSpeedFilterType('below');
         break;
       case 'sitting':
         setTempFilterEnabled(false);
         setSpeedFilterEnabled(true);
-        setSpeedThreshold(unitSystem === 'imperial' ? 4.5 : 2.0);
+        setSpeedThresholdMs(2.0);
         setSpeedFilterType('below');
         break;
     }
@@ -403,7 +369,7 @@ export function WindExplorer({
     [epwData]
   );
 
-  // Calculate local stats for filtered data
+  // Calculate local stats for filtered data (unit-invariant SI comparisons)
   const filteredData = useMemo((): EPWDataRow[] => {
     return data.filter(d => {
       if (!rowPassesGlobalFilters(d, filter)) return false;
@@ -412,23 +378,16 @@ export function WindExplorer({
       if (tempFilterEnabled) {
         const tempC = resolveWindRowDryBulbC(d, epwDryBulbLookup, metadata);
         if (tempC === null) return false;
-        const temp = convertValue(tempC, '°C');
-        if (tempFilterType === 'above') {
-          isTempMatch = temp > tempThreshold;
-        } else {
-          isTempMatch = temp < tempThreshold;
-        }
+        isTempMatch = tempFilterType === 'above' ? tempC > tempThresholdC : tempC < tempThresholdC;
       }
 
       let isSpeedMatch = true;
       if (speedFilterEnabled) {
-        const speed = convertValue(d.windSpeed, 'm/s');
-        if (!Number.isFinite(speed)) {
+        const speedMs = d.windSpeed as number;
+        if (!Number.isFinite(speedMs)) {
           isSpeedMatch = false;
-        } else if (speedFilterType === 'above') {
-          isSpeedMatch = speed > speedThreshold;
         } else {
-          isSpeedMatch = speed < speedThreshold;
+          isSpeedMatch = speedFilterType === 'above' ? speedMs > speedThresholdMs : speedMs < speedThresholdMs;
         }
       }
 
@@ -438,15 +397,13 @@ export function WindExplorer({
     data,
     filter,
     tempFilterEnabled,
-    tempThreshold,
+    tempThresholdC,
     tempFilterType,
     speedFilterEnabled,
-    speedThreshold,
+    speedThresholdMs,
     speedFilterType,
-    unitSystem,
     epwDryBulbLookup,
     metadata,
-    convertValue,
   ]);
 
   const { colorVarDef, cMin, cMax, cUnit } = useMemo(() => {
@@ -481,9 +438,9 @@ export function WindExplorer({
       return 'Compare lines: baseline vs comparison averages; shading shows the gap.';
     }
     if (aggregation !== 'hour') {
-      return 'Bars span hourly minimum to maximum.';
+      return 'Cells show prevailing direction · color shows speed · bars span min–max.';
     }
-    return '';
+    return 'Cells show prevailing direction · color shows speed.';
   }, [showDifference, compareData, aggregation]);
 
   const iemWindFallbackOnly =
@@ -492,7 +449,7 @@ export function WindExplorer({
     ) : null;
 
   useEffect(() => {
-    if (!svgRef.current || !filteredData.length || dimensions.width === 0) {
+    if (!svgRef.current || !filteredData.length) {
       d3.select(svgRef.current).selectAll("*").remove();
       return;
     }
@@ -716,7 +673,16 @@ export function WindExplorer({
         return isMonthMatch && isHourMatch ? 1 : 0.2;
       });
 
-    cells
+    const nightOverlayRgba = solarNightOverlayRgba(theme);
+    const cellIsNight = (d: any) =>
+      solarNightOverlayEnabled &&
+      isSolarNightEpwStation(
+        metadata!.lat,
+        metadata!.lng,
+        solarNightParamsFromHeatmapDatum(d, metadata!.timeZone)
+      );
+
+    const cellRects = cells
       .append("rect")
       .attr("width", d =>
         explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width
@@ -724,9 +690,26 @@ export function WindExplorer({
       .attr("height", d => rowInnerHeight(d.y))
       .attr("rx", 2)
       .attr("ry", 2)
-      .style("fill", d => colorScale(d.value))
-      .append("title")
-      .text(d => d.tooltip);
+      .style("fill", d => colorScale(d.value));
+
+    attachChartTooltip(
+      cellRects,
+      (d: any) => {
+        const lines = String(d.tooltip ?? '').split('\n').filter(Boolean);
+        return {
+          title: lines[0] ?? colorVarDef.name,
+          swatch: colorScale(d.value),
+          rows: lines.slice(1).map(line => {
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+              return { label: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+            }
+            return { label: colorVarDef.name, value: line };
+          }),
+        };
+      },
+      { hoverStroke: axisInk, hoverStrokeWidth: 1.5 }
+    );
 
     if (solarNightOverlayEnabled) {
       cells
@@ -737,18 +720,10 @@ export function WindExplorer({
         .attr("height", d => rowInnerHeight(d.y))
         .attr("rx", 2)
         .attr("ry", 2)
-        .style("fill", solarNightOverlayRgba(theme))
+        .style("fill", nightOverlayRgba)
         .style("stroke", "none")
         .style("pointer-events", "none")
-        .style("opacity", d =>
-          isSolarNightEpwStation(
-            metadata!.lat,
-            metadata!.lng,
-            solarNightParamsFromHeatmapDatum(d, metadata!.timeZone)
-          )
-            ? 1
-            : 0
-        );
+        .style("opacity", d => (cellIsNight(d) ? 1 : 0));
     }
 
     // Overlay text for wind direction
@@ -758,7 +733,11 @@ export function WindExplorer({
         .attr("y", d => rowInnerHeight(d.y) / 2)
         .attr("dy", "0.35em")
         .attr("text-anchor", "middle")
-        .style("fill", heatmapCellInk(heatmapTextColor))
+        .style("fill", d => {
+          const base = colorScale(d.value);
+          const effective = cellIsNight(d) ? blendCellWithOverlay(base, nightOverlayRgba) : base;
+          return heatmapCellInk(heatmapTextColor, effective);
+        })
         .style("font-size", `${type.cellValuePx}px`)
         .style("font-weight", HEATMAP_CELL_FONT_WEIGHT)
         .style("pointer-events", "none")
@@ -1088,13 +1067,30 @@ export function WindExplorer({
         }
       });
 
-      fgGroups.append("title").text(d => {
+      const barPeriodLabel = (d: any) => {
+        if (aggregation === 'month') {
+          const m = Math.max(0, Math.min(11, (d.month ?? 1) - 1));
+          return monthNames[m] ?? 'Period';
+        }
+        if (aggregation === 'week') return `Week ${Math.max(1, Math.round(d.x0 / 7) + 1)}`;
+        return `Day ${Math.round(d.x0)}`;
+      };
+
+      attachChartTooltip(fgGroups, (d: any) => {
         const dv = explorerBarStatisticY(heatmapCellStatistic, {
           valueSelected: d.valueSelected,
           minSelected: d.minSelected,
           maxSelected: d.maxSelected,
         });
-        return `${statLabel}: ${dv.toFixed(1)} ${cUnit}\nRange: ${d.minSelected?.toFixed(1) ?? 'N/A'} to ${d.maxSelected?.toFixed(1) ?? 'N/A'} ${cUnit}`;
+        return {
+          title: `${barPeriodLabel(d)} · ${colorVarDef.name}`,
+          swatch: colorScale(dv),
+          rows: [
+            { label: `Selected (${statLabel})`, value: `${dv.toFixed(1)} ${cUnit}` },
+            { label: 'Bar low', value: `${d.minSelected?.toFixed(1) ?? '—'} ${cUnit}` },
+            { label: 'Bar high', value: `${d.maxSelected?.toFixed(1) ?? '—'} ${cUnit}` },
+          ],
+        };
       });
     }
 
@@ -1130,9 +1126,12 @@ export function WindExplorer({
     // --- Wind Rose ---
     // Removed from WindExplorer
 
-  }, [data, compareData, showDifference, filteredData, variables, colorVar, gradientId, aggregation, gradients, filter, dimensions.width, renderScale, svgHeight, unitSystem, heatmapTextColor, theme, metadata, heatmapCellStatistic, barGradientSvgId, barChartFillMode]);
+  }, [data, compareData, showDifference, filteredData, variables, colorVar, gradientId, aggregation, gradients, filter, renderScale, svgHeight, cUnit, cMin, cMax, heatmapTextColor, theme, metadata, heatmapCellStatistic, barGradientSvgId, barChartFillMode]);
 
-  const stats = (() => {
+  const stats = useMemo(() => {
+    if (!showStatsModal) {
+      return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
+    }
     const isCircular = colorVar === 'windDirection';
     const isTemp = colorVarDef.category === 'Temperature';
     if (showDifference && compareData) {
@@ -1167,7 +1166,7 @@ export function WindExplorer({
       total: isTemp || isCircular ? NaN : convertValue(d3.sum(validVals), colorVarDef.unit, true),
       count: validVals.length,
     };
-  })();
+  }, [showStatsModal, colorVar, colorVarDef.category, colorVarDef.unit, showDifference, compareData, filteredData, convertValue]);
 
   return (
     <div 
@@ -1206,7 +1205,7 @@ export function WindExplorer({
                 Comparison · {paneCity ?? '—'}
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -1309,7 +1308,7 @@ export function WindExplorer({
                 )}
               </div>
               <div className={chartToolbarRevealClass}>
-                <div className="pt-1">
+                <div className={expandChromeStrip ? 'pt-1' : ''}>
                   <AggregationToolbar
                     value={aggregation}
                     onChange={setAggregation}
@@ -1393,9 +1392,10 @@ export function WindExplorer({
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>
-                  <button 
+                  <button
+                    type="button"
                     onClick={() => setShowGradientModal(true)}
-                    className="text-[11px] font-bold text-gray-600 hover:text-gray-800 uppercase tracking-tight"
+                    className="text-[11px] font-bold text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white uppercase tracking-tight"
                   >
                     + Create
                   </button>
@@ -1469,11 +1469,15 @@ export function WindExplorer({
                     <div className="relative flex-1">
                       <input
                         type="number"
-                        value={tempThreshold}
-                        onChange={(e) => setTempThreshold(Number(e.target.value))}
+                        value={displayTempThreshold}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n)) return;
+                          setTempThresholdC(unitSystem === 'imperial' ? ((n - 32) * 5) / 9 : n);
+                        }}
                         className={`block w-full rounded-full border-0 py-1.5 pl-3 pr-6 text-xs transition-all ${theme === 'dark' ? 'bg-gray-700 text-gray-100 focus:ring-gray-500 hover:bg-gray-600' : 'bg-gray-100 text-gray-900 focus:ring-gray-400 hover:bg-gray-200'}`}
                       />
-                      <span className={`absolute right-2 top-1.5 text-[11px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>{unitSystem === 'imperial' ? '°F' : '°C'}</span>
+                      <span className={`absolute right-2 top-1.5 text-[11px] ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>{unitSystem === 'imperial' ? '°F' : '°C'}</span>
                     </div>
                   </div>
                 )}
@@ -1502,11 +1506,15 @@ export function WindExplorer({
                     <div className="relative flex-1">
                       <input
                         type="number"
-                        value={speedThreshold}
-                        onChange={(e) => setSpeedThreshold(Number(e.target.value))}
+                        value={displaySpeedThreshold}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (!Number.isFinite(n)) return;
+                          setSpeedThresholdMs(unitSystem === 'imperial' ? n / 2.23693629 : n);
+                        }}
                         className={`block w-full rounded-full border-0 py-1.5 pl-3 pr-10 text-xs transition-all ${theme === 'dark' ? 'bg-gray-700 text-gray-100 focus:ring-gray-500 hover:bg-gray-600' : 'bg-gray-100 text-gray-900 focus:ring-gray-400 hover:bg-gray-200'}`}
                       />
-                      <span className={`absolute right-2 top-1.5 text-[11px] ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
+                      <span className={`absolute right-2 top-1.5 text-[11px] ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>{unitSystem === 'imperial' ? 'mph' : 'm/s'}</span>
                     </div>
                   </div>
                 )}
@@ -1549,4 +1557,4 @@ export function WindExplorer({
       </div>
     </div>
   );
-}
+});
