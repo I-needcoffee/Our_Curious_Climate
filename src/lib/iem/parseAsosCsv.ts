@@ -55,13 +55,13 @@ export function parseIemAsosWindCsv(csv: string, knotsToMsFn: (k: number) => num
     let windMs: number | null = null;
     if (skStr && skStr !== 'null' && skStr !== '') {
       const knots = Number(skStr);
-      if (Number.isFinite(knots)) windMs = knotsToMsFn(knots);
+      if (Number.isFinite(knots) && knots >= 0 && knots < 250) windMs = knotsToMsFn(knots);
     }
 
     let windFromDeg: number | null = null;
     if (drStr && drStr !== 'null' && drStr !== '') {
       const d = Number(drStr);
-      if (Number.isFinite(d)) windFromDeg = ((d % 360) + 360) % 360;
+      if (Number.isFinite(d) && d >= 0 && d <= 360) windFromDeg = d % 360;
     }
 
     out.push({ station, validMs, windMs, windFromDeg });

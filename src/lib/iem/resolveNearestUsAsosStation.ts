@@ -37,6 +37,7 @@ export async function resolveNearestUsAsosForEpw(metadata: EPWMetadata): Promise
   if (!gjP) {
     gjP = fetchIemNetworkGeoJson(net);
     networkGeoJsonCache.set(net, gjP);
+    gjP.catch(() => networkGeoJsonCache.delete(net));
   }
   const gj = await gjP;
   const hit = nearestNetworkFeature(gj.features, metadata.lat, metadata.lng);

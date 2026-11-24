@@ -17,6 +17,7 @@ const MONTH_SHORT = [
 
 /** Hour labels matching the 12×24 Y-axis (`0` = 12 AM … `23` = 11 PM). */
 export function formatEpwStationHour(hour0to23: number): string {
+  if (!Number.isFinite(hour0to23)) return '—';
   const h = ((Math.floor(hour0to23) % 24) + 24) % 24;
   if (h === 0) return '12 AM';
   if (h === 12) return '12 PM';

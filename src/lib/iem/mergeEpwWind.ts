@@ -32,12 +32,16 @@ export function stationClockFromUtcMs(
   return { month: t.getUTCMonth() + 1, day: t.getUTCDate(), hour: t.getUTCHours() };
 }
 
-/** TMY dry-bulb (°C) keyed by EPW station month/day/hour. */
+/** TMY dry-bulb (°C) keyed by EPW station standard-time month/day/hour. */
 export function buildEpwDryBulbStationClockLookup(epwRows: EPWDataRow[]): Map<number, number> {
   const map = new Map<number, number>();
   for (const r of epwRows) {
     if (!isValidEpwDryBulb(r.dryBulbTemperature)) continue;
-    map.set(stationClockKey(r.month, r.day, r.hour), r.dryBulbTemperature as number);
+    const c = r.solarStandardClock;
+    const m = c?.month ?? r.month;
+    const d = c?.day ?? r.day;
+    const h = c?.hour ?? r.hour;
+    map.set(stationClockKey(m, d, h), r.dryBulbTemperature as number);
   }
   return map;
 }
@@ -74,12 +78,14 @@ export function resolveWindRowDryBulbC(
 }
 
 /**
- * Build a UTC hourly map from asos rows (prefer last sample within each UTC hour bucket).
+ * Build a UTC hourly map from IEM rows (prefer last non-empty sample within each UTC hour bucket
+ * so a later null reading never overwrites an earlier valid observation).
  */
 export function hourlyUtcWindLookup(rows: ParsedIemWindRow[]): Map<number, Pick<ParsedIemWindRow, 'windMs' | 'windFromDeg'>> {
   const buckets = new Map<number, ParsedIemWindRow>();
 
   for (const row of rows) {
+    if (row.windMs === null && row.windFromDeg === null) continue;
     const h = floorHourUtc(row.validMs);
     const prev = buckets.get(h);
     if (!prev || row.validMs >= prev.validMs) {
@@ -96,22 +102,17 @@ export function hourlyUtcWindLookup(rows: ParsedIemWindRow[]): Map<number, Pick<
 
 /**
  * For each EPW row, synthesize a UTC epoch using **`referenceCalendarYear`** and the EPW calendar
- * in **station standard time** via `metadata.timeZone` — same convention as {@link utcInstantFromEpwStationClock}
- * (`minute = 30` midpoint for hourly EPW slots).
- *
- * This lets TMY timelines align with ASOS extracted for a concrete calendar year (`referenceCalendarYear`).
+ * in **station standard time** via `metadata.timeZone` — honoring `solarStandardClock` when DST display is active
+ * and preserving fractional timezone offsets.
  */
 export function epwUtcMsForMergedWind(row: EPWDataRow, metadata: EPWMetadata, referenceCalendarYear: number, minuteMid = 30): number {
-  const dom = clampDayToUtcMonth(row.day, referenceCalendarYear, row.month);
-  return Date.UTC(
-    referenceCalendarYear,
-    row.month - 1,
-    dom,
-    row.hour - metadata.timeZone,
-    minuteMid,
-    0,
-    0
-  );
+  const c = row.solarStandardClock;
+  const month = c?.month ?? row.month;
+  const day = c?.day ?? row.day;
+  const hour = c?.hour ?? row.hour;
+  const dom = clampDayToUtcMonth(day, referenceCalendarYear, month);
+  const tzMs = Number.isFinite(metadata.timeZone) ? Math.round(metadata.timeZone * 3_600_000) : 0;
+  return Date.UTC(referenceCalendarYear, month - 1, dom, hour, minuteMid, 0, 0) - tzMs;
 }
 
 /** Shallow row copies with substituted wind Speed / Direction (degrees, m/s EPW-compatible). */
@@ -131,16 +132,18 @@ export function mergeHourlyWindFromIemIntoEpw(
 
     const next: EPWDataRow = { ...r };
 
-    // EPW semantics: numeric fields elsewhere may be number | null; preserve null if asos missing dimension.
     if (wind.windMs !== null) {
       next.windSpeed = wind.windMs;
     }
 
-    // Calm-speed directions are often sentinel in METAR; keep EPW dir if asos dir missing only when speed nonzero.
-    if (wind.windFromDeg !== null) {
-      next.windDirection = wind.windFromDeg;
-    } else if (wind.windMs !== null && wind.windMs === 0) {
+    // Avoid hybrid EPW/IEM vectors: if IEM reports speed with variable/missing direction (VRB),
+    // store 0 for calm or null for variable direction instead of retaining an unrelated EPW direction.
+    if (wind.windMs !== null && wind.windMs < 1e-6) {
       next.windDirection = 0;
+    } else if (wind.windFromDeg !== null) {
+      next.windDirection = wind.windFromDeg;
+    } else {
+      next.windDirection = null;
     }
 
     return next;
@@ -197,7 +200,7 @@ export function mergeHourlyWindFromMultiYearIemIntoEpw(
         nSpeed++;
       }
 
-      if (windMs !== null && windFromDeg !== null) {
+      if (windMs !== null && windMs > 1e-6 && windFromDeg !== null) {
         const rad = windFromDeg * (Math.PI / 180);
         sumU += -windMs * Math.sin(rad);
         sumV += -windMs * Math.cos(rad);
@@ -211,7 +214,7 @@ export function mergeHourlyWindFromMultiYearIemIntoEpw(
     const avgU = nVec > 0 ? sumU / nVec : 0;
     const avgV = nVec > 0 ? sumV / nVec : 0;
     let avgDir: number | null = null;
-    if (nVec > 0) {
+    if (nVec > 0 && Math.hypot(avgU, avgV) > 1e-9) {
       let d = (Math.atan2(-avgU, -avgV) * 180) / Math.PI;
       if (d < 0) d += 360;
       avgDir = d;
@@ -220,10 +223,13 @@ export function mergeHourlyWindFromMultiYearIemIntoEpw(
     const next: EPWDataRow = { ...r };
     if (avgSpeed !== null) {
       next.windSpeed = avgSpeed;
-      if (avgSpeed < 1e-6) next.windDirection = 0;
     }
-    if (avgDir !== null) {
+    if (avgSpeed !== null && avgSpeed < 1e-6) {
+      next.windDirection = 0;
+    } else if (avgDir !== null) {
       next.windDirection = avgDir;
+    } else {
+      next.windDirection = null;
     }
     return next;
   });

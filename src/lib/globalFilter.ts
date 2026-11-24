@@ -42,14 +42,18 @@ export function hourInWrappedRange(hour: number, startHour: number, endHour: num
     : hour >= startHour || hour <= endHour;
 }
 
-/** True when month isolation is not the full calendar year. */
+/** True when month isolation is not the full calendar year (accounts for wrapped full-year ranges like 4..3). */
 export function monthFilterIsPartial(f: Pick<GlobalFilterState, 'startMonth' | 'endMonth'>): boolean {
-  return !(f.startMonth === 1 && f.endMonth === 12);
+  if (f.startMonth === 1 && f.endMonth === 12) return false;
+  if (f.startMonth === f.endMonth + 1) return false;
+  return true;
 }
 
-/** True when hour isolation is not the full day. */
+/** True when hour isolation is not the full day (accounts for wrapped full-day ranges like 13..12). */
 export function hourFilterIsPartial(f: Pick<GlobalFilterState, 'startHour' | 'endHour'>): boolean {
-  return !(f.startHour === 0 && f.endHour === 23);
+  if (f.startHour === 0 && f.endHour === 23) return false;
+  if (f.startHour === f.endHour + 1) return false;
+  return true;
 }
 
 /**
@@ -169,14 +173,50 @@ export function explorerBarStatisticY(
   return dims.valueSelected;
 }
 
+/** Circular mean of compass bearings in degrees [0, 360). Returns NaN if empty or opposing cancel out. */
+export function circularMeanDeg(degrees: readonly (number | null | undefined)[]): number {
+  let sumSin = 0;
+  let sumCos = 0;
+  let n = 0;
+  for (const d of degrees) {
+    if (typeof d !== 'number' || !Number.isFinite(d)) continue;
+    const rad = (d * Math.PI) / 180;
+    sumSin += Math.sin(rad);
+    sumCos += Math.cos(rad);
+    n += 1;
+  }
+  if (!n) return NaN;
+  const mag = Math.hypot(sumSin, sumCos);
+  if (mag < 1e-9) return 0;
+  return ((Math.atan2(sumSin, sumCos) * 180) / Math.PI + 360) % 360;
+}
+
+/** Shortest signed angular difference (compareDeg - primaryDeg) wrapped into (-180, 180]. */
+export function circularDiffDeg(compareDeg: number, primaryDeg: number): number {
+  if (!Number.isFinite(compareDeg) || !Number.isFinite(primaryDeg)) return NaN;
+  let diff = ((compareDeg - primaryDeg + 540) % 360) - 180;
+  if (diff <= -180) diff += 360;
+  return diff;
+}
+
 /**
  * Reduce hourly samples in one heatmap cell to a scalar (default: mean ≈ footer “Ave”).
  * An empty bin is “no value” (NaN), not zero — zero is a real measurement.
  */
-export function aggregateCellStatistic(values: number[], stat: HeatmapCellStatistic): number {
+export function aggregateCellStatistic(
+  values: number[],
+  stat: HeatmapCellStatistic,
+  isCircularDeg = false
+): number {
   const v = values.filter(x => typeof x === 'number' && Number.isFinite(x));
   if (!v.length) return NaN;
+  if (isCircularDeg) return circularMeanDeg(v);
   if (stat === 'mean') return v.reduce((a, b) => a + b, 0) / v.length;
-  if (stat === 'high') return Math.max(...v);
-  return Math.min(...v);
+  let best = v[0]!;
+  if (stat === 'high') {
+    for (let i = 1; i < v.length; i++) if (v[i]! > best) best = v[i]!;
+  } else {
+    for (let i = 1; i < v.length; i++) if (v[i]! < best) best = v[i]!;
+  }
+  return best;
 }

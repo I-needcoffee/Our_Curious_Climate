@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
-import type { EPWDataRow } from '../lib/epwParser';
+import type { EPWDataRow, EPWMetadata } from '../lib/epwParser';
 import type { UnitSystem } from '../App';
-import { UNIT_C, UNIT_F } from '../lib/unitConversion';
+import { convertUnit, convertValue, UNIT_C, UNIT_F } from '../lib/unitConversion';
+import type { GlobalFilterState } from '../lib/globalFilter';
+import { rowPassesGlobalFilters } from '../lib/globalFilter';
 import {
   formatAstronomicalSeasonLabel,
   hemisphereFromLatitude,
@@ -12,6 +14,7 @@ import {
   utciRowOutsideModelRange,
   UTCI_CLOCK_WINDOWS,
   UTCI_HOUR_WINDOW_NOTE_SHORT,
+  type UtciRowOpts,
 } from '../lib/utciModel';
 
 function cToF(v: number) {
@@ -52,8 +55,8 @@ function utciComfortableC(utciC: number) {
   return utciC >= 9 && utciC <= 26;
 }
 
-function computeUtciC(row: EPWDataRow) {
-  return computeUtciForEpwRow(row)?.utci ?? null;
+function computeUtciC(row: EPWDataRow, opts: UtciRowOpts) {
+  return computeUtciForEpwRow(row, opts)?.utci ?? null;
 }
 
 function ratio(n: number, d: number) {
@@ -69,18 +72,32 @@ function pct(n: number, d: number, digits = 1) {
 function computeQuickStatsFromRows(
   rows: EPWDataRow[] | undefined,
   unitSystem: UnitSystem,
-  siteLatitude?: number | null
+  metadata?: EPWMetadata | null,
+  filter?: GlobalFilterState
 ) {
-  const data = (rows ?? []).filter(r => r && r.date);
+  const raw = (rows ?? []).filter(r => r && r.date);
+  const data = filter ? raw.filter(r => rowPassesGlobalFilters(r, filter)) : raw;
+  const siteLatitude = metadata?.lat ?? null;
   const hemisphere = hemisphereFromLatitude(siteLatitude);
+  const utciOpts: UtciRowOpts =
+    metadata &&
+    Number.isFinite(metadata.lat) &&
+    Number.isFinite(metadata.lng) &&
+    Number.isFinite(metadata.timeZone)
+      ? {
+          radiantMode: 'station',
+          site: { lat: metadata.lat, lng: metadata.lng, timeZone: metadata.timeZone },
+        }
+      : { radiantMode: 'station' };
 
   const tempsC = data.map(r => r.dryBulbTemperature as number).filter(v => v != null && Number.isFinite(v));
   const dni = data.map(r => r.directNormalRadiation as number).filter(v => v != null && Number.isFinite(v));
   const ghi = data.map(r => r.globalHorizontalRadiation as number).filter(v => v != null && Number.isFinite(v));
   const useDirectNormal = dni.length > 0;
   const peakSource = useDirectNormal ? dni : ghi;
-  const peakRad = max(peakSource);
-  const radUnit = 'Wh/m²';
+  const peakRadSi = max(peakSource);
+  const peakRad = Number.isFinite(peakRadSi) ? convertValue(peakRadSi, 'Wh/m²', unitSystem) : NaN;
+  const radUnit = convertUnit('Wh/m²', unitSystem);
   const peakRadHint = useDirectNormal ? 'Direct normal' : 'Global horizontal';
   const humid = data.map(r => r.relativeHumidity as number).filter(v => v != null && Number.isFinite(v));
   const cloudTenths = data.map(r => r.totalSkyCover as number).filter(v => v != null && Number.isFinite(v));
@@ -116,8 +133,8 @@ function computeQuickStatsFromRows(
   let utciOutOfRange = 0;
 
   for (const r of data) {
-    if (utciRowOutsideModelRange(r)) utciOutOfRange += 1;
-    const utciC = computeUtciC(r);
+    if (utciRowOutsideModelRange(r, utciOpts)) utciOutOfRange += 1;
+    const utciC = computeUtciC(r, utciOpts);
     if (utciC == null) continue;
     const ok = utciComfortableC(utciC);
 
@@ -186,6 +203,8 @@ export function Grid4x2StatsColumn({
   unitSystem,
   exportMode,
   siteLatitude = null,
+  metadata = null,
+  filter,
 }: {
   theme: 'light' | 'dark';
   rows?: EPWDataRow[];
@@ -193,10 +212,13 @@ export function Grid4x2StatsColumn({
   /** Omit comfort-panel chrome so the combined export frame is a single border. */
   exportMode?: boolean;
   siteLatitude?: number | null;
+  metadata?: EPWMetadata | null;
+  filter?: GlobalFilterState;
 }) {
+  const effectiveLat = metadata?.lat ?? siteLatitude;
   const stats = useMemo(
-    () => computeQuickStatsFromRows(rows, unitSystem, siteLatitude),
-    [rows, unitSystem, siteLatitude]
+    () => computeQuickStatsFromRows(rows, unitSystem, metadata, filter),
+    [rows, unitSystem, metadata, filter]
   );
 
   const dark = theme === 'dark';
@@ -319,8 +341,8 @@ export function Grid4x2StatsColumn({
             {(['spring', 'summer', 'fall', 'winter'] as const).map(season => (
               <React.Fragment key={season}>
                 <Row
-                  label={<SeasonLabel label={formatAstronomicalSeasonLabel(season, hemisphereFromLatitude(siteLatitude))} />}
-                  title={formatAstronomicalSeasonLabel(season, hemisphereFromLatitude(siteLatitude))}
+                  label={<SeasonLabel label={formatAstronomicalSeasonLabel(season, hemisphereFromLatitude(effectiveLat))} />}
+                  title={formatAstronomicalSeasonLabel(season, hemisphereFromLatitude(effectiveLat))}
                   value={stats.comfort7to19BySeason[season]}
                 />
               </React.Fragment>

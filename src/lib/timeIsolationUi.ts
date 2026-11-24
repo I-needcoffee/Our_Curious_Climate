@@ -34,7 +34,7 @@ export const GLOBAL_HOUR_PRESETS: {
 }[] = [
   { id: 'all', label: 'All hours', hint: '12am–11pm', range: [0, 23] },
   { id: 'day', label: 'Day', hint: '7am–6pm', range: [7, 18] },
-  { id: 'night', label: 'Night', hint: '8pm–7am', range: [20, 6] },
+  { id: 'night', label: 'Night', hint: '8pm–6am', range: [20, 6] },
   { id: 'morning', label: 'Morning', hint: '7am–10am', range: [7, 10] },
   { id: 'midday', label: 'Midday', hint: '11am–2pm', range: [11, 14] },
   { id: 'afternoon', label: 'Afternoon', hint: '3pm–6pm', range: [15, 18] },
@@ -49,14 +49,14 @@ export const WIND_ROSE_HOUR_PRESETS: {
 }[] = [
   { id: 'all', label: 'All hours', hint: '12am–11pm', range: [0, 23] },
   { id: 'day', label: 'Day', hint: '7am–6pm', range: [7, 18] },
-  { id: 'night', label: 'Night', hint: '8pm–7am', range: [20, 6] },
+  { id: 'night', label: 'Night', hint: '8pm–6am', range: [20, 6] },
 ];
 
 export const MONTH_WRAP_HINT =
   'Drag a handle past the other to wrap around the year (Winter is Dec–Feb).';
 
 export const HOUR_WRAP_HINT =
-  'Drag a handle past the other to wrap around midnight (Night is 8pm–7am).';
+  'Drag a handle past the other to wrap around midnight (Night is 8pm–6am).';
 
 export function isolationRangesEqual(a: IsolationRange, b: IsolationRange): boolean {
   return a[0] === b[0] && a[1] === b[1];

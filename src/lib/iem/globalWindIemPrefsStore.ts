@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import type { CompareWindIemSharedControls, WindFileSource } from './windIemPrefsShared';
 import type { IemWindStationSelection } from './windStationTypes';
 
@@ -147,21 +147,24 @@ export function useWindIemGlobalPrefs(): CompareWindIemSharedControls & {
     closeWindStationPicker();
   }, []);
 
-  return {
-    source: snap.source,
-    iemYearStart: snap.iemYearStart,
-    iemYearEnd: snap.iemYearEnd,
-    setSource,
-    setIemYearRange,
-    iemStation: snap.iemStation,
-    setIemStation,
-    setupModalOpen: snap.setupModalOpen,
-    setupModalRevertOnCancel: snap.setupModalRevertOnCancel,
-    stationPickerOpen: snap.stationPickerOpen,
-    stationPickerRevertOnCancel: snap.stationPickerRevertOnCancel,
-    openIemSetupModal: openModal,
-    closeIemSetupModal: closeModal,
-    openWindStationPicker: openPicker,
-    closeWindStationPicker: closePicker,
-  };
+  return useMemo(
+    () => ({
+      source: snap.source,
+      iemYearStart: snap.iemYearStart,
+      iemYearEnd: snap.iemYearEnd,
+      setSource,
+      setIemYearRange,
+      iemStation: snap.iemStation,
+      setIemStation,
+      setupModalOpen: snap.setupModalOpen,
+      setupModalRevertOnCancel: snap.setupModalRevertOnCancel,
+      stationPickerOpen: snap.stationPickerOpen,
+      stationPickerRevertOnCancel: snap.stationPickerRevertOnCancel,
+      openIemSetupModal: openModal,
+      closeIemSetupModal: closeModal,
+      openWindStationPicker: openPicker,
+      closeWindStationPicker: closePicker,
+    }),
+    [snap, setSource, setIemYearRange, setIemStation, openModal, closeModal, openPicker, closePicker]
+  );
 }

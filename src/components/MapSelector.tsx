@@ -1541,7 +1541,8 @@ export function MapSelector({
                 fileTypeLabelFromBasename(baseline.filename || '')
               );
               onMapLibraryModeChange?.(showFuture ? 'future' : 'historical');
-              onSelect(parsed, parsedBaseline);
+              // Baseline (historical/2020) goes first, Future goes second so Δ = Future − Baseline.
+              onSelect(parsedBaseline, parsed);
               return;
             }
           }
@@ -1998,7 +1999,6 @@ export function MapSelector({
               >
                 <Popup className="rounded-2xl">
                   <ObKmlPinPopupContent
-                    key={pin.id}
                     pin={pin}
                     usaIndexRows={usaObZipByStation?.get(pin.stationKey) ?? null}
                     usaZipPrefix={ONE_BUILDING_USA_ZIP_PREFIX}

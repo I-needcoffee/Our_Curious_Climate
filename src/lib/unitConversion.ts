@@ -10,17 +10,29 @@ export function isCelsiusUnit(unit: string): boolean {
   return unit === UNIT_C || unit === '°C';
 }
 
+/**
+ * Full Imperial unit conversion from EPW SI units.
+ * Returns `NaN` for `null`/`undefined`/non-finite inputs so missing measurements are never
+ * silently coerced to `0` (which would become `0 °C` in metric and `0 °F` in imperial).
+ */
 export function convertValue(
   val: number | null | undefined,
   unit: string,
   unitSystem: LegendUnitSystem,
   isDelta = false
 ): number {
-  if (val === null || val === undefined) return 0;
+  if (val === null || val === undefined || !Number.isFinite(val)) return NaN;
   if (unitSystem === 'imperial') {
     if (isCelsiusUnit(unit)) return isDelta ? val * (9 / 5) : val * (9 / 5) + 32;
     if (unit === 'm/s') return val * 2.23694;
     if (unit === 'mm') return val / 25.4;
+    if (unit === 'cm') return val / 2.54;
+    if (unit === 'km') return val * 0.621371;
+    if (unit === 'm') return val * 3.28084;
+    if (unit === 'Pa') return val / 3386.389;
+    if (unit === 'Wh/m²') return val * 0.31699833;
+    if (unit === 'lux') return val * 0.09290304;
+    if (unit === 'Cd/m²') return val * 0.09290304;
   }
   return val;
 }
@@ -30,6 +42,13 @@ export function convertUnit(unit: string, unitSystem: LegendUnitSystem): string 
     if (isCelsiusUnit(unit)) return UNIT_F;
     if (unit === 'm/s') return 'mph';
     if (unit === 'mm') return 'in';
+    if (unit === 'cm') return 'in';
+    if (unit === 'km') return 'mi';
+    if (unit === 'm') return 'ft';
+    if (unit === 'Pa') return 'inHg';
+    if (unit === 'Wh/m²') return 'BTU/ft²';
+    if (unit === 'lux') return 'fc';
+    if (unit === 'Cd/m²') return 'Cd/ft²';
   }
   return unit;
 }
@@ -63,10 +82,16 @@ export function utciGradientExtentC(values: number[]): { minC: number; maxC: num
   const DEFAULT_MIN = -40;
   const DEFAULT_MAX = 50;
   const PAD = 2;
-  const finite = values.filter(v => typeof v === 'number' && Number.isFinite(v));
-  if (!finite.length) return { minC: DEFAULT_MIN, maxC: DEFAULT_MAX };
-  const dataMin = Math.min(...finite);
-  const dataMax = Math.max(...finite);
+  let dataMin = Infinity;
+  let dataMax = -Infinity;
+  for (const v of values) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    if (v < dataMin) dataMin = v;
+    if (v > dataMax) dataMax = v;
+  }
+  if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax)) {
+    return { minC: DEFAULT_MIN, maxC: DEFAULT_MAX };
+  }
   return {
     minC: Math.min(DEFAULT_MIN, Math.floor(dataMin - PAD)),
     maxC: Math.max(DEFAULT_MAX, Math.ceil(dataMax + PAD)),

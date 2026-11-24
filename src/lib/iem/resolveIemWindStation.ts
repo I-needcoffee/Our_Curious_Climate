@@ -27,9 +27,11 @@ export async function resolveIemWindStationForEpw(
     return { kind: 'not_us_epw_location', detail: catalog.detail };
   }
 
-  const picked = pickDefaultWindStation(catalog.stations);
-  if (picked) {
-    return { kind: 'eligible', selection: windMapStationToSelection(picked) };
+  if (catalog.kind === 'ok') {
+    const picked = pickDefaultWindStation(catalog.stations);
+    if (picked) {
+      return { kind: 'eligible', selection: windMapStationToSelection(picked) };
+    }
   }
 
   const nearest = await resolveNearestUsAsosForEpw(metadata);

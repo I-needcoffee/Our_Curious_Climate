@@ -11,9 +11,8 @@ export interface EPWMetadata {
   timeZone: number;
   elevation: number;
   /**
-   * From `HOLIDAYS/DAYLIGHT SAVINGS` first field. `unspecified` if that line is missing/ambiguous.
-   * Describes whether the *site* observes DST; hourly data are still typically on the standard
-   * `timeZone` offset unless your file’s documentation says otherwise.
+   * From `HOLIDAYS/DAYLIGHT SAVINGS` fields 2–3 (DST Start / End day; `0,0` means no DST).
+   * Field 1 in EPW is `LeapYear Observed`, not DST. `unspecified` if missing/ambiguous.
    */
   daylightSavings: 'yes' | 'no' | 'unspecified';
 }
@@ -100,8 +99,8 @@ export function attachParsedEpwSource(
 }
 
 export function parseEPW(csvString: string): ParsedEPW {
-  // Detect if there are multiple LOCATION blocks (concatenated EPWs)
-  const blocks = csvString.split(/(?=LOCATION,)/).filter(b => b.trim().length > 0);
+  // Detect if there are multiple LOCATION blocks (concatenated EPWs), anchored to line starts
+  const blocks = csvString.split(/(?=^LOCATION,)/m).filter(b => b.trim().length > 0);
   if (blocks.length > 1) {
     console.log(`Detected ${blocks.length} EPW blocks in file. Parsing the first one.`);
     return parseSingleEPW(blocks[0]);
@@ -134,11 +133,15 @@ function parseSingleEPW(csvString: string): ParsedEPW {
     const hl = lines[hi] ?? '';
     if (!/^HOLIDAYS\/DAYLIGHT SAVINGS/i.test(hl) && !/^HOLIDAYS,.*DAYLIGHT/i.test(hl)) continue;
     const hp = hl.split(',');
-    const v = (hp[1] ?? '').trim();
-    if (/^y(es)?$/i.test(v) || v === '1' || v.toUpperCase() === 'Y') {
-      daylightSavings = 'yes';
-    } else if (/^n(o)?$/i.test(v) || v === '0' || v.toUpperCase() === 'N') {
-      daylightSavings = 'no';
+    // EnergyPlus EPW spec: hp[1] = LeapYear Observed, hp[2] = DST Start Day, hp[3] = DST End Day.
+    const dstStart = (hp[2] ?? '').trim();
+    const dstEnd = (hp[3] ?? '').trim();
+    if (dstStart && dstEnd) {
+      if (dstStart === '0' && dstEnd === '0') {
+        daylightSavings = 'no';
+      } else if (dstStart !== '0' && dstEnd !== '0') {
+        daylightSavings = 'yes';
+      }
     }
     break;
   }
@@ -157,11 +160,32 @@ function parseSingleEPW(csvString: string): ParsedEPW {
   };
 
   const data: EPWDataRow[] = [];
-  const varMinMax: Record<string, { min: number; max: number }> = {};
+  const varMinMax: Record<string, { min: number; max: number; count: number }> = {};
 
   EPW_COLUMNS.forEach(col => {
-    varMinMax[col.id] = { min: Infinity, max: -Infinity };
+    varMinMax[col.id] = { min: Infinity, max: -Infinity, count: 0 };
   });
+
+  const isMissingEpwValue = (colId: string, missing: number, val: number): boolean => {
+    if (!Number.isFinite(val)) return true;
+    if (val === missing) return true;
+    // Per EnergyPlus EPW Data Dictionary:
+    if (
+      (colId === 'globalHorizontalIlluminance' ||
+        colId === 'directNormalIlluminance' ||
+        colId === 'diffuseHorizontalIlluminance') &&
+      val >= 999900
+    ) {
+      return true;
+    }
+    if (colId === 'zenithLuminance' && val >= 9999) return true;
+    // 77777 = unlimited ceiling height, 88888 = cirroform ceiling (categorical codes, not meters)
+    if (colId === 'ceilingHeight' && (val === 77777 || val === 88888 || val >= 99999)) return true;
+    return false;
+  };
+
+  const tzMs = Number.isFinite(metadata.timeZone) ? Math.round(metadata.timeZone * 3_600_000) : 0;
+  let hasFeb29 = false;
 
   // Parse Data
   for (let i = locationLineIndex + 1; i < lines.length; i++) {
@@ -177,30 +201,25 @@ function parseSingleEPW(csvString: string): ParsedEPW {
     const month = parseInt(parts[1], 10);
     const day = parseInt(parts[2], 10);
     const hour = parseInt(parts[3], 10);
-    const minute = parseInt(parts[4], 10);
+    const rawMinute = parseInt(parts[4], 10);
 
     if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hour)) continue;
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+    if (month === 2 && day === 29) hasFeb29 = true;
 
-    // EPW hours are 1-24 (end-of-hour). We convert to 0-23 for filtering/labels.
-    const jsHour = hour - 1;
+    // EPW hours are 1-24 (end-of-hour). Convert to 0-23 (clamped if a non-standard file uses 0-23).
+    const jsHour = hour >= 1 && hour <= 24 ? hour - 1 : Math.max(0, Math.min(23, hour));
+    const minute = Number.isNaN(rawMinute) ? 0 : rawMinute;
+    // Use :30 interval midpoint for standard hourly EPW timestamps (minute 0 or 60) so SunCalc
+    // matches `solarNightHeatmap.ts` regardless of whether a generator emits minute=0 or minute=60.
+    const sampleMinute = minute === 0 || minute === 60 ? 30 : minute;
 
     /**
-     * IMPORTANT:
-     * `SunCalc` expects a real UTC instant (`Date.getTime()`), but EPW timestamps are in the
-     * station's local standard time (`metadata.timeZone`, hours offset from UTC).
-     *
-     * Many earlier bugs come from constructing `new Date(year,...)` which uses the viewer's local
-     * timezone (and DST rules), causing some files to appear “time-shifted” (e.g. morning plotted as afternoon).
-     *
-     * Convert station-local time → UTC instant:  utc = local - tzHours.
-     * (EPW timeZone is e.g. -8 for Pacific: local = UTC-8 ⇒ UTC = local - (-8) = local + 8)
+     * Convert station-local standard time → UTC instant without truncating fractional time zones
+     * (Date.UTC truncates fractional hour arguments toward zero).
      */
-    const utcMs = Date.UTC(year, month - 1, day, jsHour - metadata.timeZone, minute);
+    const utcMs = Date.UTC(year, month - 1, day, jsHour, sampleMinute) - tzMs;
     const jsDate = new Date(utcMs);
-
-    // Calculate day of year from calendar date (stable, DST-independent).
-    const oneDay = 1000 * 60 * 60 * 24;
-    const dayOfYear = Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 0)) / oneDay);
 
     const row: EPWDataRow = {
       date: jsDate,
@@ -209,17 +228,19 @@ function parseSingleEPW(csvString: string): ParsedEPW {
       day,
       hour: jsHour,
       minute,
-      dayOfYear,
+      dayOfYear: 1,
     };
 
     EPW_COLUMNS.forEach(col => {
-      let val = parseFloat(parts[col.index]);
-      // Handle missing values
-      if (val === col.missing || isNaN(val)) {
-        val = null as any; 
+      const parsedVal = parseFloat(parts[col.index]);
+      let val: number | null = parsedVal;
+      if (isMissingEpwValue(col.id, col.missing, parsedVal)) {
+        val = null;
       } else {
-        if (val < varMinMax[col.id].min) varMinMax[col.id].min = val;
-        if (val > varMinMax[col.id].max) varMinMax[col.id].max = val;
+        const mm = varMinMax[col.id];
+        if (parsedVal < mm.min) mm.min = parsedVal;
+        if (parsedVal > mm.max) mm.max = parsedVal;
+        mm.count += 1;
       }
       row[col.id] = val;
     });
@@ -227,20 +248,33 @@ function parseSingleEPW(csvString: string): ParsedEPW {
     data.push(row);
   }
 
-  // Create variables list
-  const variables: EPWVariable[] = EPW_COLUMNS.map(col => {
+  // Assign canonical dayOfYear (1..365 for standard TMY, 1..366 only if the file actually has Feb 29).
+  // Using each row's historical year in mixed-year TMY files causes gaps (59→61) and overlapping days.
+  const oneDay = 1000 * 60 * 60 * 24;
+  const canonicalYear = hasFeb29 ? 2000 : 2001;
+  const canonicalYearStart = Date.UTC(canonicalYear, 0, 0);
+  for (const row of data) {
+    row.dayOfYear = Math.floor((Date.UTC(canonicalYear, row.month - 1, row.day) - canonicalYearStart) / oneDay);
+  }
+
+  // Create variables list — exclude all-missing columns (count === 0) instead of fabricating [0, 100].
+  const variables: EPWVariable[] = EPW_COLUMNS.filter(
+    col =>
+      col.id === 'dryBulbTemperature' ||
+      (varMinMax[col.id].count > 0 && varMinMax[col.id].min !== varMinMax[col.id].max)
+  ).map(col => {
     const minMax = varMinMax[col.id];
     return {
       id: col.id,
       name: col.name,
       unit: col.unit,
-      min: minMax.min === Infinity ? 0 : minMax.min,
-      max: minMax.max === -Infinity ? 100 : minMax.max,
+      min: minMax.count > 0 ? minMax.min : 0,
+      max: minMax.count > 0 ? minMax.max : 100,
       category: col.category,
       fixedMin: col.fixedMin,
       fixedMax: col.fixedMax,
     };
-  }).filter(v => v.min !== v.max || v.id === 'dryBulbTemperature'); 
+  });
 
   return { metadata, data, variables };
 }

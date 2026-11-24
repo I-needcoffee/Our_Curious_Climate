@@ -9,9 +9,11 @@ function asosCacheKey(stationId: string, year: number): string {
 }
 
 function asosYearBoundsUtc(year: number): { stsUtcIso: string; etsUtcIso: string } {
+  // Extend through Jan 2 00:00Z so Western Hemisphere stations (UTC-5 to UTC-10)
+  // retain all late-evening Dec 31 local-standard-time hours.
   const stsUtcIso = `${year}-01-01T00:00:00Z`;
   const next = year + 1;
-  const etsUtcIso = `${next}-01-01T00:30:00Z`;
+  const etsUtcIso = `${next}-01-02T00:00:00Z`;
   return { stsUtcIso, etsUtcIso };
 }
 

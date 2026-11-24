@@ -1,6 +1,11 @@
 import * as d3 from 'd3';
 import { EPWDataRow } from './epwParser';
 import { epwEquivalentHourKey, indexEpwByEquivalentHour, isFiniteNumber } from './epwClockMatch';
+import {
+  aggregateCellStatistic,
+  circularDiffDeg,
+  type HeatmapCellStatistic,
+} from './globalFilter';
 
 export type DataExplorerAggregation = 'hour' | 'day' | 'week' | 'month';
 
@@ -9,21 +14,10 @@ function finiteField(row: EPWDataRow | undefined, field: string): number | undef
   return isFiniteNumber(value) ? value : undefined;
 }
 
-function meanFinite(values: readonly (number | null | undefined)[]): number {
-  const finite = values.filter(isFiniteNumber);
-  if (!finite.length) return NaN;
-  return d3.mean(finite) ?? NaN;
-}
-
 /**
- * Per-cell display-space Δ values, matching the heatmap’s aggregation
- * (month/week = group-mean diffs; day/hour = per-row diffs after unit conversion).
+ * Per-cell display-space Δ values, matching the heatmap’s aggregation & cell statistic.
  * Hours are paired by month/day/hour, not file row number. A pair is omitted when either
- * side is missing, so a gap is not stored as zero and cannot stretch the color scale.
- *
- * @param groupSource Rows used to build month/week groups and the day/hour series (defaults
- *  to `data`). **Wind** passes filtered rows so the domain matches a heatmap that aggregates
- *  only the filtered slice.
+ * side is missing, so a gap is not stored as zero and cannot bias or stretch the color scale.
  */
 export function dataExplorerDiffValuesForAggregation(
   aggregation: DataExplorerAggregation,
@@ -32,18 +26,32 @@ export function dataExplorerDiffValuesForAggregation(
   colorVar: string,
   baseUnit: string,
   convertValue: (val: number | null | undefined, unit: string, isDelta?: boolean) => number,
-  groupSource: EPWDataRow[] = _data
+  groupSource: EPWDataRow[] = _data,
+  statistic: HeatmapCellStatistic = 'mean'
 ): number[] {
   const out: number[] = [];
   const compareByHour = indexEpwByEquivalentHour(compareData);
   const compareField = (row: EPWDataRow) =>
     finiteField(compareByHour.get(epwEquivalentHourKey(row)), colorVar);
+  const isCircularDeg = colorVar === 'windDirection';
 
   const pushGroup = (values: EPWDataRow[]) => {
-    const primaryAvg = meanFinite(values.map(row => finiteField(row, colorVar)));
-    const compareAvg = meanFinite(values.map(compareField));
-    if (!Number.isFinite(primaryAvg) || !Number.isFinite(compareAvg)) return;
-    out.push(convertValue(compareAvg - primaryAvg, baseUnit, true));
+    const primPaired: number[] = [];
+    const compPaired: number[] = [];
+    for (const row of values) {
+      const p = finiteField(row, colorVar);
+      const c = compareField(row);
+      if (p === undefined || c === undefined) continue;
+      primPaired.push(p);
+      compPaired.push(c);
+    }
+    if (!primPaired.length) return;
+    const pStat = aggregateCellStatistic(primPaired, statistic, isCircularDeg);
+    const cStat = aggregateCellStatistic(compPaired, statistic, isCircularDeg);
+    if (!Number.isFinite(pStat) || !Number.isFinite(cStat)) return;
+    const delta = isCircularDeg ? circularDiffDeg(cStat, pStat) : cStat - pStat;
+    const converted = convertValue(delta, baseUnit, true);
+    if (Number.isFinite(converted)) out.push(converted);
   };
 
   if (aggregation === 'month') {
@@ -61,7 +69,9 @@ export function dataExplorerDiffValuesForAggregation(
       const primary = finiteField(row, colorVar);
       const compare = compareField(row);
       if (primary === undefined || compare === undefined) return;
-      out.push(convertValue(compare - primary, baseUnit, true));
+      const delta = isCircularDeg ? circularDiffDeg(compare, primary) : compare - primary;
+      const converted = convertValue(delta, baseUnit, true);
+      if (Number.isFinite(converted)) out.push(converted);
     });
   }
 

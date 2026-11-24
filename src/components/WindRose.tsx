@@ -9,6 +9,11 @@ import type { ChartType, CompareWindRoseSharedControls } from '../App';
 import { X, Settings2 } from 'lucide-react';
 import type { GlobalFilterState } from '../lib/globalFilter';
 import { hourInWrappedRange, monthInRange, rowPassesGlobalFilters } from '../lib/globalFilter';
+import {
+  convertUnit as convertDisplayUnit,
+  convertValue as convertDisplayValue,
+} from '../lib/unitConversion';
+import { resolveEpwVariableDef } from '../lib/variableLegendDomain';
 import { UnitSystem } from '../App';
 import { ChartTypeMenu } from './ChartTypeMenu';
 import {
@@ -131,6 +136,8 @@ function roseScaleTicks(maxHours: number): number[] {
   return [...inner, maxHours];
 }
 
+const EMPTY_EPW_ROWS: EPWDataRow[] = [];
+
 export function WindRose({
   data: epwData,
   compareData: epwCompareRaw,
@@ -162,25 +169,48 @@ export function WindRose({
 
   const globalIemPrefs = useWindIemGlobalPrefs();
   const iemControls = windRoseShared?.iem ?? globalIemPrefs;
+  const sameCompareSite =
+    !compareMetadata ||
+    !metadata ||
+    (Math.abs(compareMetadata.lat - metadata.lat) < 0.05 &&
+      Math.abs(compareMetadata.lng - metadata.lng) < 0.05);
+  const compareIemControls = useMemo(
+    () => (sameCompareSite ? iemControls : { ...iemControls, iemStation: null }),
+    [sameCompareSite, iemControls]
+  );
   const skipCompareWindResolution = !(epwCompareRaw && epwCompareRaw.length > 0);
+  const useIemSamples = iemControls.source === 'iem';
 
-  // For wind roses, preserve multi-year distributions by binning raw ASOS hourly samples across years.
-  const iemSamples = useIemAsosWindSamples(metadata, iemControls, false, epwData);
+  // For wind roses, preserve multi-year distributions (1 hourly sample per UTC hour, annualized).
+  const iemSamples = useIemAsosWindSamples(metadata, iemControls, !useIemSamples, epwData);
   const iemSamplesCompare = useIemAsosWindSamples(
     compareMetadata ?? metadata,
-    iemControls,
-    skipCompareWindResolution,
-    epwCompareRaw ?? []
+    compareIemControls,
+    !useIemSamples || skipCompareWindResolution,
+    epwCompareRaw ?? EMPTY_EPW_ROWS
   );
 
-  const primWindResolved = useResolvedIemWindRows(epwData, metadata, iemControls, false);
-  const cmpWindResolved = useResolvedIemWindRows(epwCompareRaw ?? [], compareMetadata ?? metadata, iemControls, skipCompareWindResolution);
+  // Avoid duplicate IEM network fetches: only run `useResolvedIemWindRows` when using EPW mode.
+  const primWindResolved = useResolvedIemWindRows(epwData, metadata, iemControls, useIemSamples);
+  const cmpWindResolved = useResolvedIemWindRows(
+    epwCompareRaw ?? EMPTY_EPW_ROWS,
+    compareMetadata ?? metadata,
+    compareIemControls,
+    useIemSamples || skipCompareWindResolution
+  );
 
-  const data = iemControls.source === 'iem' ? iemSamples.samples : primWindResolved.rows;
-  const compareData =
-    iemControls.source === 'iem'
-      ? (skipCompareWindResolution ? epwCompareRaw : iemSamplesCompare.samples)
-      : (skipCompareWindResolution ? epwCompareRaw : cmpWindResolved.rows);
+  const iemPrimaryReady = useIemSamples && iemSamples.samples.length > 0;
+  const iemCompareReady = useIemSamples && iemSamplesCompare.samples.length > 0;
+  const primaryHourWeight = iemPrimaryReady ? 1 / Math.max(1, iemSamples.yearCount) : 1;
+  const compareHourWeight = iemCompareReady ? 1 / Math.max(1, iemSamplesCompare.yearCount) : 1;
+
+  // Fall back cleanly to EPW data if IEM fails or returns no rows.
+  const data = iemPrimaryReady ? iemSamples.samples : primWindResolved.rows;
+  const compareData = skipCompareWindResolution
+    ? epwCompareRaw
+    : iemCompareReady
+      ? iemSamplesCompare.samples
+      : cmpWindResolved.rows;
 
   const [iCv, setICv] = useState(variables.find(v => v.id === 'windSpeed')?.id || variables[0]?.id || '');
   const colorVar = windRoseShared?.colorVar ?? iCv;
@@ -275,24 +305,10 @@ export function WindRose({
     };
   }, []);
 
-  const convertValue = (val: number | null | undefined, unit: string, isDelta: boolean = false) => {
-    if (val === null || val === undefined) return 0;
-    if (unitSystem === 'imperial') {
-      if (unit === '°C') return isDelta ? val * 9/5 : val * 9/5 + 32;
-      if (unit === 'm/s') return val * 2.23694;
-      if (unit === 'mm') return val / 25.4;
-    }
-    return val;
-  };
+  const convertValue = (val: number | null | undefined, unit: string, isDelta: boolean = false) =>
+    convertDisplayValue(val, unit, unitSystem, isDelta);
 
-  const convertUnit = (unit: string) => {
-    if (unitSystem === 'imperial') {
-      if (unit === '°C') return '°F';
-      if (unit === 'm/s') return 'mph';
-      if (unit === 'mm') return 'in';
-    }
-    return unit;
-  };
+  const convertUnit = (unit: string) => convertDisplayUnit(unit, unitSystem);
 
   const epwDryBulbLookup = useMemo(
     () => (epwData.length ? buildEpwDryBulbStationClockLookup(epwData) : null),
@@ -329,7 +345,9 @@ export function WindRose({
       let isSpeedMatch = true;
       if (speedFilterEnabled) {
         const speed = convertValue(d.windSpeed as number, 'm/s');
-        if (speedFilterType === 'above') {
+        if (!Number.isFinite(speed)) {
+          isSpeedMatch = false;
+        } else if (speedFilterType === 'above') {
           isSpeedMatch = speed > speedThreshold;
         } else {
           isSpeedMatch = speed < speedThreshold;
@@ -393,9 +411,9 @@ export function WindRose({
             hours: [0, 23],
           })
         : [];
-    const maxPrimary = d3.max(directionHourTotals(annualPrimary, numBins)) || 0;
+    const maxPrimary = (d3.max(directionHourTotals(annualPrimary, numBins)) || 0) * primaryHourWeight;
     const maxCompare = annualCompare.length
-      ? d3.max(directionHourTotals(annualCompare, numBins)) || 0
+      ? (d3.max(directionHourTotals(annualCompare, numBins)) || 0) * compareHourWeight
       : 0;
     return Math.max(maxPrimary, maxCompare, 1);
   }, [
@@ -414,6 +432,8 @@ export function WindRose({
     metadata,
     compareMetadata,
     numBins,
+    primaryHourWeight,
+    compareHourWeight,
   ]);
 
   const scaleMaxHours = scaleMaxOverride ?? annualMaxHours;
@@ -432,7 +452,7 @@ export function WindRose({
   }, [tutorialEnabled, tutorialReport, colorVar, variables, numBins]);
 
   const { colorVarDef, cMin, cMax, cUnit } = useMemo(() => {
-    const def = variables.find(v => v.id === colorVar) || variables.find(v => v.id === 'windSpeed') || variables[0];
+    const def = resolveEpwVariableDef(variables, colorVar || 'windSpeed');
     let min = def.fixedMin !== undefined ? convertValue(def.fixedMin, def.unit) : convertValue(def.min, def.unit);
     let max = def.fixedMax !== undefined ? convertValue(def.fixedMax, def.unit) : convertValue(def.max, def.unit);
     const unit = convertUnit(def.unit);
@@ -462,7 +482,7 @@ export function WindRose({
     ) : null;
 
   useEffect(() => {
-    if (!roseRef.current || !filteredData.length || dimensions.width === 0) return;
+    if (!roseRef.current || dimensions.width === 0) return;
 
     const gradientDef = gradients.find(g => g.id === gradientId) || gradients[0];
     
@@ -491,66 +511,15 @@ export function WindRose({
     const roseRadius = Math.min(roseWidth / 2 - rim.x, roseHeight / 2 - rim.y);
     /** Over-scale bins are compressed to the ring and flagged with a chevron drawn inside the wedge tip. */
     const overflowRadiusMax = roseRadius;
-
-    const roseSvg = d3.select(roseRef.current);
-    roseSvg.selectAll("*").remove();
-
-    const roseG = roseSvg
-      .attr("viewBox", `0 0 ${roseWidth} ${roseHeight}`)
-      .append("g")
-      .attr("transform", `translate(${roseWidth / 2}, ${roseHeight / 2})`);
-
-    // Group wind by direction
     const binSize = 360 / numBins;
-    
-    // Create 6 buckets based on the color variable's domain
     const numBuckets = 6;
     const bucketScale = d3.scaleQuantize<number>()
       .domain([cMin, cMax])
       .range(d3.range(numBuckets));
-    
-    const bins = d3.range(numBins).map(i => ({
-      angle: i * binSize,
-      buckets: new Array(numBuckets).fill(0),
-      totalCount: 0
-    }));
-
-    const compareByHour = showDifference && compareData ? indexEpwByEquivalentHour(compareData) : null;
-
-    filteredData.forEach(d => {
-      const dir = d.windDirection as number;
-      const speed = d.windSpeed as number;
-      
-      let val: number;
-      if (showDifference && compareByHour) {
-        const compareRow = compareByHour.get(epwEquivalentHourKey(d));
-        const primaryVal = d[colorVar] as unknown;
-        const compareVal = compareRow?.[colorVar] as unknown;
-        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return;
-        val = convertValue(compareVal - primaryVal, colorVarDef.unit, true);
-      } else {
-        val = convertValue(d[colorVar] as number, colorVarDef.unit);
-      }
-
-      if (dir !== null && dir !== undefined && val !== null && val !== undefined && speed > 0) {
-        let binIndex = Math.round(dir / binSize) % numBins;
-        if (binIndex < 0) binIndex += numBins;
-        
-        let bucketIndex = bucketScale(val);
-        if (bucketIndex === undefined) bucketIndex = 0;
-        if (bucketIndex >= numBuckets) bucketIndex = numBuckets - 1;
-        
-        bins[binIndex].buckets[bucketIndex]++;
-        bins[binIndex].totalCount++;
-      }
-    });
-
     const scaleMax = Math.max(1, scaleMaxHours);
     const rScaleRose = d3.scaleLinear()
       .domain([0, scaleMax])
       .range([0, roseRadius]);
-    // Extend linearly past the outer circle. If a direction would leave the
-    // plot, compress that whole stacked bar to overflowRadiusMax and mark it.
     const radiusOf = (hours: number, totalCount: number) => {
       const totalR = rScaleRose(Math.max(totalCount, hours));
       if (totalR <= overflowRadiusMax) return Math.max(0, rScaleRose(hours));
@@ -558,177 +527,265 @@ export function WindRose({
       return (Math.max(0, hours) / totalCount) * overflowRadiusMax;
     };
     const binHitsDrawCap = (totalCount: number) => rScaleRose(totalCount) > overflowRadiusMax + 0.5;
-    const anyOverflow = bins.some(b => b.totalCount > scaleMax + 0.5);
-    const hoursScaleNote =
-      scaleMaxOverride == null
-        ? `Rings = hours with wind · outer ring ${Math.round(annualMaxHours)} h (annual peak) · calm excluded`
-        : anyOverflow
-          ? `Outer ring ${Math.round(scaleMaxHours)} h · arrows exceed scale · calm excluded`
-          : `Outer ring ${Math.round(scaleMaxHours)} h (annual peak ${Math.round(annualMaxHours)} h) · calm excluded`;
+    const compareByHour = showDifference && compareData ? indexEpwByEquivalentHour(compareData) : null;
 
-    // Draw grid circles (always include the outer scale max)
-    const ticks = roseScaleTicks(scaleMax);
-    roseG.selectAll(".rose-grid")
-      .data(ticks)
-      .join("circle")
-      .attr("class", "rose-grid")
-      .attr("r", d => rScaleRose(d))
-      .style("fill", "none")
-      .style("stroke", roseRingColor(theme))
-      .style("stroke-width", d => d === scaleMax ? '2px' : '1.5px')
-      .style("stroke-dasharray", "none");
+    const renderRoseInto = (
+      svgEl: SVGSVGElement,
+      rowsToPlot: EPWDataRow[],
+      hourWeight: number,
+      allowDiff: boolean
+    ): boolean => {
+      const roseSvg = d3.select(svgEl);
+      roseSvg.selectAll('*').remove();
 
-    const ringLabelItems = ticks.flatMap(tick =>
-      RING_LABEL_BEARINGS_DEG.map(bearing => ({ tick, bearing }))
-    );
-    const ringFill = theme === 'dark' ? '#9ca3af' : '#6b7280';
-    const ringHalo = roseCardFill(theme);
-    roseG
-      .selectAll(".rose-grid-label")
-      .data(ringLabelItems)
-      .join("text")
-      .attr("class", "rose-grid-label")
-      .attr("transform", d => {
-        const r = rScaleRose(d.tick);
-        const rad = (d.bearing * Math.PI) / 180;
-        const x = r * Math.sin(rad);
-        const y = -r * Math.cos(rad);
-        let rot = d.bearing;
-        if (rot > 90 && rot < 270) rot += 180;
-        return `translate(${x},${y}) rotate(${rot})`;
-      })
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "central")
-      .style("fill", ringFill)
-      .style("font-size", `${ringLabelPx}px`)
-      .style("font-weight", d => (d.tick === scaleMax ? "700" : "600"))
-      .style("paint-order", "stroke")
-      .style("stroke", ringHalo)
-      .style("stroke-width", `${Math.max(2, ringLabelPx * 0.3)}px`)
-      .style("stroke-linejoin", "round")
-      .text(d => `${Math.round(d.tick)}`);
+      const roseG = roseSvg
+        .attr('viewBox', `0 0 ${roseWidth} ${roseHeight}`)
+        .append('g')
+        .attr('transform', `translate(${roseWidth / 2}, ${roseHeight / 2})`);
 
-    // Draw axis lines (16 compass points)
-    roseG.selectAll(".rose-axis")
-      .data(d3.range(16))
-      .join("line")
-      .attr("class", "rose-axis")
-      .attr("x1", 0)
-      .attr("y1", 0)
-      .attr("x2", d => roseRadius * Math.sin(d * (360/16) * Math.PI / 180))
-      .attr("y2", d => -roseRadius * Math.cos(d * (360/16) * Math.PI / 180))
-      .style("stroke", roseRingColor(theme))
-      .style("stroke-width", '1px')
-      .style("stroke-opacity", 0.5);
+      const bins = d3.range(numBins).map(i => ({
+        angle: i * binSize,
+        buckets: new Array(numBuckets).fill(0),
+        totalCount: 0,
+      }));
 
-    // Stack the buckets
-    const stack = d3.stack<any>()
-      .keys(d3.range(numBuckets).map(String))
-      .value((d, key) => d.buckets[Number(key)]);
-    
-    const series = stack(bins);
-    
-    const wedges: any[] = [];
-    series.forEach((s) => {
-      const extent = bucketScale.invertExtent(Number(s.key));
-      s.forEach(d => {
-        if (d[1] > d[0]) {
-          wedges.push({
-            angle: d.data.angle,
-            inner: d[0],
-            outer: d[1],
-            count: d[1] - d[0],
-            totalCount: d.data.totalCount,
-            bucketIndex: Number(s.key),
-            extent: extent
-          });
+      rowsToPlot.forEach(d => {
+        const dir = d.windDirection as number;
+        const speed = d.windSpeed as number;
+
+        let val: number;
+        if (allowDiff && compareByHour) {
+          const compareRow = compareByHour.get(epwEquivalentHourKey(d));
+          const primaryVal = d[colorVar] as unknown;
+          const compareVal = compareRow?.[colorVar] as unknown;
+          if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return;
+          val = convertValue(compareVal - primaryVal, colorVarDef.unit, true);
+        } else {
+          val = convertValue(d[colorVar] as number, colorVarDef.unit);
+        }
+
+        if (
+          typeof dir === 'number' &&
+          Number.isFinite(dir) &&
+          typeof val === 'number' &&
+          Number.isFinite(val) &&
+          typeof speed === 'number' &&
+          Number.isFinite(speed) &&
+          speed > 0
+        ) {
+          let binIndex = Math.round(dir / binSize) % numBins;
+          if (binIndex < 0) binIndex += numBins;
+
+          let bucketIndex = bucketScale(val);
+          if (bucketIndex === undefined) bucketIndex = 0;
+          if (bucketIndex >= numBuckets) bucketIndex = numBuckets - 1;
+
+          bins[binIndex].buckets[bucketIndex] += hourWeight;
+          bins[binIndex].totalCount += hourWeight;
         }
       });
-    });
 
-    const visibleWedges = wedges.filter(d => {
-      const inner = radiusOf(d.inner, d.totalCount);
-      const outer = radiusOf(d.outer, d.totalCount);
-      return outer - inner > 0.25;
-    });
+      const ticks = roseScaleTicks(scaleMax);
+      roseG
+        .selectAll('.rose-grid')
+        .data(ticks)
+        .join('circle')
+        .attr('class', 'rose-grid')
+        .attr('r', d => rScaleRose(d))
+        .style('fill', 'none')
+        .style('stroke', roseRingColor(theme))
+        .style('stroke-width', d => (d === scaleMax ? '2px' : '1.5px'))
+        .style('stroke-dasharray', 'none');
 
-    const arc = d3.arc<any>()
-      .innerRadius(d => radiusOf(d.inner, d.totalCount))
-      .outerRadius(d => Math.max(radiusOf(d.inner, d.totalCount), radiusOf(d.outer, d.totalCount)))
-      .startAngle(d => (d.angle - binSize / 2) * Math.PI / 180)
-      .endAngle(d => (d.angle + binSize / 2) * Math.PI / 180);
+      const ringLabelItems = ticks.flatMap(tick =>
+        RING_LABEL_BEARINGS_DEG.map(bearing => ({ tick, bearing }))
+      );
+      const ringFill = theme === 'dark' ? '#9ca3af' : '#6b7280';
+      const ringHalo = roseCardFill(theme);
+      roseG
+        .selectAll('.rose-grid-label')
+        .data(ringLabelItems)
+        .join('text')
+        .attr('class', 'rose-grid-label')
+        .attr('transform', d => {
+          const r = rScaleRose(d.tick);
+          const rad = (d.bearing * Math.PI) / 180;
+          const x = r * Math.sin(rad);
+          const y = -r * Math.cos(rad);
+          let rot = d.bearing;
+          if (rot > 90 && rot < 270) rot += 180;
+          return `translate(${x},${y}) rotate(${rot})`;
+        })
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .style('fill', ringFill)
+        .style('font-size', `${ringLabelPx}px`)
+        .style('font-weight', d => (d.tick === scaleMax ? '700' : '600'))
+        .style('paint-order', 'stroke')
+        .style('stroke', ringHalo)
+        .style('stroke-width', `${Math.max(2, ringLabelPx * 0.3)}px`)
+        .style('stroke-linejoin', 'round')
+        .text(d => `${Math.round(d.tick)}`);
 
-    roseG.selectAll(".rose-wedge")
-      .data(visibleWedges)
-      .join("path")
-      .attr("class", "rose-wedge")
-      .attr("d", arc)
-      .style("fill", d => {
-        const midVal = (d.extent[0] + d.extent[1]) / 2;
-        return colorScale(midVal);
-      })
-      .style("opacity", 0.6)
-      .style("stroke", "#ffffff")
-      .style("stroke-width", "0.5px")
-      .append("title")
-      .text(d => {
-        const over = d.totalCount > scaleMax;
-        return `Direction: ${Math.round(d.angle)}°\nRange: ${d.extent[0].toFixed(1)} - ${d.extent[1].toFixed(1)} ${cUnit}\nCount: ${d.count} hours${
-          over ? `\nDirection total ${Math.round(d.totalCount)} hrs exceeds outer circle (${Math.round(scaleMax)} hrs)` : ''
-        }`;
+      // Draw axis lines (16 compass points)
+      roseG
+        .selectAll('.rose-axis')
+        .data(d3.range(16))
+        .join('line')
+        .attr('class', 'rose-axis')
+        .attr('x1', 0)
+        .attr('y1', 0)
+        .attr('x2', d => roseRadius * Math.sin((d * (360 / 16) * Math.PI) / 180))
+        .attr('y2', d => -roseRadius * Math.cos((d * (360 / 16) * Math.PI) / 180))
+        .style('stroke', roseRingColor(theme))
+        .style('stroke-width', '1px')
+        .style('stroke-opacity', 0.5);
+
+      const stack = d3
+        .stack<any>()
+        .keys(d3.range(numBuckets).map(String))
+        .value((d, key) => d.buckets[Number(key)]);
+
+      const series = stack(bins);
+
+      const wedges: any[] = [];
+      series.forEach(s => {
+        const extent = bucketScale.invertExtent(Number(s.key));
+        s.forEach(d => {
+          if (d[1] > d[0]) {
+            wedges.push({
+              angle: d.data.angle,
+              inner: d[0],
+              outer: d[1],
+              count: d[1] - d[0],
+              totalCount: d.data.totalCount,
+              bucketIndex: Number(s.key),
+              extent: extent,
+            });
+          }
+        });
       });
 
-    const overflowChevrons = bins.filter(b => binHitsDrawCap(b.totalCount));
-    roseG
-      .selectAll(".rose-overflow")
-      .data(overflowChevrons)
-      .join("path")
-      .attr("class", "rose-overflow")
-      .attr("d", d => {
-        const ang = (d.angle * Math.PI) / 180;
-        const tipR = overflowRadiusMax - 1.5;
-        const r = tipR - 7;
-        const half = 4.2;
-        const tipX = tipR * Math.sin(ang);
-        const tipY = -tipR * Math.cos(ang);
-        const bx = r * Math.sin(ang);
-        const by = -r * Math.cos(ang);
-        const p1x = bx + half * Math.cos(ang);
-        const p1y = by + half * Math.sin(ang);
-        const p2x = bx - half * Math.cos(ang);
-        const p2y = by - half * Math.sin(ang);
-        return `M${p1x},${p1y}L${tipX},${tipY}L${p2x},${p2y}Z`;
-      })
-      .style("fill", axisInk)
-      .style("stroke", roseCardFill(theme))
-      .style("stroke-width", "1.2px")
-      .style("opacity", 0.9)
-      .append("title")
-      .text(d => `${Math.round(d.totalCount)} hrs exceeds outer circle (${Math.round(scaleMax)} hrs)`);
+      const visibleWedges = wedges.filter(d => {
+        const inner = radiusOf(d.inner, d.totalCount);
+        const outer = radiusOf(d.outer, d.totalCount);
+        return outer - inner > 0.25;
+      });
 
-    roseG.selectAll(".rose-label")
-      .data(d3.range(16))
-      .join("text")
-      .attr("class", "rose-label")
-      .attr("x", d => (roseRadius + ringGap) * Math.sin(d * (360/16) * Math.PI / 180))
-      .attr("y", d => -(roseRadius + ringGap) * Math.cos(d * (360/16) * Math.PI / 180))
-      .attr("dy", d => ringLabelPlacement((d * (360 / 16) * Math.PI) / 180).dy)
-      .attr("text-anchor", d => ringLabelPlacement((d * (360 / 16) * Math.PI) / 180).anchor)
-      .style("fill", d => (d % 2 === 0 ? axisInk : gridInk))
-      .style("font-size", d => `${d % 4 === 0 ? cardinalPx : d % 2 === 0 ? intercardinalPx : secondaryPx}px`)
-      .style("font-weight", d => (d % 4 === 0 ? "700" : d % 2 === 0 ? "600" : "500"))
-      .text(d => COMPASS_POINTS[d]);
+      const arc = d3
+        .arc<any>()
+        .innerRadius(d => radiusOf(d.inner, d.totalCount))
+        .outerRadius(d => Math.max(radiusOf(d.inner, d.totalCount), radiusOf(d.outer, d.totalCount)))
+        .startAngle(d => ((d.angle - binSize / 2) * Math.PI) / 180)
+        .endAngle(d => ((d.angle + binSize / 2) * Math.PI) / 180);
 
-    // The speed-class legend lives in the card header as a stepped pill bar (same component as
-    // every other card) so the whole SVG belongs to the rose; publish what it needs.
-    setLegendState({
-      note: hoursScaleNote,
-      bandFills: d3.range(numBuckets).map(i => {
-        const extent = bucketScale.invertExtent(i);
-        return colorScale((extent[0] + extent[1]) / 2);
-      }),
+      const unitWord = hourWeight < 1 ? 'hrs/yr' : 'hours';
+      roseG
+        .selectAll('.rose-wedge')
+        .data(visibleWedges)
+        .join('path')
+        .attr('class', 'rose-wedge')
+        .attr('d', arc)
+        .style('fill', d => {
+          const midVal = (d.extent[0] + d.extent[1]) / 2;
+          return colorScale(midVal);
+        })
+        .style('opacity', 0.6)
+        .style('stroke', '#ffffff')
+        .style('stroke-width', '0.5px')
+        .append('title')
+        .text(d => {
+          const over = d.totalCount > scaleMax;
+          const rangeText =
+            d.bucketIndex === 0
+              ? `≤ ${d.extent[1].toFixed(1)} ${cUnit}`
+              : d.bucketIndex === numBuckets - 1
+                ? `≥ ${d.extent[0].toFixed(1)} ${cUnit}`
+                : `${d.extent[0].toFixed(1)} - ${d.extent[1].toFixed(1)} ${cUnit}`;
+          const countDisplay = hourWeight < 1 ? d.count.toFixed(1) : Math.round(d.count);
+          return `Direction: ${Math.round(d.angle)}°\nRange: ${rangeText}\nCount: ${countDisplay} ${unitWord}${
+            over ? `\nDirection total ${Math.round(d.totalCount)} ${unitWord} exceeds outer circle (${Math.round(scaleMax)} h)` : ''
+          }`;
+        });
+
+      const overflowChevrons = bins.filter(b => binHitsDrawCap(b.totalCount));
+      roseG
+        .selectAll('.rose-overflow')
+        .data(overflowChevrons)
+        .join('path')
+        .attr('class', 'rose-overflow')
+        .attr('d', d => {
+          const ang = (d.angle * Math.PI) / 180;
+          const tipR = overflowRadiusMax - 1.5;
+          const r = tipR - 7;
+          const half = 4.2;
+          const tipX = tipR * Math.sin(ang);
+          const tipY = -tipR * Math.cos(ang);
+          const bx = r * Math.sin(ang);
+          const by = -r * Math.cos(ang);
+          const p1x = bx + half * Math.cos(ang);
+          const p1y = by + half * Math.sin(ang);
+          const p2x = bx - half * Math.cos(ang);
+          const p2y = by - half * Math.sin(ang);
+          return `M${p1x},${p1y}L${tipX},${tipY}L${p2x},${p2y}Z`;
+        })
+        .style('fill', axisInk)
+        .style('stroke', roseCardFill(theme))
+        .style('stroke-width', '1.2px')
+        .style('opacity', 0.9)
+        .append('title')
+        .text(d => `${Math.round(d.totalCount)} ${unitWord} exceeds outer circle (${Math.round(scaleMax)} h)`);
+
+      roseG
+        .selectAll('.rose-label')
+        .data(d3.range(16))
+        .join('text')
+        .attr('class', 'rose-label')
+        .attr('x', d => (roseRadius + ringGap) * Math.sin((d * (360 / 16) * Math.PI) / 180))
+        .attr('y', d => -(roseRadius + ringGap) * Math.cos((d * (360 / 16) * Math.PI) / 180))
+        .attr('dy', d => ringLabelPlacement((d * (360 / 16) * Math.PI) / 180).dy)
+        .attr('text-anchor', d => ringLabelPlacement((d * (360 / 16) * Math.PI) / 180).anchor)
+        .style('fill', d => (d % 2 === 0 ? axisInk : gridInk))
+        .style('font-size', d => `${d % 4 === 0 ? cardinalPx : d % 2 === 0 ? intercardinalPx : secondaryPx}px`)
+        .style('font-weight', d => (d % 4 === 0 ? '700' : d % 2 === 0 ? '600' : '500'))
+        .text(d => COMPASS_POINTS[d]);
+
+      return bins.some(b => b.totalCount > scaleMax + 0.5);
+    };
+
+    const anyOverflow = renderRoseInto(
+      roseRef.current,
+      filteredData,
+      primaryHourWeight,
+      Boolean(showDifference && compareData)
+    );
+    if (stackedComparison && compareData && compareRoseRef.current) {
+      renderRoseInto(compareRoseRef.current, filteredCompareData, compareHourWeight, false);
+    }
+
+    const ringUnit = primaryHourWeight < 1 ? 'h/yr' : 'h';
+    const hoursScaleNote =
+      scaleMaxOverride == null
+        ? `Rings = hours with wind · outer ring ${Math.round(annualMaxHours)} ${ringUnit} (annual peak) · calm excluded`
+        : anyOverflow
+          ? `Outer ring ${Math.round(scaleMaxHours)} ${ringUnit} · arrows exceed scale · calm excluded`
+          : `Outer ring ${Math.round(scaleMaxHours)} ${ringUnit} (annual peak ${Math.round(annualMaxHours)} ${ringUnit}) · calm excluded`;
+
+    const nextBandFills = d3.range(numBuckets).map(i => {
+      const extent = bucketScale.invertExtent(i);
+      return colorScale((extent[0] + extent[1]) / 2);
     });
-  }, [filteredData, data, compareData, showDifference, variables, colorVar, colorVarDef, gradientId, gradients, filter, dimensions.width, renderScale, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours]);
+    setLegendState(prev => {
+      if (
+        prev.note === hoursScaleNote &&
+        prev.bandFills.length === nextBandFills.length &&
+        prev.bandFills.every((c, idx) => c === nextBandFills[idx])
+      ) {
+        return prev;
+      }
+      return { note: hoursScaleNote, bandFills: nextBandFills };
+    });
+  }, [filteredData, filteredCompareData, stackedComparison, data, compareData, showDifference, variables, colorVar, colorVarDef, gradientId, gradients, filter, dimensions.width, renderScale, numBins, unitSystem, heatmapTextColor, theme, scaleMaxHours, scaleMaxOverride, annualMaxHours, primaryHourWeight, compareHourWeight]);
 
   const selectedPill = theme === 'dark' ? 'bg-gray-100 text-gray-900' : 'bg-gray-900 text-white';
   const idlePill = 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600';
@@ -1166,7 +1223,7 @@ export function WindRose({
 
       <div className="px-1 py-0.5 flex-1 min-h-0 flex flex-col gap-0 overflow-hidden min-w-0">
         <div className="relative flex min-h-0 min-w-0 w-full flex-1 items-center justify-center overflow-hidden">
-          {primWindResolved.loadingIem && iemControls.source === 'iem' ? (
+          {iemSamples.loading && iemControls.source === 'iem' ? (
             <IemWindChartLoadingOverlay
               theme={theme}
               label="Compiling IEM mesonet wind for your year range…"

@@ -12,7 +12,19 @@ import type { ChartType, CompareSunpathSharedControls } from '../App';
 import { X, Settings2 } from 'lucide-react';
 
 import type { GlobalFilterState } from '../lib/globalFilter';
-import { dryBulbCPassesGlobalTemperature, rowPassesGlobalFilters } from '../lib/globalFilter';
+import {
+  circularDiffDeg,
+  circularMeanDeg,
+  dryBulbCPassesGlobalTemperature,
+  hourInWrappedRange,
+  rowPassesGlobalFilters,
+} from '../lib/globalFilter';
+import {
+  convertUnit as convertDisplayUnit,
+  convertValue as convertDisplayValue,
+} from '../lib/unitConversion';
+import { resolveEpwVariableDef } from '../lib/variableLegendDomain';
+import { utcInstantFromEpwStationClock } from '../lib/solarNightHeatmap';
 import { UnitSystem } from '../App';
 import { ChartTypeMenu } from './ChartTypeMenu';
 import { ChartToolbarLabeledMenu } from './ChartToolbarLabeledMenu';
@@ -270,26 +282,14 @@ export function SunPath({
     return acc;
   }, {} as Record<string, EPWVariable[]>);
 
-  const radiusVarDef = variables.find(v => v.id === radiusVar) || variables[0] || EMPTY_VARIABLES_FALLBACK;
+  const radiusVarDef = variables.length
+    ? resolveEpwVariableDef(variables, radiusVar)
+    : EMPTY_VARIABLES_FALLBACK;
 
-  const convertValue = (val: number | null | undefined, unit: string, isDelta: boolean = false) => {
-    if (val === null || val === undefined) return 0;
-    if (unitSystem === 'imperial') {
-      if (unit === '°C') return isDelta ? val * 9/5 : val * 9/5 + 32;
-      if (unit === 'm/s') return val * 2.23694;
-      if (unit === 'mm') return val / 25.4;
-    }
-    return val;
-  };
+  const convertValue = (val: number | null | undefined, unit: string, isDelta: boolean = false) =>
+    convertDisplayValue(val, unit, unitSystem, isDelta);
 
-  const convertUnit = (unit: string) => {
-    if (unitSystem === 'imperial') {
-      if (unit === '°C') return '°F';
-      if (unit === 'm/s') return 'mph';
-      if (unit === 'mm') return 'in';
-    }
-    return unit;
-  };
+  const convertUnit = (unit: string) => convertDisplayUnit(unit, unitSystem);
 
   const radiusUnit = convertUnit(radiusVarDef.unit);
 
@@ -300,7 +300,9 @@ export function SunPath({
     let isTempMatch = true;
     if (tempFilterEnabled) {
       const temp = convertValue(d.dryBulbTemperature as number, '°C');
-      if (tempFilterType === 'helpful') {
+      if (!Number.isFinite(temp)) {
+        isTempMatch = false;
+      } else if (tempFilterType === 'helpful') {
         isTempMatch = temp < helpfulThreshold;
       } else {
         isTempMatch = temp > harmfulThreshold;
@@ -316,7 +318,9 @@ const filteredCompareData = (compareData || []).filter(d => {
     let isTempMatch = true;
     if (tempFilterEnabled) {
       const temp = convertValue(d.dryBulbTemperature as number, '°C');
-      if (tempFilterType === 'helpful') {
+      if (!Number.isFinite(temp)) {
+        isTempMatch = false;
+      } else if (tempFilterType === 'helpful') {
         isTempMatch = temp < helpfulThreshold;
       } else {
         isTempMatch = temp > harmfulThreshold;
@@ -347,19 +351,20 @@ const filteredCompareData = (compareData || []).filter(d => {
   }, [filteredData, filteredCompareData, compareData, radiusVar, radiusVarDef]);
 
   const { colorVarDef, cMin, cMax, cUnit } = useMemo(() => {
-    const def = variables.find(v => v.id === colorVar) || variables[0] || EMPTY_VARIABLES_FALLBACK;
+    const def = variables.length ? resolveEpwVariableDef(variables, colorVar) : EMPTY_VARIABLES_FALLBACK;
     let min = def.fixedMin !== undefined ? convertValue(def.fixedMin, def.unit) : convertValue(def.min, def.unit);
     let max = def.fixedMax !== undefined ? convertValue(def.fixedMax, def.unit) : convertValue(def.max, def.unit);
     const unit = convertUnit(def.unit);
 
     if (showDifference && compareData) {
       const compareByHour = indexEpwByEquivalentHour(compareData);
+      const isCircular = colorVar === 'windDirection';
       const diffs: number[] = [];
       for (const row of data) {
         const primaryVal = row[colorVar] as unknown;
         const compareVal = compareByHour.get(epwEquivalentHourKey(row))?.[colorVar] as unknown;
         if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) continue;
-        diffs.push(compareVal - primaryVal);
+        diffs.push(isCircular ? circularDiffDeg(compareVal, primaryVal) : compareVal - primaryVal);
       }
       const bound = symmetricDiffBound(diffs);
       const half = bound > 0 ? bound : 1;
@@ -388,30 +393,39 @@ const filteredCompareData = (compareData || []).filter(d => {
   }, [tutorialEnabled, tutorialReport, aggregation, colorVar, variables, radiusVar, radiusVarDef?.name]);
 
   const stats = (() => {
+    const isCircular = colorVar === 'windDirection';
+    const isTemp = colorVarDef.category === 'Temperature';
     if (showDifference && compareData) {
       const compareByHour = indexEpwByEquivalentHour(compareData);
-      const diffs = filteredData.map(d => {
-        const primaryVal = d[colorVar] as number;
-        const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
-        if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return null;
-        return compareVal - primaryVal;
-      }).filter(v => v !== null) as number[];
+      const diffs = filteredData
+        .map(d => {
+          const primaryVal = d[colorVar] as number;
+          const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
+          if (!isFiniteNumber(primaryVal) || !isFiniteNumber(compareVal)) return null;
+          return isCircular ? circularDiffDeg(compareVal, primaryVal) : compareVal - primaryVal;
+        })
+        .filter((v): v is number => v !== null);
 
+      if (!diffs.length) return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
       return {
-        avg: convertValue(d3.mean(diffs) || 0, colorVarDef.unit, true),
-        min: convertValue(d3.min(diffs) || 0, colorVarDef.unit, true),
-        max: convertValue(d3.max(diffs) || 0, colorVarDef.unit, true),
-        total: convertValue(d3.sum(diffs) || 0, colorVarDef.unit, true),
-        count: diffs.length
+        avg: convertValue(d3.mean(diffs), colorVarDef.unit, true),
+        min: convertValue(d3.min(diffs), colorVarDef.unit, true),
+        max: convertValue(d3.max(diffs), colorVarDef.unit, true),
+        total: isTemp || isCircular ? NaN : convertValue(d3.sum(diffs), colorVarDef.unit, true),
+        count: diffs.length,
       };
     }
 
+    const validVals = filteredData
+      .map(d => d[colorVar] as number)
+      .filter((v): v is number => isFiniteNumber(v));
+    if (!validVals.length) return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
     return {
-      avg: convertValue(d3.mean(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      min: convertValue(d3.min(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      max: convertValue(d3.max(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      total: convertValue(d3.sum(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      count: filteredData.length
+      avg: convertValue(isCircular ? circularMeanDeg(validVals) : d3.mean(validVals), colorVarDef.unit),
+      min: convertValue(d3.min(validVals), colorVarDef.unit),
+      max: convertValue(d3.max(validVals), colorVarDef.unit),
+      total: isTemp || isCircular ? NaN : convertValue(d3.sum(validVals), colorVarDef.unit, true),
+      count: validVals.length,
     };
   })();
 
@@ -573,7 +587,7 @@ const filteredCompareData = (compareData || []).filter(d => {
               rVal = meanEpwColumn(byDate, radiusVar);
             }
 
-            const rep = byDate[0]!;
+            const midRow = byDate[Math.floor(byDate.length / 2)] ?? byDate[0]!;
             points.push({
               date: midDate,
               altitude,
@@ -585,9 +599,9 @@ const filteredCompareData = (compareData || []).filter(d => {
               _count: byDate.length,
               _period: period,
               _hour: hour,
-              year: rep.year,
-              month: rep.month,
-              day: rep.day,
+              year: midRow.year,
+              month: midRow.month,
+              day: midRow.day,
               hour: hour as number,
             });
           }
@@ -622,8 +636,8 @@ const filteredCompareData = (compareData || []).filter(d => {
 
     // Split points into selected and unselected
     const isSelected = (d: any) => {
-      const m = d.month || (d.date ? d.date.getMonth() + 1 : 1);
-      const h = d._hour !== undefined ? d._hour : (d.hour !== undefined ? d.hour : (d.date ? d.date.getHours() : 0));
+      const m = d.month ?? 1;
+      const h = d._hour !== undefined ? d._hour : (d.hour ?? 0);
       const isMonthMatch = filter.startMonth <= filter.endMonth
         ? (m >= filter.startMonth && m <= filter.endMonth)
         : (m >= filter.startMonth || m <= filter.endMonth);
@@ -636,8 +650,8 @@ const filteredCompareData = (compareData || []).filter(d => {
       let isTempMatch = true;
       if (tempFilterEnabled) {
         const temp = convertValue(d.dryBulbTemperature as number, '°C');
-        if (isNaN(temp)) {
-          isTempMatch = true;
+        if (!Number.isFinite(temp)) {
+          isTempMatch = false;
         } else if (tempFilterType === 'helpful') {
           isTempMatch = temp < helpfulThreshold;
         } else {
@@ -647,15 +661,17 @@ const filteredCompareData = (compareData || []).filter(d => {
 
       return (
         isMonthMatch &&
-        h >= filter.startHour &&
-        h <= filter.endHour &&
+        hourInWrappedRange(h, filter.startHour, filter.endHour) &&
         isIsolationTemp &&
         isTempMatch
       );
     };
 
-    const selectedPoints = points.filter(isSelected);
-    const unselectedPoints = points.filter(d => !isSelected(d));
+    const validPoints = points.filter(
+      d => typeof d._val === 'number' && Number.isFinite(d._val) && typeof d._rVal === 'number' && Number.isFinite(d._rVal)
+    );
+    const selectedPoints = validPoints.filter(isSelected);
+    const unselectedPoints = validPoints.filter(d => !isSelected(d));
 
     // 1. Draw unselected points (bottom layer)
     g.selectAll(".data-point-unselected")
@@ -731,14 +747,14 @@ const filteredCompareData = (compareData || []).filter(d => {
       )
       .text(d => compass[d as keyof typeof compass] || `${d}°`);
 
-    // 3. Draw Sun Path Lines (Solstices and Equinoxes)
-    // The arcs are not labelled on the dial: the legend footnote names them (highest = summer
-    // solstice, lowest = winter solstice) so no text sits on top of the sun positions.
-    const year = currentData[0]?.date.getFullYear() || new Date().getFullYear();
+    // 3. Draw Sun Path Lines (Solstices and Equinoxes) in the station's local standard timezone
+    const year = currentData[0]?.year || 2020;
+    const isSouthern = Number.isFinite(locMeta.lat) && locMeta.lat < 0;
+    const tzHours = Number.isFinite(locMeta.timeZone) ? locMeta.timeZone : 0;
     const keyDates = [
-      { name: 'Summer Solstice', date: new Date(year, 5, 21) }, // June 21
-      { name: 'Equinox', date: new Date(year, 2, 21) }, // March 21
-      { name: 'Winter Solstice', date: new Date(year, 11, 21) } // Dec 21
+      { name: isSouthern ? 'Winter Solstice (Jun 21)' : 'Summer Solstice (Jun 21)', month: 6, day: 21 },
+      { name: 'Equinox (Mar 21)', month: 3, day: 21 },
+      { name: isSouthern ? 'Summer Solstice (Dec 21)' : 'Winter Solstice (Dec 21)', month: 12, day: 21 },
     ];
 
     /**
@@ -757,9 +773,15 @@ const filteredCompareData = (compareData || []).filter(d => {
       const segments: { altitude: number; azimuth: number }[][] = [];
       let current: { altitude: number; azimuth: number }[] = [];
       for (let h = 0; h < 24; h++) {
-        for (let m = 0; m < 60; m += 10) {
-          const d = new Date(kd.date);
-          d.setHours(h, m, 0, 0);
+        for (let m = 0; m < 60; m += 5) {
+          const d = utcInstantFromEpwStationClock({
+            year,
+            month: kd.month,
+            day: kd.day,
+            jsHour: h,
+            minute: m,
+            timeZoneHours: tzHours,
+          });
           const pos = SunCalc.getPosition(d, locMeta.lat, locMeta.lng);
           const altitude = (pos.altitude * 180) / Math.PI;
           if (altitude >= 0) {
@@ -1010,15 +1032,23 @@ const filteredCompareData = (compareData || []).filter(d => {
         <div className="grid grid-cols-2 gap-2">
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.avg) ? `${stats.avg.toFixed(1)} ${cUnit}` : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.min) && Number.isFinite(stats.max)
+                ? `${stats.min.toFixed(1)} / ${stats.max.toFixed(1)} ${cUnit}`
+                : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.total) ? `${stats.total.toFixed(stats.total < 10 ? 2 : 0)} ${cUnit}` : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>

@@ -13,6 +13,7 @@ import {
 } from '../lib/explorerBarGradient';
 import { differenceDivergingColor, DIFFERENCE_DIVERGING_ID } from '../lib/differenceDivergingColor';
 import { dataExplorerDiffValuesForAggregation } from '../lib/dataExplorerDiffAggregation';
+import { resolveEpwVariableDef } from '../lib/variableLegendDomain';
 import { epwEquivalentHourKey, indexEpwByEquivalentHour } from '../lib/epwClockMatch';
 import { symmetricDiffBound } from '../lib/symmetricDiffDomain';
 import {
@@ -29,6 +30,8 @@ import { X, Settings2 } from 'lucide-react';
 import type { BarChartFillMode, GlobalFilterState, HeatmapCellStatistic } from '../lib/globalFilter';
 import {
   aggregateCellStatistic,
+  circularDiffDeg,
+  circularMeanDeg,
   explorerBarSolidColor,
   explorerBarStatisticY,
   globalFilterDaySegments,
@@ -58,6 +61,7 @@ import {
   chartToolbarChipButtonClass,
   chartToolbarRoundButtonClass,
   CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  compareExplorerLineColors,
   comparePaneLabelClass,
   chartToolbarRemoveButtonClass,
   chartToolbarRevealClassFor,
@@ -100,13 +104,6 @@ const EMPTY_VARIABLES_FALLBACK: EPWVariable = {
   fixedMin: 5,
   fixedMax: 35,
 };
-
-/** Dual-series line chart in difference mode: baseline vs comparison (not Δ heatmap colors). */
-function compareExplorerLineColors(theme: 'light' | 'dark') {
-  return theme === 'dark'
-    ? { baseline: '#d1d5db', comparison: '#ffffff' }
-    : { baseline: '#e5e7eb', comparison: '#000000' };
-}
 
 interface DataExplorerProps {
   data: EPWDataRow[];
@@ -229,6 +226,9 @@ export function DataExplorer({
   const [internalShowSettings, setInternalShowSettings] = useState(false);
   const showSettings = explorerShared?.showSettings ?? internalShowSettings;
   const setShowSettings = explorerShared?.setShowSettings ?? setInternalShowSettings;
+  const [precipBarMode, setPrecipBarMode] = useState<'mean' | 'cumulative'>('mean');
+  const isPrecipDepth = colorVar === 'liquidPrecipitationDepth';
+  const useCumulativePrecip = isPrecipDepth && precipBarMode === 'cumulative' && aggregation !== 'hour';
 
   const showStatsModal = showStats && (!pairSuppressHeader || pairModalHost);
   const showSettingsModal = showSettings && (!pairSuppressHeader || pairModalHost);
@@ -273,7 +273,7 @@ export function DataExplorer({
   }, {} as Record<string, EPWVariable[]>);
 
   const { colorVarDef, cMin, cMax, cUnit } = useMemo(() => {
-    const def = variables.find(v => v.id === colorVar) ?? variables[0] ?? EMPTY_VARIABLES_FALLBACK;
+    const def = variables.length ? resolveEpwVariableDef(variables, colorVar) : EMPTY_VARIABLES_FALLBACK;
     const bounds = effectiveVariableLegendBounds(def);
     let min = convertValue(bounds.lo, def.unit);
     let max = convertValue(bounds.hi, def.unit);
@@ -286,7 +286,9 @@ export function DataExplorer({
         compareData,
         colorVar,
         def.unit,
-        convertValue
+        convertValue,
+        data,
+        heatmapCellStatistic
       );
       const bound = symmetricDiffBound(diffs);
       const half = bound > 0 ? bound : 1;
@@ -294,14 +296,21 @@ export function DataExplorer({
       max = half;
     }
     return { colorVarDef: def, cMin: min, cMax: max, cUnit: unit };
-  }, [variables, colorVar, showDifference, compareData, data, unitSystem, aggregation, convertValue]);
+  }, [variables, colorVar, showDifference, compareData, data, unitSystem, aggregation, convertValue, heatmapCellStatistic]);
 
   const colorVarLabel = `${colorVarDef.name} (${cUnit})`;
 
   const explorerLegendFootnote = useMemo(() => {
     const usesDaily = explorerUsesDailyAvgBarExtents(colorVar, colorVarDef.category);
     if (showDifference && compareData) {
-      return 'Compare lines: baseline vs comparison averages; shading shows the gap.';
+      const statWord =
+        heatmapCellStatistic === 'low' ? 'lows' : heatmapCellStatistic === 'high' ? 'highs' : 'averages';
+      return useCumulativePrecip
+        ? 'Compare lines: baseline vs comparison cumulative totals; shading shows the gap.'
+        : `Compare lines: baseline vs comparison ${statWord}; shading shows the gap.`;
+    }
+    if (useCumulativePrecip) {
+      return 'Bars show cumulative precipitation totals per period.';
     }
     if (aggregation !== 'hour' && usesDaily) {
       return 'Bars span mean daily low to daily high.';
@@ -310,7 +319,7 @@ export function DataExplorer({
       return 'Bars span hourly minimum to maximum.';
     }
     return '';
-  }, [aggregation, colorVar, colorVarDef.category, showDifference, compareData]);
+  }, [aggregation, colorVar, colorVarDef.category, showDifference, compareData, heatmapCellStatistic, useCumulativePrecip]);
 
   useEffect(() => {
     if (!svgRef.current || dimensions.width === 0) return;
@@ -369,11 +378,38 @@ export function DataExplorer({
     let heatmapData: any[] = [];
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+    const isCircularDeg = colorVar === 'windDirection';
+    const statLabel =
+      heatmapCellStatistic === 'low' ? 'Low' : heatmapCellStatistic === 'high' ? 'High' : 'Avg';
+    const emptyReason =
+      filter.temperatureMode !== 'off'
+        ? 'No hours in dry-bulb band for this period'
+        : 'No valid data for this period';
+
     const aggVarSeries = (rows: EPWDataRow[]) =>
       aggregateCellStatistic(
-        rows.map(r => r[colorVar] as number).filter(x => typeof x === 'number' && !Number.isNaN(x)),
-        heatmapCellStatistic
+        rows.map(r => r[colorVar] as number).filter(x => typeof x === 'number' && Number.isFinite(x)),
+        heatmapCellStatistic,
+        isCircularDeg
       );
+
+    const pairedDiffStat = (rows: EPWDataRow[]) => {
+      const primVals: number[] = [];
+      const cmpVals: number[] = [];
+      for (const r of rows) {
+        const pv = r[colorVar] as number;
+        const cv = compareRowFor(r)?.[colorVar] as number;
+        if (typeof pv !== 'number' || !Number.isFinite(pv)) continue;
+        if (typeof cv !== 'number' || !Number.isFinite(cv)) continue;
+        primVals.push(pv);
+        cmpVals.push(cv);
+      }
+      if (!primVals.length) return NaN;
+      const p = aggregateCellStatistic(primVals, heatmapCellStatistic, isCircularDeg);
+      const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic, isCircularDeg);
+      if (!Number.isFinite(p) || !Number.isFinite(c)) return NaN;
+      return convertValue(isCircularDeg ? circularDiffDeg(c, p) : c - p, colorVarDef.unit, true);
+    };
 
     const heatmapFill = (v: number) =>
       Number.isFinite(v) ? colorScale(v) : theme === 'dark' ? 'rgba(55,65,81,0.4)' : 'rgba(203,213,225,0.7)';
@@ -390,12 +426,7 @@ export function DataExplorer({
           if (selectedRows.length === 0) {
             val = NaN;
           } else if (showDifference && compareData) {
-            const p = aggVarSeries(selectedRows);
-            const cmpVals = selectedRows
-              .map(v => compareRowFor(v)?.[colorVar] as number)
-              .filter((x): x is number => x != null && typeof x === 'number' && !Number.isNaN(x));
-            const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic);
-            val = convertValue(c - p, colorVarDef.unit, true);
+            val = pairedDiffStat(selectedRows);
           } else {
             val = convertValue(aggVarSeries(selectedRows), colorVarDef.unit);
           }
@@ -410,8 +441,8 @@ export function DataExplorer({
             value: val,
             label: `${monthNames[month - 1]}`,
             tooltip: Number.isFinite(val)
-              ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${valLine} ${cUnit}`
-              : `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band for this month/hour`,
+              ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} ${showDifference ? `Diff (${statLabel})` : statLabel}\n${colorVarDef.name}: ${valLine} ${cUnit}`
+              : `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\n${emptyReason}`,
 
             sunYear: values[0].year,
             sunMonth: month,
@@ -435,12 +466,7 @@ export function DataExplorer({
           if (selectedRows.length === 0) {
             val = NaN;
           } else if (showDifference && compareData) {
-            const p = aggVarSeries(selectedRows);
-            const cmpVals = selectedRows
-              .map(v => compareRowFor(v)?.[colorVar] as number)
-              .filter((x): x is number => x != null && typeof x === 'number' && !Number.isNaN(x));
-            const c = aggregateCellStatistic(cmpVals, heatmapCellStatistic);
-            val = convertValue(c - p, colorVarDef.unit, true);
+            val = pairedDiffStat(selectedRows);
           } else {
             val = convertValue(aggVarSeries(selectedRows), colorVarDef.unit);
           }
@@ -454,8 +480,8 @@ export function DataExplorer({
             value: val,
             label: `W${week + 1}`,
             tooltip: Number.isFinite(val)
-              ? `Week ${week + 1} ${formatEpwStationHour(hour)} ${showDifference ? 'Diff' : 'Avg'}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}`
-              : `Week ${week + 1} ${formatEpwStationHour(hour)}\nNo hours in dry-bulb band for this week/hour`,
+              ? `Week ${week + 1} ${formatEpwStationHour(hour)} ${showDifference ? `Diff (${statLabel})` : statLabel}\n${colorVarDef.name}: ${val.toFixed(1)} ${cUnit}`
+              : `Week ${week + 1} ${formatEpwStationHour(hour)}\n${emptyReason}`,
             sunYear: mid.year,
             sunMonth: mid.month,
             sunDay: mid.day,
@@ -466,24 +492,21 @@ export function DataExplorer({
       });
     } else {
       // day or hour
-      heatmapData = data.map((d, i) => {
+      heatmapData = data.map((d) => {
         const pass = rowPassesGlobalFilters(d, filter);
         let val: number;
         if (!pass) {
           val = NaN;
         } else if (showDifference && compareData) {
-          const pv = aggregateCellStatistic([d[colorVar] as number], heatmapCellStatistic);
-          const cmp = compareRowFor(d)?.[colorVar];
-          const cv = aggregateCellStatistic(
-            cmp != null && typeof cmp === 'number' ? [cmp] : [],
-            heatmapCellStatistic
-          );
-          val = convertValue(cv - pv, colorVarDef.unit, true);
+          const pv = d[colorVar] as number;
+          const cv = compareRowFor(d)?.[colorVar] as number;
+          val =
+            typeof pv === 'number' && Number.isFinite(pv) && typeof cv === 'number' && Number.isFinite(cv)
+              ? convertValue(isCircularDeg ? circularDiffDeg(cv, pv) : cv - pv, colorVarDef.unit, true)
+              : NaN;
         } else {
-          val = convertValue(
-            aggregateCellStatistic([d[colorVar] as number], heatmapCellStatistic),
-            colorVarDef.unit
-          );
+          const pv = d[colorVar] as number;
+          val = typeof pv === 'number' && Number.isFinite(pv) ? convertValue(pv, colorVarDef.unit) : NaN;
         }
         const valLine = Number.isFinite(val) ? val.toFixed(1) : '—';
         return {
@@ -495,7 +518,7 @@ export function DataExplorer({
           label: formatEpwStationDate(d),
           tooltip: Number.isFinite(val)
             ? `${formatEpwStationDateTime(d)}\n${colorVarDef.name} ${showDifference ? 'Diff' : ''}: ${valLine} ${cUnit}`
-            : `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`,
+            : `${formatEpwStationDateTime(d)}\n${filter.temperatureMode !== 'off' && !pass ? 'Outside dry-bulb band' : 'No valid data'}`,
           sunYear: d.year,
           sunMonth: d.month,
           sunDay: d.day,
@@ -579,11 +602,15 @@ export function DataExplorer({
           const isHourMatch = hourInWrappedRange(d.y, filter.startHour, filter.endHour);
           return isMonthMatch && isHourMatch ? 1 : 0.2;
         })
-        .text(d =>
-          Number.isFinite(d.value) && explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width > overlayMinWidth
-            ? Math.round(d.value)
-            : ""
-        );
+        .text(d => {
+          if (!Number.isFinite(d.value) || explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width <= overlayMinWidth) {
+            return "";
+          }
+          const span = Math.abs(cMax - cMin);
+          if (span <= 2) return d.value.toFixed(2);
+          if (span <= 15 && Math.abs(d.value) < 10) return d.value.toFixed(1);
+          return String(Math.round(d.value));
+        });
       fitHeatmapCellLabels(
         cellLabels,
         d => explorerHeatmapCellXPx(innerWidth, cellGapPx, d.x0, d.x1).width,
@@ -660,79 +687,94 @@ export function DataExplorer({
       let compareMinSelected: number | undefined, compareMaxSelected: number | undefined;
 
       const useDailyExtents =
-        explorerUsesDailyAvgBarExtents(colorVar, colorVarDef.category) && aggregation !== 'hour';
+        !useCumulativePrecip &&
+        explorerUsesDailyAvgBarExtents(colorVar, colorVarDef.category) &&
+        aggregation !== 'hour';
+
+      const seriesMeanOrSum = (nums: number[]): number => {
+        if (!nums.length) return NaN;
+        if (useCumulativePrecip) return nums.reduce((a, b) => a + b, 0);
+        if (isCircularDeg) return circularMeanDeg(nums);
+        return d3.mean(nums) ?? NaN;
+      };
+      const finiteFromRows = (rows: EPWDataRow[]) =>
+        rows.map(r => r[colorVar] as number).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
 
       if (showDifference && compareData) {
-        valAll = convertFinite(d3.mean(values, d => d[colorVar] as number) );
-        const compareValuesAll = values.map(v => compareRowFor(v)?.[colorVar] as number).filter(v => v !== null);
-        compareValAll = convertFinite(d3.mean(compareValuesAll) );
+        valAll = convertFinite(seriesMeanOrSum(finiteFromRows(values)));
+        const compareValuesAll = values
+          .map(v => compareRowFor(v)?.[colorVar] as number)
+          .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+        compareValAll = convertFinite(seriesMeanOrSum(compareValuesAll));
 
         if (selectedValues.length > 0) {
-          valSelected = convertFinite(d3.mean(selectedValues, d => d[colorVar] as number) );
-          if (useDailyExtents) {
+          const selNums = finiteFromRows(selectedValues);
+          valSelected = convertFinite(seriesMeanOrSum(selNums));
+          if (useCumulativePrecip) {
+            minSelected = 0;
+            maxSelected = Number.isFinite(valSelected) ? valSelected : undefined;
+          } else if (useDailyExtents) {
             const ext = meanDailyLowHighForRows(selectedValues, colorVar);
             if (ext) {
               minSelected = convertFinite(ext.low);
               maxSelected = convertFinite(ext.high);
             } else {
-              minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
-              maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
+              minSelected = convertFinite(d3.min(selNums));
+              maxSelected = convertFinite(d3.max(selNums));
             }
           } else {
-            minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
-            maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
+            minSelected = convertFinite(d3.min(selNums));
+            maxSelected = convertFinite(d3.max(selNums));
           }
 
-          const compareValuesSel = selectedValues.map(v => compareRowFor(v)?.[colorVar] as number).filter(v => v !== null);
-          compareValSelected = convertFinite(d3.mean(compareValuesSel) );
+          const compareValuesSel = selectedValues
+            .map(v => compareRowFor(v)?.[colorVar] as number)
+            .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+          compareValSelected = convertFinite(seriesMeanOrSum(compareValuesSel));
 
           const compareRowsAtSel = selectedValues
             .map(v => compareRowFor(v))
             .filter((r): r is EPWDataRow => r != null);
           if (compareRowsAtSel.length > 0) {
-            if (useDailyExtents) {
+            const cmpSelNums = finiteFromRows(compareRowsAtSel);
+            if (useCumulativePrecip) {
+              compareMinSelected = 0;
+              compareMaxSelected = Number.isFinite(compareValSelected) ? compareValSelected : undefined;
+            } else if (useDailyExtents) {
               const ecmp = meanDailyLowHighForRows(compareRowsAtSel, colorVar);
               if (ecmp) {
                 compareMinSelected = convertFinite(ecmp.low);
                 compareMaxSelected = convertFinite(ecmp.high);
               } else {
-                compareMinSelected = convertFinite(
-                  d3.min(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
-                  colorVarDef.unit
-                );
-                compareMaxSelected = convertFinite(
-                  d3.max(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
-                  colorVarDef.unit
-                );
+                compareMinSelected = convertFinite(d3.min(cmpSelNums));
+                compareMaxSelected = convertFinite(d3.max(cmpSelNums));
               }
             } else {
-              compareMinSelected = convertFinite(
-                d3.min(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
-                colorVarDef.unit
-              );
-              compareMaxSelected = convertFinite(
-                d3.max(compareRowsAtSel.map(r => r[colorVar] as number).filter(v => typeof v === 'number')) ,
-                colorVarDef.unit
-              );
+              compareMinSelected = convertFinite(d3.min(cmpSelNums));
+              compareMaxSelected = convertFinite(d3.max(cmpSelNums));
             }
           }
         }
       } else {
-        valAll = convertFinite(d3.mean(values, d => d[colorVar] as number) );
+        valAll = convertFinite(seriesMeanOrSum(finiteFromRows(values)));
         if (selectedValues.length > 0) {
-          valSelected = convertFinite(d3.mean(selectedValues, d => d[colorVar] as number) );
-          if (useDailyExtents) {
+          const selNums = finiteFromRows(selectedValues);
+          valSelected = convertFinite(seriesMeanOrSum(selNums));
+          if (useCumulativePrecip) {
+            minSelected = 0;
+            maxSelected = Number.isFinite(valSelected) ? valSelected : undefined;
+          } else if (useDailyExtents) {
             const ext = meanDailyLowHighForRows(selectedValues, colorVar);
             if (ext) {
               minSelected = convertFinite(ext.low);
               maxSelected = convertFinite(ext.high);
             } else {
-              minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
-              maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
+              minSelected = convertFinite(d3.min(selNums));
+              maxSelected = convertFinite(d3.max(selNums));
             }
           } else {
-            minSelected = convertFinite(d3.min(selectedValues, d => d[colorVar] as number) );
-            maxSelected = convertFinite(d3.max(selectedValues, d => d[colorVar] as number) );
+            minSelected = convertFinite(d3.min(selNums));
+            maxSelected = convertFinite(d3.max(selNums));
           }
         }
       }
@@ -827,19 +869,28 @@ export function DataExplorer({
       });
     }
 
-    let yMin =
-      d3.min(aggregatedData, d => {
-        const minP = d.minSelected ?? d.valueAll;
-        const minC = (d.compareMinSelected ?? d.compareValueSelected ?? d.compareValueAll) ?? minP;
-        return Math.min(minP, minC);
-      }) || 0;
-
-    let yMax =
-      d3.max(aggregatedData, d => {
-        const maxP = d.maxSelected ?? d.valueAll;
-        const maxC = (d.compareMaxSelected ?? d.compareValueSelected ?? d.compareValueAll) ?? maxP;
-        return Math.max(maxP, maxC);
-      }) || cMax;
+    let rawYMin = Infinity;
+    let rawYMax = -Infinity;
+    for (const d of aggregatedData) {
+      const candidates = [
+        d.minSelected,
+        d.maxSelected,
+        d.valueSelected,
+        d.valueAll,
+        d.compareMinSelected,
+        d.compareMaxSelected,
+        d.compareValueSelected,
+        d.compareValueAll,
+      ];
+      for (const v of candidates) {
+        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+        if (v < rawYMin) rawYMin = v;
+        if (v > rawYMax) rawYMax = v;
+      }
+    }
+    let yMin = Number.isFinite(rawYMin) ? rawYMin : 0;
+    let yMax = Number.isFinite(rawYMax) ? rawYMax : cMax;
+    if (yMin === yMax) yMax = yMin + 1;
 
     // Optional: Give it a bit of bottom margin if min is above 0, or zero-bound if we prefer
     if (yMin > 0 && colorVarDef.category !== "Temperature") yMin = 0;
@@ -864,9 +915,15 @@ export function DataExplorer({
           })
         : null;
 
-    const validData = aggregatedData.filter(d => d.valueSelected !== null);
+    const validData = aggregatedData.filter(
+      d => typeof d.valueSelected === 'number' && Number.isFinite(d.valueSelected)
+    );
     const pairLineData = aggregatedData.filter(
-      d => d.valueSelected !== null && d.compareValueSelected !== null
+      d =>
+        typeof d.valueSelected === 'number' &&
+        Number.isFinite(d.valueSelected) &&
+        typeof d.compareValueSelected === 'number' &&
+        Number.isFinite(d.compareValueSelected)
     );
 
     barChartG.append("g")
@@ -883,27 +940,44 @@ export function DataExplorer({
       .attr("stroke-width", 1);
 
     if (showDifference && compareData) {
-      // Draw Line Chart connecting dots
+      const yOfPrimary = (d: (typeof pairLineData)[0]) =>
+        useCumulativePrecip
+          ? d.valueSelected!
+          : explorerBarStatisticY(heatmapCellStatistic, {
+              valueSelected: d.valueSelected!,
+              minSelected: d.minSelected,
+              maxSelected: d.maxSelected,
+            });
+      const yOfCompare = (d: (typeof pairLineData)[0]) =>
+        useCumulativePrecip
+          ? d.compareValueSelected!
+          : explorerBarStatisticY(heatmapCellStatistic, {
+              valueSelected: d.compareValueSelected!,
+              minSelected: d.compareMinSelected,
+              maxSelected: d.compareMaxSelected,
+            });
+
+      // Draw Line Chart connecting dots (lines and dots track the same active statistic)
       const linePrimary = d3
         .line<(typeof pairLineData)[0]>()
-        .defined(d => d.valueSelected != null && d.compareValueSelected != null)
+        .defined(d => Number.isFinite(yOfPrimary(d)) && Number.isFinite(yOfCompare(d)))
         .x(d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
-        .y(d => yScaleBar(d.valueSelected!))
+        .y(d => yScaleBar(yOfPrimary(d)))
         .curve(d3.curveMonotoneX);
 
       const lineCompare = d3
         .line<(typeof pairLineData)[0]>()
-        .defined(d => d.valueSelected != null && d.compareValueSelected != null)
+        .defined(d => Number.isFinite(yOfPrimary(d)) && Number.isFinite(yOfCompare(d)))
         .x(d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
-        .y(d => yScaleBar(d.compareValueSelected!))
+        .y(d => yScaleBar(yOfCompare(d)))
         .curve(d3.curveMonotoneX);
 
       const areaDiff = d3
         .area<(typeof pairLineData)[0]>()
-        .defined(d => d.valueSelected != null && d.compareValueSelected != null)
+        .defined(d => Number.isFinite(yOfPrimary(d)) && Number.isFinite(yOfCompare(d)))
         .x(d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
-        .y0(d => yScaleBar(d.compareValueSelected!))
-        .y1(d => yScaleBar(d.valueSelected!))
+        .y0(d => yScaleBar(yOfCompare(d)))
+        .y1(d => yScaleBar(yOfPrimary(d)))
         .curve(d3.curveMonotoneX);
 
       // Add difference shading
@@ -933,72 +1007,28 @@ export function DataExplorer({
         .attr("stroke-linejoin", "round")
         .attr("d", lineCompare);
 
-      // Add dots
+      // Add dots colored to match their baseline/comparison series (never the Δ diverging scale)
       barChartG.selectAll(".dot-primary")
         .data(pairLineData)
         .join("circle")
         .attr("class", "dot-primary")
         .attr("cx", d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
-        .attr("cy", d =>
-          yScaleBar(
-            explorerBarStatisticY(heatmapCellStatistic, {
-              valueSelected: d.valueSelected!,
-              minSelected: d.minSelected,
-              maxSelected: d.maxSelected,
-            })
-          )
-        )
+        .attr("cy", d => yScaleBar(yOfPrimary(d)))
         .attr("r", 3)
-        .attr("fill", d =>
-          colorScale(
-            explorerBarStatisticY(heatmapCellStatistic, {
-              valueSelected: d.valueSelected!,
-              minSelected: d.minSelected,
-              maxSelected: d.maxSelected,
-            })
-          )
-        )
+        .attr("fill", lineBaseline)
         .append("title")
-        .text(d =>
-          `Primary (${heatmapCellStatistic}): ${explorerBarStatisticY(heatmapCellStatistic, {
-            valueSelected: d.valueSelected!,
-            minSelected: d.minSelected,
-            maxSelected: d.maxSelected,
-          }).toFixed(1)} ${cUnit}`
-        );
+        .text(d => `Baseline (${useCumulativePrecip ? 'total' : statLabel}): ${yOfPrimary(d).toFixed(1)} ${cUnit}`);
 
       barChartG.selectAll(".dot-compare")
         .data(pairLineData)
         .join("circle")
         .attr("class", "dot-compare")
         .attr("cx", d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
-        .attr("cy", d =>
-          yScaleBar(
-            explorerBarStatisticY(heatmapCellStatistic, {
-              valueSelected: d.compareValueSelected!,
-              minSelected: d.compareMinSelected,
-              maxSelected: d.compareMaxSelected,
-            })
-          )
-        )
+        .attr("cy", d => yScaleBar(yOfCompare(d)))
         .attr("r", 3)
-        .attr("fill", d =>
-          colorScale(
-            explorerBarStatisticY(heatmapCellStatistic, {
-              valueSelected: d.compareValueSelected!,
-              minSelected: d.compareMinSelected,
-              maxSelected: d.compareMaxSelected,
-            })
-          )
-        )
+        .attr("fill", lineComparison)
         .append("title")
-        .text(d =>
-          `Comparison (${heatmapCellStatistic}): ${explorerBarStatisticY(heatmapCellStatistic, {
-            valueSelected: d.compareValueSelected!,
-            minSelected: d.compareMinSelected,
-            maxSelected: d.compareMaxSelected,
-          }).toFixed(1)} ${cUnit}`
-        );
+        .text(d => `Comparison (${useCumulativePrecip ? 'total' : statLabel}): ${yOfCompare(d).toFixed(1)} ${cUnit}`);
 
     } else {
       // Draw standard Bar Chart
@@ -1013,8 +1043,8 @@ export function DataExplorer({
         const xPos = xScale(d.x0);
 
         const val = d.valueSelected!;
-        const minVal = d.minSelected !== undefined && d.minSelected !== null ? d.minSelected : val;
-        const maxVal = d.maxSelected !== undefined && d.maxSelected !== null ? d.maxSelected : val;
+        const minVal = typeof d.minSelected === 'number' && Number.isFinite(d.minSelected) ? d.minSelected : val;
+        const maxVal = typeof d.maxSelected === 'number' && Number.isFinite(d.maxSelected) ? d.maxSelected : val;
         const yMinPx = yScaleBar(minVal);
         const yMaxPx = yScaleBar(maxVal);
         const topY = Math.min(yMinPx, yMaxPx);
@@ -1028,7 +1058,7 @@ export function DataExplorer({
           .style(
             "fill",
             chartBarFill ??
-              explorerBarSolidColor(colorScale, heatmapCellStatistic, {
+              explorerBarSolidColor(colorScale, useCumulativePrecip ? 'mean' : heatmapCellStatistic, {
                 valueSelected: val,
                 minSelected: minVal,
                 maxSelected: maxVal,
@@ -1037,7 +1067,7 @@ export function DataExplorer({
           .style("opacity", 0.6);
 
         // Indicator dot: matches footer Low/Ave/High (bars still span mean daily min–max when applicable).
-        if (aggregation !== 'hour') {
+        if (aggregation !== 'hour' && !useCumulativePrecip) {
           const markY = explorerBarStatisticY(heatmapCellStatistic, {
             valueSelected: val,
             minSelected: minVal,
@@ -1054,12 +1084,15 @@ export function DataExplorer({
       });
 
       fgGroups.append("title").text(d => {
+        if (useCumulativePrecip) {
+          return `Cumulative total: ${d.valueSelected!.toFixed(2)} ${cUnit}`;
+        }
         const yv = explorerBarStatisticY(heatmapCellStatistic, {
           valueSelected: d.valueSelected!,
           minSelected: d.minSelected,
           maxSelected: d.maxSelected,
         });
-        return `Selected (${heatmapCellStatistic}): ${yv.toFixed(1)} ${cUnit}; bar span min–max`;
+        return `Selected (${statLabel}): ${yv.toFixed(1)} ${cUnit}; bar span min–max`;
       });
     }
 
@@ -1114,37 +1147,51 @@ export function DataExplorer({
     heatmapCellStatistic,
     barGradientSvgId,
     barChartFillMode,
+    useCumulativePrecip,
   ]);
 
   // Calculate local stats for filtered data
   const stats = (() => {
     const filteredData = data.filter(d => rowPassesGlobalFilters(d, filter));
+    const isCircularDeg = colorVar === 'windDirection';
+    const isTemp = colorVarDef.category === 'Temperature';
 
     if (showDifference && compareData) {
       const compareByHour = indexEpwByEquivalentHour(compareData);
-      const diffs = filteredData.map(d => {
-        const primaryVal = d[colorVar] as number;
-        const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
-        if (typeof primaryVal !== 'number' || typeof compareVal !== 'number') return null;
-        if (!Number.isFinite(primaryVal) || !Number.isFinite(compareVal)) return null;
-        return compareVal - primaryVal;
-      }).filter(v => v !== null) as number[];
+      const diffs = filteredData
+        .map(d => {
+          const primaryVal = d[colorVar] as number;
+          const compareVal = compareByHour.get(epwEquivalentHourKey(d))?.[colorVar] as number;
+          if (typeof primaryVal !== 'number' || typeof compareVal !== 'number') return null;
+          if (!Number.isFinite(primaryVal) || !Number.isFinite(compareVal)) return null;
+          return isCircularDeg ? circularDiffDeg(compareVal, primaryVal) : compareVal - primaryVal;
+        })
+        .filter((v): v is number => v !== null);
 
+      if (!diffs.length) {
+        return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
+      }
       return {
-        avg: convertValue(d3.mean(diffs) || 0, colorVarDef.unit, true),
-        min: convertValue(d3.min(diffs) || 0, colorVarDef.unit, true),
-        max: convertValue(d3.max(diffs) || 0, colorVarDef.unit, true),
-        total: convertValue(d3.sum(diffs) || 0, colorVarDef.unit, true),
-        count: diffs.length
+        avg: convertValue(d3.mean(diffs), colorVarDef.unit, true),
+        min: convertValue(d3.min(diffs), colorVarDef.unit, true),
+        max: convertValue(d3.max(diffs), colorVarDef.unit, true),
+        total: isTemp || isCircularDeg ? NaN : convertValue(d3.sum(diffs), colorVarDef.unit, true),
+        count: diffs.length,
       };
     }
 
+    const validVals = filteredData
+      .map(d => d[colorVar] as number)
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    if (!validVals.length) {
+      return { avg: NaN, min: NaN, max: NaN, total: NaN, count: 0 };
+    }
     return {
-      avg: convertValue(d3.mean(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      min: convertValue(d3.min(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      max: convertValue(d3.max(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      total: convertValue(d3.sum(filteredData, d => d[colorVar] as number) || 0, colorVarDef.unit),
-      count: filteredData.length
+      avg: convertValue(isCircularDeg ? circularMeanDeg(validVals) : d3.mean(validVals), colorVarDef.unit),
+      min: convertValue(d3.min(validVals), colorVarDef.unit),
+      max: convertValue(d3.max(validVals), colorVarDef.unit),
+      total: isTemp || isCircularDeg ? NaN : convertValue(d3.sum(validVals), colorVarDef.unit, true),
+      count: validVals.length,
     };
   })();
 
@@ -1380,15 +1427,23 @@ export function DataExplorer({
         <div className="grid grid-cols-2 gap-2">
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {cUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.avg) ? `${stats.avg.toFixed(1)} ${cUnit}` : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {cUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.min) && Number.isFinite(stats.max)
+                ? `${stats.min.toFixed(1)} / ${stats.max.toFixed(1)} ${cUnit}`
+                : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Total</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.total.toFixed(0)} {cUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.total) ? `${stats.total.toFixed(stats.total < 10 ? 2 : 0)} ${cUnit}` : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
@@ -1406,6 +1461,34 @@ export function DataExplorer({
         anchorRef={outerRef as any}
       >
         <div className="grid grid-cols-1 gap-3">
+          {isPrecipDepth && (
+            <div className="space-y-2">
+              <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                Precipitation Bars
+              </label>
+              <div className={`inline-flex rounded-full p-1 ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                {(['mean', 'cumulative'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={precipBarMode === mode}
+                    onClick={() => setPrecipBarMode(mode)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold capitalize transition-colors ${
+                      precipBarMode === mode
+                        ? theme === 'dark'
+                          ? 'bg-gray-900 text-white'
+                          : 'bg-white text-gray-900 glow-sm'
+                        : theme === 'dark'
+                          ? 'text-gray-300 hover:text-white'
+                          : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {mode === 'mean' ? 'Mean (hourly)' : 'Cumulative total'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             <div className="flex justify-between items-center">
               <label className={`block text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Color Palette</label>

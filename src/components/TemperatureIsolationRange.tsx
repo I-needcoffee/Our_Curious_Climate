@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import type { GlobalFilterState } from '../lib/globalFilter';
@@ -46,20 +47,69 @@ export function TemperatureIsolationRange({
   const maxC = Math.max(extentMinC, extentMaxC);
   const span = Math.max(maxC - minC, 1e-6);
 
-  const [loC, hiC] = effectiveTemperatureBand(filter, minC, maxC);
+  const [rawLoC, rawHiC] = effectiveTemperatureBand(filter, minC, maxC);
   const clampLo = (t: number) => Math.min(maxC, Math.max(minC, t));
+  const loC = clampLo(rawLoC);
+  const hiC = clampLo(rawHiC);
+  const step = span > 30 ? 1 : 0.5;
+  const inputStep = unitSystem === 'imperial' ? 1 : 0.5;
   const syncMode = (nextLoC: number, nextHiC: number): GlobalFilterState['temperatureMode'] => {
     const a = Math.min(nextLoC, nextHiC);
     const b = Math.max(nextLoC, nextHiC);
-    const atFull = Math.abs(a - minC) < 1e-3 && Math.abs(b - maxC) < 1e-3;
+    const tol = Math.max(step * 0.6, 0.05);
+    const atFull = Math.abs(a - minC) <= tol && Math.abs(b - maxC) <= tol;
     return atFull ? 'off' : 'between';
   };
 
   const display = (c: number) =>
     unitSystem === 'imperial' ? (c * 9) / 5 + 32 : c;
   const parseDisplayToC = (n: number) => (unitSystem === 'imperial' ? ((n - 32) * 5) / 9 : n);
+  const fmtInput = (c: number) => String(Math.round(display(c) * 10) / 10);
 
-  const step = span > 30 ? 1 : 0.5;
+  const [loDraft, setLoDraft] = useState(() => fmtInput(loC));
+  const [hiDraft, setHiDraft] = useState(() => fmtInput(hiC));
+  useEffect(() => {
+    setLoDraft(fmtInput(loC));
+  }, [loC, unitSystem]);
+  useEffect(() => {
+    setHiDraft(fmtInput(hiC));
+  }, [hiC, unitSystem]);
+
+  const commitLo = (raw: string) => {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setLoDraft(fmtInput(loC));
+      return;
+    }
+    const nextC = clampLo(parseDisplayToC(parsed));
+    const hi = clampLo(Math.max(loC, hiC));
+    const nextLo = Math.min(nextC, hi);
+    onChangeFilter({
+      ...filter,
+      temperatureLoC: nextLo,
+      temperatureHiC: hi,
+      temperatureMode: syncMode(nextLo, hi),
+    });
+    setLoDraft(fmtInput(nextLo));
+  };
+
+  const commitHi = (raw: string) => {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setHiDraft(fmtInput(hiC));
+      return;
+    }
+    const nextC = clampLo(parseDisplayToC(parsed));
+    const low = clampLo(Math.min(loC, hiC));
+    const nextHi = Math.max(nextC, low);
+    onChangeFilter({
+      ...filter,
+      temperatureLoC: low,
+      temperatureHiC: nextHi,
+      temperatureMode: syncMode(low, nextHi),
+    });
+    setHiDraft(fmtInput(nextHi));
+  };
 
   const trackStyle = [{ backgroundColor: dark ? '#9ca3af' : '#525252', height: compact ? '4px' : '6px' }];
   const knob = {
@@ -129,20 +179,12 @@ export function TemperatureIsolationRange({
           <div className="flex items-center gap-1">
             <input
               type="number"
-              step={step}
-              value={Math.round(display(loC) * 100) / 100}
-              onChange={e => {
-                const parsed = Number(e.target.value);
-                if (!Number.isFinite(parsed)) return;
-                const nextC = clampLo(parseDisplayToC(parsed));
-                const hi = clampLo(Math.max(loC, hiC));
-                const nextLo = Math.min(nextC, hi);
-                onChangeFilter({
-                  ...filter,
-                  temperatureLoC: nextLo,
-                  temperatureHiC: hi,
-                  temperatureMode: syncMode(nextLo, hi),
-                });
+              step={inputStep}
+              value={loDraft}
+              onChange={e => setLoDraft(e.target.value)}
+              onBlur={() => commitLo(loDraft)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitLo(loDraft);
               }}
               className={`w-24 rounded-full px-3 py-1.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${dark ? 'bg-gray-900/80 text-gray-100' : 'bg-white glow-sm'}`}
             />
@@ -154,20 +196,12 @@ export function TemperatureIsolationRange({
           <div className="flex items-center gap-1">
             <input
               type="number"
-              step={step}
-              value={Math.round(display(hiC) * 100) / 100}
-              onChange={e => {
-                const parsed = Number(e.target.value);
-                if (!Number.isFinite(parsed)) return;
-                const nextC = clampLo(parseDisplayToC(parsed));
-                const low = clampLo(Math.min(loC, hiC));
-                const nextHi = Math.max(nextC, low);
-                onChangeFilter({
-                  ...filter,
-                  temperatureLoC: low,
-                  temperatureHiC: nextHi,
-                  temperatureMode: syncMode(low, nextHi),
-                });
+              step={inputStep}
+              value={hiDraft}
+              onChange={e => setHiDraft(e.target.value)}
+              onBlur={() => commitHi(hiDraft)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitHi(hiDraft);
               }}
               className={`w-24 rounded-full px-3 py-1.5 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${dark ? 'bg-gray-900/80 text-gray-100' : 'bg-white glow-sm'}`}
             />

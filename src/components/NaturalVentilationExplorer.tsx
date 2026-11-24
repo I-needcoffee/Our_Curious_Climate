@@ -76,6 +76,7 @@ import {
   rowSuitableForNaturalVentilation,
   computeNvHourStats,
   formatNvCriteriaSummary,
+  formatNvPresetLabel,
 } from '../lib/naturalVentilationModel';
 import { UtciComfortTimeLegendStrip } from './UtciExplorer';
 
@@ -187,7 +188,8 @@ export function NaturalVentilationExplorer({
   const nvData: NvDataRow[] = useMemo(() => {
     return data.map(d => {
       const ok = rowSuitableForNaturalVentilation(d, criteria);
-      const tdb = (d.dryBulbTemperature as number) || 0;
+      const rawT = d.dryBulbTemperature as number;
+      const tdb = typeof rawT === 'number' && Number.isFinite(rawT) ? rawT : NaN;
       return {
         ...d,
         tempC: tdb,
@@ -230,8 +232,8 @@ export function NaturalVentilationExplorer({
     tutorialReport({ aggregation, nvCriteria: criteria });
   }, [tutorialEnabled, tutorialReport, aggregation, criteria]);
 
-  const tempSliderMin = unitSystem === 'imperial' ? 0 : -10;
-  const tempSliderMax = unitSystem === 'imperial' ? 100 : 40;
+  const tempSliderMin = -40;
+  const tempSliderMax = unitSystem === 'imperial' ? 105 : 40;
 
   const applyPreset = (id: string) => {
     const preset = NV_CRITERIA_PRESETS.find(p => p.id === id);
@@ -241,18 +243,23 @@ export function NaturalVentilationExplorer({
   };
 
   const updateCriteriaTempMin = (displayVal: number) => {
+    if (!Number.isFinite(displayVal)) return;
+    const nextMin = displayToC(displayVal);
     setPresetId('custom');
-    setCriteria(prev => ({ ...prev, tempMinC: displayToC(displayVal) }));
+    setCriteria(prev => ({ ...prev, tempMinC: Math.min(nextMin, prev.tempMaxC) }));
   };
 
   const updateCriteriaTempMax = (displayVal: number) => {
+    if (!Number.isFinite(displayVal)) return;
+    const nextMax = displayToC(displayVal);
     setPresetId('custom');
-    setCriteria(prev => ({ ...prev, tempMaxC: displayToC(displayVal) }));
+    setCriteria(prev => ({ ...prev, tempMaxC: Math.max(nextMax, prev.tempMinC) }));
   };
 
   const updateCriteriaRh = (rh: number) => {
+    if (!Number.isFinite(rh)) return;
     setPresetId('custom');
-    setCriteria(prev => ({ ...prev, maxRhPct: rh }));
+    setCriteria(prev => ({ ...prev, maxRhPct: Math.max(0, Math.min(100, rh)) }));
   };
 
   useEffect(() => {
@@ -322,6 +329,8 @@ export function NaturalVentilationExplorer({
     };
 
     let heatmapData: HeatmapDatum[] = [];
+    const statLabel =
+      heatmapCellStatistic === 'low' ? 'Low' : heatmapCellStatistic === 'high' ? 'High' : 'Avg';
 
     if (aggregation === 'month') {
       const groups = d3.group(currentData, d => d.month, d => d.hour);
@@ -337,10 +346,11 @@ export function NaturalVentilationExplorer({
             .map(d => d.tempC)
             .filter(v => Number.isFinite(v));
 
+          // Suitable share is always the fraction of valid hours meeting criteria (never binary min/max 0%/100%).
           const suitableRatio =
             finiteSuitable.length === 0
               ? NaN
-              : aggregateCellStatistic(finiteSuitable, heatmapCellStatistic);
+              : finiteSuitable.reduce((a, b) => a + b, 0) / finiteSuitable.length;
           const avgTemp =
             finiteTemp.length === 0
               ? NaN
@@ -357,8 +367,8 @@ export function NaturalVentilationExplorer({
             tooltip: !Number.isFinite(suitableRatio) && !Number.isFinite(avgTemp)
               ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nNo hours in filter`
               : colorMode === 'suitableHours'
-                ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
-                : `${monthNames[month - 1]} ${formatEpwStationHour(hour)} Avg\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
+                ? `${monthNames[month - 1]} ${formatEpwStationHour(hour)}\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
+                : `${monthNames[month - 1]} ${formatEpwStationHour(hour)} ${statLabel}\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
           });
         });
       });
@@ -378,7 +388,7 @@ export function NaturalVentilationExplorer({
           const suitableRatio =
             finiteSuitable.length === 0
               ? NaN
-              : aggregateCellStatistic(finiteSuitable, heatmapCellStatistic);
+              : finiteSuitable.reduce((a, b) => a + b, 0) / finiteSuitable.length;
           const avgTemp =
             finiteTemp.length === 0
               ? NaN
@@ -395,8 +405,8 @@ export function NaturalVentilationExplorer({
             tooltip: !Number.isFinite(suitableRatio) && !Number.isFinite(avgTemp)
               ? `Week ${week + 1} ${formatEpwStationHour(hour)}\nNo hours in filter`
               : colorMode === 'suitableHours'
-                ? `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
-                : `Week ${week + 1} ${formatEpwStationHour(hour)} Avg\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
+                ? `Week ${week + 1} ${formatEpwStationHour(hour)}\nSuitable: ${Number.isFinite(suitableRatio) ? (suitableRatio * 100).toFixed(1) : '—'}%`
+                : `Week ${week + 1} ${formatEpwStationHour(hour)} ${statLabel}\nTemp: ${Number.isFinite(avgTemp) ? convertTemp(avgTemp).toFixed(1) : '—'}${tempUnit}`,
           });
         });
       });
@@ -414,8 +424,8 @@ export function NaturalVentilationExplorer({
           tooltip: !pass
             ? `${formatEpwStationDateTime(d)}\nOutside filter`
             : colorMode === 'suitableHours'
-              ? `${formatEpwStationDateTime(d)}\nSuitable: ${d.suitable ? 'Yes' : 'No'}`
-              : `${formatEpwStationDateTime(d)}\nTemp: ${convertTemp(d.tempC).toFixed(1)}${tempUnit}`,
+              ? `${formatEpwStationDateTime(d)}\nSuitable: ${!Number.isFinite(d.suitable) ? '—' : d.suitable ? 'Yes' : 'No'}`
+              : `${formatEpwStationDateTime(d)}\nTemp: ${Number.isFinite(d.tempC) ? `${convertTemp(d.tempC).toFixed(1)}${tempUnit}` : '—'}`,
         };
       });
     }
@@ -671,7 +681,13 @@ export function NaturalVentilationExplorer({
 
     const fgGroups = barChartG
       .selectAll('.fg-group')
-      .data(aggregatedData.filter(d => d.suitableRatioSelected !== null || d.valueSelected !== null))
+      .data(
+        aggregatedData.filter(d =>
+          colorMode === 'suitableHours'
+            ? typeof d.suitableRatioSelected === 'number' && Number.isFinite(d.suitableRatioSelected)
+            : typeof d.valueSelected === 'number' && Number.isFinite(d.valueSelected)
+        )
+      )
       .join('g')
       .attr('class', 'fg-group');
 
@@ -687,16 +703,7 @@ export function NaturalVentilationExplorer({
         const topY = Math.min(yHi, yLo);
         const barH = Math.max(1, Math.abs(yLo - yHi));
         const pillR = Math.min(barW / 2, barH / 2);
-        const comfortFill =
-          chartBarFill ??
-          getFillColor(
-            0,
-            explorerBarStatisticY(heatmapCellStatistic, {
-              valueSelected: ratio,
-              minSelected: 0,
-              maxSelected: ratio,
-            })
-          );
+        const comfortFill = chartBarFill ?? getFillColor(0, ratio);
         const baselinePx = yScaleBar.range()[0];
         group
           .append('path')
@@ -1017,7 +1024,7 @@ export function NaturalVentilationExplorer({
             >
               {NV_CRITERIA_PRESETS.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.label}
+                  {formatNvPresetLabel(p, unitSystem)}
                 </option>
               ))}
               <option value="custom">Custom</option>
@@ -1045,7 +1052,10 @@ export function NaturalVentilationExplorer({
                 <input
                   type="number"
                   value={Math.round(cToDisplay(criteria.tempMinC) * 10) / 10}
-                  onChange={e => updateCriteriaTempMin(parseFloat(e.target.value) || 0)}
+                  onChange={e => {
+                    const n = parseFloat(e.target.value);
+                    if (Number.isFinite(n)) updateCriteriaTempMin(n);
+                  }}
                   className={`w-16 rounded-full border-0 px-3 py-1 text-sm ${
                     theme === 'dark'
                       ? 'bg-gray-700 text-white'
@@ -1075,7 +1085,10 @@ export function NaturalVentilationExplorer({
                 <input
                   type="number"
                   value={Math.round(cToDisplay(criteria.tempMaxC) * 10) / 10}
-                  onChange={e => updateCriteriaTempMax(parseFloat(e.target.value) || 0)}
+                  onChange={e => {
+                    const n = parseFloat(e.target.value);
+                    if (Number.isFinite(n)) updateCriteriaTempMax(n);
+                  }}
                   className={`w-16 rounded-full border-0 px-3 py-1 text-sm ${
                     theme === 'dark'
                       ? 'bg-gray-700 text-white'
@@ -1105,7 +1118,10 @@ export function NaturalVentilationExplorer({
                 <input
                   type="number"
                   value={criteria.maxRhPct}
-                  onChange={e => updateCriteriaRh(parseFloat(e.target.value) || 0)}
+                  onChange={e => {
+                    const n = parseFloat(e.target.value);
+                    if (Number.isFinite(n)) updateCriteriaRh(n);
+                  }}
                   className={`w-16 rounded-full border-0 px-3 py-1 text-sm ${
                     theme === 'dark'
                       ? 'bg-gray-700 text-white'

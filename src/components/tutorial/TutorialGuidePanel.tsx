@@ -1,6 +1,8 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   comfortPercentHeatStyle,
+  formatUtciCategoryRange,
+  UTCI_COMFORT_CATEGORY,
   utciExposureScenarioIndex,
   UTCI_HOUR_WINDOW_NOTE,
 } from '../../lib/utciModel';
@@ -17,7 +19,7 @@ import {
 } from '../../lib/tutorialGuideStats';
 import { useTutorialLive } from '../../context/TutorialLiveContext';
 import { NATURAL_VENTILATION_SUITABLE_BLUE_HEX, OUTDOOR_COMFORT_GREEN_HEX } from '../../lib/constants';
-import { NV_CRITERIA_PRESETS } from '../../lib/naturalVentilationModel';
+import { formatNvPresetLabel, NV_CRITERIA_PRESETS } from '../../lib/naturalVentilationModel';
 
 export function TutorialGuidePanel({
   theme,
@@ -213,7 +215,7 @@ export function TutorialGuidePanel({
                             >
                               {formatNvHoursPct(stat.suitableHours, stat.suitablePct)}
                             </p>
-                            {preset ? <p className={`mt-1 text-xs leading-snug ${muted}`}>{preset.label}</p> : null}
+                            {preset ? <p className={`mt-1 text-xs leading-snug ${muted}`}>{formatNvPresetLabel(preset, unitSystem)}</p> : null}
                           </li>
                         );
                       })}
@@ -284,7 +286,7 @@ export function TutorialGuidePanel({
                       {Number.isFinite(utciStats.comfortPercent) ? `${utciStats.comfortPercent.toFixed(1)}%` : '—'}
                     </p>
                     <p className={`mt-1.5 text-xs leading-snug ${muted}`}>
-                      No thermal stress · {utciStats.hoursCounted.toLocaleString()} filtered hours
+                      No thermal stress ({formatUtciCategoryRange(UTCI_COMFORT_CATEGORY, unitSystem)}) · {utciStats.hoursCounted.toLocaleString()} filtered hours
                       {utciStats.isolationLabel ? ` · ${utciStats.isolationLabel}` : ''}
                     </p>
                   </div>
@@ -292,27 +294,38 @@ export function TutorialGuidePanel({
                   <div>
                     <h4 className={blockTitle}>UTCI categories (% of filtered hours)</h4>
                     <ul className="flex flex-col gap-0.5">
-                      {utciStats.categoryShares.map(share => (
-                        <li
-                          key={share.category}
-                          className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2.5 rounded-full px-2.5 py-1"
-                          style={share.isComfort ? tint(OUTDOOR_COMFORT_GREEN_HEX) : undefined}
-                        >
-                          <span className="h-3 w-3 shrink-0 rounded-full glow-sm" style={{ backgroundColor: share.color }} aria-hidden />
-                          <span
-                            className={`min-w-0 text-[13px] leading-snug ${share.isComfort ? 'font-semibold' : muted}`}
-                            style={share.isComfort ? { color: OUTDOOR_COMFORT_GREEN_HEX } : undefined}
+                      {utciStats.categoryShares.map(share => {
+                        const rangeLabel = formatUtciCategoryRange(share.category, unitSystem);
+                        return (
+                          <li
+                            key={share.category}
+                            className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-x-2.5 rounded-full px-2.5 py-1"
+                            style={share.isComfort ? tint(OUTDOOR_COMFORT_GREEN_HEX) : undefined}
                           >
-                            {share.label}
-                          </span>
-                          <span
-                            className={`shrink-0 text-[13px] font-semibold tabular-nums ${share.isComfort ? '' : ink}`}
-                            style={share.isComfort ? { color: OUTDOOR_COMFORT_GREEN_HEX } : undefined}
-                          >
-                            {share.percentage.toFixed(1)}%
-                          </span>
-                        </li>
-                      ))}
+                            <span className="h-3 w-3 shrink-0 rounded-full glow-sm" style={{ backgroundColor: share.color }} aria-hidden />
+                            <span
+                              className={`min-w-0 text-[13px] leading-snug ${share.isComfort ? 'font-semibold' : muted}`}
+                              style={share.isComfort ? { color: OUTDOOR_COMFORT_GREEN_HEX } : undefined}
+                            >
+                              {share.label}
+                            </span>
+                            <span
+                              className={`shrink-0 whitespace-nowrap text-right text-xs tabular-nums ${
+                                share.isComfort ? 'font-medium opacity-80' : dark ? 'text-gray-400' : 'text-gray-500'
+                              }`}
+                              style={share.isComfort ? { color: OUTDOOR_COMFORT_GREEN_HEX } : undefined}
+                            >
+                              {rangeLabel}
+                            </span>
+                            <span
+                              className={`min-w-[3.25rem] shrink-0 text-right text-[13px] font-semibold tabular-nums ${share.isComfort ? '' : ink}`}
+                              style={share.isComfort ? { color: OUTDOOR_COMFORT_GREEN_HEX } : undefined}
+                            >
+                              {share.percentage.toFixed(1)}%
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
 

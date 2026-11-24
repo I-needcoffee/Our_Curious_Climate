@@ -9,9 +9,10 @@ function rwisCacheKey(network: string, stationId: string, year: number): string 
 }
 
 function rwisYearBoundsUtc(year: number): { stsUtcIso: string; etsUtcIso: string } {
+  // Extend through Jan 2 00:00 UTC so Western Hemisphere stations retain late Dec 31 local hours.
   return {
     stsUtcIso: `${year}-01-01 00:00`,
-    etsUtcIso: `${year + 1}-01-01 00:00`,
+    etsUtcIso: `${year + 1}-01-02 00:00`,
   };
 }
 

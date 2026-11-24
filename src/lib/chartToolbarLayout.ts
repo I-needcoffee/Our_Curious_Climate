@@ -156,3 +156,10 @@ export function statTileLabelClass(theme: Theme): string {
 export function statTileValueClass(theme: Theme): string {
   return `text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`;
 }
+
+/** Dual-series line chart in difference mode: baseline vs comparison (not Δ heatmap colors). */
+export function compareExplorerLineColors(theme: Theme) {
+  return theme === 'dark'
+    ? { baseline: '#9ca3af', comparison: '#ffffff' }
+    : { baseline: '#9ca3af', comparison: '#111827' };
+}

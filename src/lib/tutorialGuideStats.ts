@@ -25,6 +25,7 @@ import {
   UTCI_COMFORT_CATEGORY,
 } from './utciModel';
 import { GROUND_PRESETS, LADYBUG_GROUND, buildSurfaceTemperatureLookup, realizeGround, surfaceTemperatureForRow } from './groundComfort';
+import { convertUnit, convertValue } from './unitConversion';
 
 export type TutorialQuickStat = { label: string; value: string };
 
@@ -68,24 +69,10 @@ function numericSeries(rows: EPWDataRow[], columnId: string): number[] {
   return out;
 }
 
-function formatValue(v: number, unit: string, unitSystem: UnitSystem): string {
-  let n = v;
-  let u = unit;
-  if (unitSystem === 'imperial') {
-    if (unit === '°C') {
-      n = (v * 9) / 5 + 32;
-      u = '°F';
-    } else if (unit === 'm/s') {
-      n = v * 2.23694;
-      u = 'mph';
-    } else if (unit === 'mm') {
-      n = v / 25.4;
-      u = 'in';
-    } else if (unit === 'km') {
-      n = v * 0.621371;
-      u = 'mi';
-    }
-  }
+function formatValue(v: number, unit: string, unitSystem: UnitSystem, isDelta = false): string {
+  const n = convertValue(v, unit, unitSystem, isDelta);
+  const u = convertUnit(unit, unitSystem);
+  if (!Number.isFinite(n)) return '—';
   const abs = Math.abs(n);
   const decimals = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
   return `${n.toFixed(decimals)}${u ? ` ${u}` : ''}`;
@@ -105,7 +92,7 @@ function coreStats(vals: number[], unit: string, unitSystem: UnitSystem): Tutori
     { label: 'Median (middle timestep)', value: formatValue(median as number, unit, unitSystem) },
   ];
   if (dev != null && vals.length > 2 && Number.isFinite(dev) && dev > 0) {
-    lines.push({ label: 'Typical day-to-day swing (std. dev.)', value: formatValue(dev, unit, unitSystem) });
+    lines.push({ label: 'Hourly spread (std. dev.)', value: formatValue(dev, unit, unitSystem, true) });
   }
   lines.push({ label: 'Timesteps counted', value: String(vals.length) });
   return lines;

@@ -1,7 +1,7 @@
 // @ts-ignore
 import tc from 'jsthermalcomfort';
 import type { EPWDataRow } from './epwParser';
-import { utciGradientExtentC } from './unitConversion';
+import { UNIT_C, UNIT_F, utciGradientExtentC } from './unitConversion';
 import type { GlobalFilterState, HeatmapCellStatistic } from './globalFilter';
 import {
   aggregateCellStatistic,
@@ -56,13 +56,46 @@ export const UTCI_CATEGORY_ORDER = Object.keys(UTCI_COLORS);
 
 export const UTCI_COMFORT_CATEGORY = 'no thermal stress';
 
+/** Official UTCI assessment scale thresholds in °C (Bröde et al., 2012). */
+export const UTCI_CATEGORY_RANGES_C: Record<string, { minC?: number; maxC?: number }> = {
+  'extreme cold stress': { maxC: -40 },
+  'very strong cold stress': { minC: -40, maxC: -27 },
+  'strong cold stress': { minC: -27, maxC: -13 },
+  'moderate cold stress': { minC: -13, maxC: 0 },
+  'slight cold stress': { minC: 0, maxC: 9 },
+  'no thermal stress': { minC: 9, maxC: 26 },
+  'moderate heat stress': { minC: 26, maxC: 32 },
+  'strong heat stress': { minC: 32, maxC: 38 },
+  'very strong heat stress': { minC: 38, maxC: 46 },
+  'extreme heat stress': { minC: 46 },
+};
+
+export function formatUtciCategoryRange(
+  category: string,
+  unitSystem: 'metric' | 'imperial'
+): string {
+  const range = UTCI_CATEGORY_RANGES_C[category];
+  if (!range) return '';
+  const unit = unitSystem === 'imperial' ? UNIT_F : UNIT_C;
+  const fmt = (c: number) => {
+    const v = unitSystem === 'imperial' ? Math.round((c * 9) / 5 + 32) : c;
+    return v < 0 ? `\u2212${Math.abs(v)}` : `${v}`;
+  };
+  if (range.minC == null && range.maxC != null) return `< ${fmt(range.maxC)}${unit}`;
+  if (range.minC != null && range.maxC == null) return `> ${fmt(range.minC)}${unit}`;
+  if (range.minC != null && range.maxC != null) {
+    return `${fmt(range.minC)} to ${fmt(range.maxC)}${unit}`;
+  }
+  return '';
+}
+
 /**
  * Official UTCI assessment scale (range bins), not nearest-threshold.
  * Do not use `jsthermalcomfort`'s `stress_category`: its mapper picks the nearest
  * boundary label, so e.g. UTCI 15°C (true comfort) is mislabeled "slight cold stress".
  */
 export function getUtciCategoryForValue(val: number): string {
-  if (!Number.isFinite(val)) return 'slight cold stress';
+  if (!Number.isFinite(val)) return '';
   if (val < -40) return 'extreme cold stress';
   if (val < -27) return 'very strong cold stress';
   if (val < -13) return 'strong cold stress';
@@ -76,6 +109,7 @@ export function getUtciCategoryForValue(val: number): string {
 }
 
 export function formatUtciCategoryLabel(category: string): string {
+  if (!category) return 'Outside UTCI range';
   if (category === UTCI_COMFORT_CATEGORY) return 'No thermal stress (comfort)';
   return category.replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -123,7 +157,7 @@ export function utciRowOutsideModelRange(row: EPWDataRow, opts: UtciRowOpts = {}
   const tr = meanRadiantForRow(row, opts);
   if (tr == null || !Number.isFinite(tr)) return true;
   const dtr = tr - tdb;
-  return tdb < -50 || tdb > 50 || dtr < -30 || dtr > 70 || v > 17;
+  return tdb < -50 || tdb > 50 || dtr < -30 || dtr > 70 || v > 17 || rh < 0 || rh > 100;
 }
 
 export function computeUtciForEpwRow(
@@ -137,11 +171,12 @@ export function computeUtciForEpwRow(
   const windSpeed = row.windSpeed as number;
   const ghr = row.globalHorizontalRadiation as number;
   if ([tdb, rh, windSpeed, ghr].some(v => v == null || Number.isNaN(v))) return null;
-  if (utciRowOutsideModelRange(row, opts)) return null;
 
   const v = includeWind ? Math.max(0.5, windSpeed) : 0.5;
   const tr = meanRadiantForRow(row, opts);
   if (tr == null || !Number.isFinite(tr)) return null;
+  const dtr = tr - tdb;
+  if (tdb < -50 || tdb > 50 || dtr < -30 || dtr > 70 || v > 17 || rh < 0 || rh > 100) return null;
 
   try {
     // Numeric UTCI only — never use library stress_category (nearest-threshold bug).
@@ -813,8 +848,8 @@ export function summarizeUtciCellScenarios(
       return {
         scenario,
         utciC: NaN,
-        category: UTCI_COMFORT_CATEGORY,
-        comfortShare: 0,
+        category: '',
+        comfortShare: NaN,
         hourCount: 0,
       };
     }

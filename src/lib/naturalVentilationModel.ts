@@ -17,9 +17,11 @@ export interface NaturalVentilationCriteria {
   maxRhPct: number;
 }
 
+const fToC = (f: number) => ((f - 32) * 5) / 9;
+
 export const DEFAULT_NV_CRITERIA: NaturalVentilationCriteria = {
-  tempMinC: 15.6, // 60 °F
-  tempMaxC: 26.7, // 80 °F
+  tempMinC: fToC(60), // 15.556 °C = 60.0 °F
+  tempMaxC: fToC(80), // 26.667 °C = 80.0 °F
   maxRhPct: 70,
 };
 
@@ -39,15 +41,32 @@ export const NV_CRITERIA_PRESETS: {
     id: 'well-conservative',
     label: 'Conservative (64–78 °F, RH ≤ 60%)',
     shortLabel: 'Conservative',
-    criteria: { tempMinC: 17.8, tempMaxC: 25.6, maxRhPct: 60 },
+    criteria: { tempMinC: fToC(64), tempMaxC: fToC(78), maxRhPct: 60 },
   },
   {
     id: 'cooling-only',
     label: 'Cooling relief (≤ 72 °F, RH ≤ 65%)',
     shortLabel: 'Cooling',
-    criteria: { tempMinC: -40, tempMaxC: 22.2, maxRhPct: 65 },
+    criteria: { tempMinC: -40, tempMaxC: fToC(72), maxRhPct: 65 },
   },
 ];
+
+export function formatNvPresetLabel(
+  preset: (typeof NV_CRITERIA_PRESETS)[number],
+  unitSystem: 'metric' | 'imperial'
+): string {
+  const fmtT = (c: number) =>
+    unitSystem === 'imperial'
+      ? `${Math.round((c * 9) / 5 + 32)} ${UNIT_F}`
+      : `${c.toFixed(1)} ${UNIT_C}`;
+  const { tempMinC, tempMaxC, maxRhPct } = preset.criteria;
+  const range =
+    preset.id === 'cooling-only'
+      ? `≤ ${fmtT(tempMaxC)}`
+      : `${fmtT(tempMinC).replace(/ °[CF]$/, '')}–${fmtT(tempMaxC)}`;
+  const name = preset.id === 'cse-broad' ? 'Broad' : preset.id === 'well-conservative' ? 'Conservative' : 'Cooling relief';
+  return `${name} (${range}, RH ≤ ${maxRhPct.toFixed(0)}%)`;
+}
 
 export function rowInNvTempRange(
   row: EPWDataRow,

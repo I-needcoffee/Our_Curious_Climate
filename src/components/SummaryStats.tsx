@@ -34,8 +34,11 @@ export function SummaryStats({ data, compareData, showDifference, variables, fil
   const rainVar = variables.find(v => v.id === 'liquidPrecipitationDepth');
 
   let avgTemp = 0;
+  let tempCount = 0;
   let avgRh = 0;
+  let rhCount = 0;
   let avgWind = 0;
+  let windCount = 0;
   let totalRain = 0;
   let avgUtci = 0;
   let utciCount = 0;
@@ -53,16 +56,16 @@ export function SummaryStats({ data, compareData, showDifference, variables, fil
       if (showDifference && compareData) {
         const compareVal = compareRow?.[v.id] as number;
         if (!isFiniteNumber(compareVal)) return null;
-        return primaryVal - compareVal;
+        return compareVal - primaryVal;
       }
       return primaryVal;
     };
 
     const add = (bucket: 'temp' | 'rh' | 'wind' | 'rain', value: number | null) => {
       if (value == null) return;
-      if (bucket === 'temp') avgTemp += value;
-      if (bucket === 'rh') avgRh += value;
-      if (bucket === 'wind') avgWind += value;
+      if (bucket === 'temp') { avgTemp += value; tempCount++; }
+      if (bucket === 'rh') { avgRh += value; rhCount++; }
+      if (bucket === 'wind') { avgWind += value; windCount++; }
       if (bucket === 'rain') totalRain += value;
     };
     add('temp', getVal(tempVar));
@@ -74,7 +77,7 @@ export function SummaryStats({ data, compareData, showDifference, variables, fil
     const compareUtci = compareRow ? computeUtciForEpwRow(compareRow)?.utci : undefined;
     if (showDifference && compareData) {
       if (primaryUtci != null && compareUtci != null) {
-        avgUtci += primaryUtci - compareUtci;
+        avgUtci += compareUtci - primaryUtci;
         utciCount++;
       }
     } else if (primaryUtci != null) {
@@ -85,9 +88,9 @@ export function SummaryStats({ data, compareData, showDifference, variables, fil
   });
 
   const count = filteredData.length;
-  avgTemp /= count;
-  avgRh /= count;
-  avgWind /= count;
+  if (tempCount > 0) avgTemp /= tempCount;
+  if (rhCount > 0) avgRh /= rhCount;
+  if (windCount > 0) avgWind /= windCount;
   if (utciCount > 0) avgUtci /= utciCount;
 
   // Convert units if imperial

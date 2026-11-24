@@ -467,11 +467,29 @@ export default function App() {
   useEffect(() => {
     const minC = dryBulbExtent.minC;
     const maxC = dryBulbExtent.maxC;
-    setGlobalFilter(prev => ({
-      ...prev,
-      temperatureLoC: Math.min(maxC, Math.max(minC, prev.temperatureLoC)),
-      temperatureHiC: Math.min(maxC, Math.max(minC, prev.temperatureHiC)),
-    }));
+    setGlobalFilter(prev => {
+      const nextLo = Math.min(maxC, Math.max(minC, prev.temperatureLoC));
+      const nextHi = Math.min(maxC, Math.max(minC, prev.temperatureHiC));
+      // If clamping to a newly loaded file collapses a `between` range to a single point,
+      // turn off temperature isolation rather than filtering out almost the entire file.
+      const collapsed = prev.temperatureMode === 'between' && nextLo >= nextHi;
+      const nextMode = collapsed ? 'off' : prev.temperatureMode;
+      const finalLo = collapsed ? minC : nextLo;
+      const finalHi = collapsed ? maxC : nextHi;
+      if (
+        prev.temperatureMode === nextMode &&
+        prev.temperatureLoC === finalLo &&
+        prev.temperatureHiC === finalHi
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        temperatureMode: nextMode,
+        temperatureLoC: finalLo,
+        temperatureHiC: finalHi,
+      };
+    });
   }, [dryBulbExtent.minC, dryBulbExtent.maxC]);
 
   /** Files represented in the current dashboard export (active file in single mode; baseline + compare in comparison). */
@@ -705,14 +723,21 @@ export default function App() {
         setSelectedFiles(updatedFiles);
         setIsSelectingFile(false);
         if (updatedFiles.length > 1) {
+          setDifferenceCompareIndex(updatedFiles.length - 1);
           setViewMode('comparison');
           setShowDifference(true);
           setShowDiffTable(true);
         }
       } else {
         setSelectedFiles(newFiles);
+        setActiveFileIndex(0);
+        setDifferenceBaselineIndex(0);
+        setDifferenceCompareIndex(newFiles.length > 1 ? 1 : 0);
+        windIemGlobal.setIemStation(null);
         if (newFiles.length === 1) {
           /** First file opens on the Grid overview (phones only have Details/Stacked). */
+          setViewMode('single');
+          setShowDifference(false);
           setLayoutMode(smUp ? 'grid-4x2' : 'tutorial');
         } else if (newFiles.length > 1) {
           setViewMode('comparison');
@@ -726,7 +751,11 @@ export default function App() {
   const handleExport = async () => {
     const element = document.getElementById('dashboard-area');
     if (!element || exportBusy) return;
-    const filenameBase = selectedFiles[0]?.metadata.city || 'export';
+    const activeForName =
+      viewMode === 'comparison'
+        ? selectedFiles[differenceBaselineIndex] ?? selectedFiles[0]
+        : selectedFiles[activeFileIndex] ?? selectedFiles[0];
+    const filenameBase = activeForName?.metadata.city || 'export';
     setExportBusy(true);
     try {
       await exportDashboardArea({ element, frame: exportFrame, format: exportFormat, filenameBase });
@@ -748,9 +777,8 @@ export default function App() {
     tutorialChromeAnchors?: boolean
   ) => {
     const isDiffExplorer = chart.id === 'diff-explorer';
-    const onRemoveHandler = isDiffExplorer
-      ? () => setShowDiffTable(false)
-      : chart.id.startsWith('cmp-')
+    const onRemoveHandler =
+      isDiffExplorer || chart.id.startsWith('cmp-')
         ? undefined
         : () => handleRemoveChart(chart.id);
     const onChangeTypeHandler = chart.id.startsWith('cmp-') ? undefined : (t: ChartType) => handleChangeType(chart.id, t);
@@ -915,6 +943,7 @@ export default function App() {
             pairSuppressFooterLegend={pairSuppressFooterLegend}
             siteLatitude={fileData.metadata.lat}
             metadata={fileData.metadata}
+            compareMetadata={compareFileData?.metadata}
           />
         );
       case 'naturalVentilation':
@@ -1100,6 +1129,11 @@ export default function App() {
               onClick={() => {
                 setSelectedFiles([]);
                 setShowDifference(false);
+                setActiveFileIndex(0);
+                setViewMode('single');
+                setDifferenceBaselineIndex(0);
+                setDifferenceCompareIndex(1);
+                windIemGlobal.setIemStation(null);
               }}
               className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0 glow-sm transition-[color,background-color,box-shadow] duration-200 sm:h-10 sm:w-10 ${theme === 'dark' ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
               title="Back to Map"
@@ -1605,6 +1639,8 @@ export default function App() {
                       unitSystem={unitSystem}
                       exportMode={exportMode}
                       siteLatitude={displayFiles[activeFileIndex]?.metadata.lat}
+                      metadata={displayFiles[activeFileIndex]?.metadata}
+                      filter={globalFilter}
                     />
                   </div>
                 ) : (

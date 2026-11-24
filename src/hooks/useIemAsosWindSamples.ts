@@ -3,6 +3,7 @@ import type { EPWDataRow, EPWMetadata } from '../lib/epwParser';
 import { fetchParsedIemWindYear } from '../lib/iem/fetchIemWindYear';
 import {
   buildEpwDryBulbStationClockLookup,
+  hourlyUtcWindLookup,
   stationClockFromUtcMs,
   stationClockKey,
 } from '../lib/iem/mergeEpwWind';
@@ -15,12 +16,14 @@ export type IemAsosSamplesState =
       kind: 'epw';
       loading: false;
       samples: EPWDataRow[];
+      yearCount: number;
       fallbackNote: null;
     }
   | {
       kind: 'iem';
       loading: boolean;
       samples: EPWDataRow[];
+      yearCount: number;
       fallbackNote: string | null;
     };
 
@@ -38,31 +41,37 @@ function samplesToEpwRows(
   metadata: EPWMetadata
 ): EPWDataRow[] {
   const dryBulbLookup = epwRows.length ? buildEpwDryBulbStationClockLookup(epwRows) : null;
+  // Normalize sub-hourly observations (e.g. RWIS 10–20 min reports) to 1 sample per UTC hour
+  // so WindRose hour counts accurately represent hours rather than raw sub-hourly readings.
+  const hourly = hourlyUtcWindLookup(rows);
+  const out: EPWDataRow[] = [];
 
-  return rows
-    .filter(r => Number.isFinite(r.validMs))
-    .map(r => {
-      const d = new Date(r.validMs);
-      const sc = stationClockFromUtcMs(r.validMs, metadata);
-      const year = d.getUTCFullYear();
-      const row: EPWDataRow = {
-        date: d,
-        year,
-        month: sc.month,
-        day: sc.day,
-        hour: sc.hour,
-        minute: d.getUTCMinutes(),
-        dayOfYear: 0,
-        windSpeed: r.windMs,
-        windDirection: r.windFromDeg,
-      };
-      const tmyDryBulb = dryBulbLookup?.get(stationClockKey(sc.month, sc.day, sc.hour));
-      if (tmyDryBulb !== undefined) {
-        row.dryBulbTemperature = tmyDryBulb;
-      }
-      return row;
-    });
+  for (const [utcHourMs, wind] of hourly) {
+    if (!Number.isFinite(utcHourMs)) continue;
+    const d = new Date(utcHourMs);
+    const sc = stationClockFromUtcMs(utcHourMs, metadata);
+    const year = d.getUTCFullYear();
+    const row: EPWDataRow = {
+      date: d,
+      year,
+      month: sc.month,
+      day: sc.day,
+      hour: sc.hour,
+      minute: 0,
+      dayOfYear: 0,
+      windSpeed: wind.windMs,
+      windDirection: wind.windFromDeg,
+    };
+    const tmyDryBulb = dryBulbLookup?.get(stationClockKey(sc.month, sc.day, sc.hour));
+    if (tmyDryBulb !== undefined) {
+      row.dryBulbTemperature = tmyDryBulb;
+    }
+    out.push(row);
+  }
+  return out;
 }
+
+const EMPTY_EPW_ROWS: EPWDataRow[] = [];
 
 /**
  * Fetch raw mesonet wind samples (one row per observation) for the selected IEM year range.
@@ -76,41 +85,69 @@ export function useIemAsosWindSamples(
   >,
   skip = false,
   /** TMY/EPW timeline used for dry-bulb when mesonet rows have no temperature. */
-  epwRows: EPWDataRow[] = []
+  epwRows: EPWDataRow[] = EMPTY_EPW_ROWS
 ): IemAsosSamplesState {
   const years = useMemo(() => inclusiveYears(iem.iemYearStart, iem.iemYearEnd), [iem.iemYearStart, iem.iemYearEnd]);
 
   const [st, setSt] = useState<IemAsosSamplesState>(() => ({
     kind: iem.source === 'iem' ? 'iem' : 'epw',
     loading: false,
-    samples: [],
+    samples: EMPTY_EPW_ROWS,
+    yearCount: 1,
     fallbackNote: null,
   }));
 
   useEffect(() => {
     if (skip || iem.source !== 'iem') {
-      setSt({ kind: 'epw', loading: false, samples: [], fallbackNote: null });
+      setSt(prev =>
+        prev.kind === 'epw' &&
+        !prev.loading &&
+        prev.samples.length === 0 &&
+        prev.yearCount === 1 &&
+        prev.fallbackNote === null
+          ? prev
+          : { kind: 'epw', loading: false, samples: EMPTY_EPW_ROWS, yearCount: 1, fallbackNote: null }
+      );
       return;
     }
 
     if (!metadata) {
-      setSt({
-        kind: 'iem',
-        loading: false,
-        samples: [],
-        fallbackNote:
-          'This chart has no EPW location metadata, so an Iowa Environmental Mesonet station match cannot be run.',
-      });
+      const note =
+        'This chart has no EPW location metadata, so an Iowa Environmental Mesonet station match cannot be run.';
+      setSt(prev =>
+        prev.kind === 'iem' &&
+        !prev.loading &&
+        prev.samples.length === 0 &&
+        prev.yearCount === 1 &&
+        prev.fallbackNote === note
+          ? prev
+          : {
+              kind: 'iem',
+              loading: false,
+              samples: EMPTY_EPW_ROWS,
+              yearCount: 1,
+              fallbackNote: note,
+            }
+      );
       return;
     }
 
     if (!years.length) {
-      setSt({ kind: 'iem', loading: false, samples: [], fallbackNote: 'Choose at least one valid IEM year.' });
+      const note = 'Choose at least one valid IEM year.';
+      setSt(prev =>
+        prev.kind === 'iem' &&
+        !prev.loading &&
+        prev.samples.length === 0 &&
+        prev.yearCount === 1 &&
+        prev.fallbackNote === note
+          ? prev
+          : { kind: 'iem', loading: false, samples: EMPTY_EPW_ROWS, yearCount: 1, fallbackNote: note }
+      );
       return;
     }
 
     let cancelled = false;
-    setSt({ kind: 'iem', loading: true, samples: [], fallbackNote: null });
+    setSt({ kind: 'iem', loading: true, samples: [], yearCount: years.length, fallbackNote: null });
 
     (async () => {
       try {
@@ -121,6 +158,7 @@ export function useIemAsosWindSamples(
             kind: 'iem',
             loading: false,
             samples: [],
+            yearCount: 1,
             fallbackNote: messageForResolvedIemWindStation(res),
           });
           return;
@@ -137,6 +175,7 @@ export function useIemAsosWindSamples(
           kind: 'iem',
           loading: false,
           samples: samplesToEpwRows(all, epwRows, metadata),
+          yearCount: Math.max(1, years.length),
           fallbackNote: null,
         });
       } catch (e) {
@@ -146,6 +185,7 @@ export function useIemAsosWindSamples(
           kind: 'iem',
           loading: false,
           samples: [],
+          yearCount: 1,
           fallbackNote: `Could not load IEM wind (${msg}).`,
         });
       }

@@ -24,6 +24,9 @@ function convertUtciDisplay(utciC: number, unitSystem: 'metric' | 'imperial'): n
 }
 
 function categoryTextClass(category: string, theme: 'light' | 'dark'): string {
+  if (!category) {
+    return theme === 'dark' ? 'text-gray-400' : 'text-gray-500';
+  }
   if (category === 'no thermal stress') {
     return theme === 'dark' ? 'text-emerald-300' : 'text-emerald-800';
   }

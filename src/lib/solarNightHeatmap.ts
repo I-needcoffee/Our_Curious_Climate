@@ -35,7 +35,8 @@ export function utcInstantFromEpwStationClock(params: {
 }): Date {
   const minute = params.minute ?? 30;
   const { year, month, day, jsHour, timeZoneHours } = params;
-  return new Date(Date.UTC(year, month - 1, day, jsHour - timeZoneHours, minute, 0, 0));
+  const tzMs = Number.isFinite(timeZoneHours) ? Math.round(timeZoneHours * 3_600_000) : 0;
+  return new Date(Date.UTC(year, month - 1, day, jsHour, minute, 0, 0) - tzMs);
 }
 
 /** True when the sun is at or below the horizon at this EPW station instant. */

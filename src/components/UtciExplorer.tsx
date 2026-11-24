@@ -12,6 +12,7 @@ import {
   nearestReflectancePreset,
   reflectanceLikeness,
   buildSurfaceTemperatureLookup,
+  surfaceTemperatureForRow,
   realizeGround,
   type GroundSurface,
 } from '../lib/groundComfort';
@@ -61,6 +62,7 @@ import {
   chartToolbarChipButtonClass,
   chartToolbarRoundButtonClass,
   CHART_TOOLBAR_SETTINGS_GLYPH_CLASS,
+  compareExplorerLineColors,
   comparePaneLabelClass,
   chartToolbarRevealClassFor,
   chartToolbarRemoveButtonClass,
@@ -101,6 +103,7 @@ import { HEATMAP_CELL_FONT_WEIGHT, chartAxisInk, heatmapCellInk } from '../lib/c
 import { epwEquivalentHourKey, indexEpwByEquivalentHour } from '../lib/epwClockMatch';
 import { useExplorerSvgFrame } from '../hooks/useSvgRenderScale';
 import {
+  formatUtciCategoryRange,
   getUtciCategoryForValue,
   getUtciComfortPeriodById,
   heatmapCellFocusDaySpans,
@@ -149,6 +152,8 @@ interface UtciExplorerProps {
   siteLatitude?: number | null;
   /** Station lat/lng/timezone for solar night shading on the exposure map. */
   metadata?: EPWMetadata | null;
+  /** Comparison city metadata so compareData uses its own coordinates, timezone, and surface temp. */
+  compareMetadata?: EPWMetadata | null;
 }
 
 // Create a continuous color scale for UTCI categories
@@ -173,7 +178,7 @@ function openUtciCellInspect(args: {
   const { rows, title, aggregation, statistic, setInspect, winningScenarioId, env } = args;
   if (!rows.length) return;
   const scenarios = summarizeUtciCellScenarios(rows, statistic, env);
-  const hourCount = scenarios[0]?.hourCount ?? rows.length;
+  const hourCount = scenarios.reduce((max, s) => Math.max(max, s.hourCount), 0);
   const aggWord =
     aggregation === 'month'
       ? 'Monthly'
@@ -362,6 +367,7 @@ export function UtciExplorer({
   pairSuppressFooterLegend,
   siteLatitude = null,
   metadata = null,
+  compareMetadata = null,
 }: UtciExplorerProps) {
   const barGradientSvgId = explorerChartValueGradientId(useId());
   const svgRef = useRef<SVGSVGElement>(null);
@@ -422,10 +428,25 @@ export function UtciExplorer({
   const surfaceTempForRow = useMemo(() => {
     if (!surfaceTempLookup) return null;
     return (row: EPWDataRow, sunlitGround: boolean) =>
-      (sunlitGround ? surfaceTempLookup.sun : surfaceTempLookup.shade).get(
-        `${row.month}-${row.day}-${row.hour}`
-      );
+      surfaceTemperatureForRow(sunlitGround ? surfaceTempLookup.sun : surfaceTempLookup.shade, row);
   }, [surfaceTempLookup]);
+
+  const compareSurfaceTempLookup = useMemo(() => {
+    if (!surfaceHeat || radiantMode !== 'reflectance' || !compareData?.length) return null;
+    return {
+      sun: buildSurfaceTemperatureLookup(compareData, activeGround, 'full'),
+      shade: buildSurfaceTemperatureLookup(compareData, activeGround, 'diffuse'),
+    };
+  }, [surfaceHeat, radiantMode, compareData, activeGround]);
+
+  const compareSurfaceTempForRow = useMemo(() => {
+    if (!compareSurfaceTempLookup) return null;
+    return (row: EPWDataRow, sunlitGround: boolean) =>
+      surfaceTemperatureForRow(
+        sunlitGround ? compareSurfaceTempLookup.sun : compareSurfaceTempLookup.shade,
+        row
+      );
+  }, [compareSurfaceTempLookup]);
 
   const utciSite = useMemo(() => {
     if (
@@ -438,6 +459,20 @@ export function UtciExplorer({
     }
     return { lat: metadata.lat, lng: metadata.lng, timeZone: metadata.timeZone };
   }, [metadata]);
+
+  const compareUtciSite = useMemo(() => {
+    const m = compareMetadata ?? metadata;
+    if (
+      !m ||
+      !Number.isFinite(m.lat) ||
+      !Number.isFinite(m.lng) ||
+      !Number.isFinite(m.timeZone)
+    ) {
+      return null;
+    }
+    return { lat: m.lat, lng: m.lng, timeZone: m.timeZone };
+  }, [compareMetadata, metadata]);
+
   const utciEnv = useMemo<UtciEnvironment>(
     () => ({
       radiantMode,
@@ -446,6 +481,16 @@ export function UtciExplorer({
       surfaceTempForRow: radiantMode === 'reflectance' ? surfaceTempForRow : null,
     }),
     [radiantMode, activeGround, utciSite, surfaceTempForRow]
+  );
+
+  const compareUtciEnv = useMemo<UtciEnvironment>(
+    () => ({
+      radiantMode,
+      ground: activeGround,
+      site: compareUtciSite,
+      surfaceTempForRow: radiantMode === 'reflectance' ? compareSurfaceTempForRow : null,
+    }),
+    [radiantMode, activeGround, compareUtciSite, compareSurfaceTempForRow]
   );
 
   const [iColorMode, setIColorMode] = useState<'categories' | 'comfortTime' | 'gradient'>('comfortTime');
@@ -786,7 +831,7 @@ export function UtciExplorer({
   const compareUtciData: UtciDataRow[] = useMemo(() => {
     return (compareData || []).map(d => {
       if (optimizeMode) {
-        const pick = pickOptimizedUtciExposure(d, utciEnv);
+        const pick = pickOptimizedUtciExposure(d, compareUtciEnv);
         return {
           ...d,
           utci: pick?.utci ?? NaN,
@@ -795,7 +840,7 @@ export function UtciExplorer({
           bestScenarioId: pick?.scenario.id ?? null,
         };
       }
-      const computed = computeUtciForEpwRow(d, { ...utciEnv, includeSun, includeWind });
+      const computed = computeUtciForEpwRow(d, { ...compareUtciEnv, includeSun, includeWind });
       return {
         ...d,
         utci: computed?.utci ?? NaN,
@@ -804,19 +849,21 @@ export function UtciExplorer({
         bestScenarioId: null,
       };
     });
-  }, [compareData, includeSun, includeWind, optimizeMode, utciEnv]);
+  }, [compareData, includeSun, includeWind, optimizeMode, compareUtciEnv]);
 
-  const convertUtci = (val: number) => {
-    if (unitSystem === 'imperial') {
-      if (showDifference) return val * 9/5; // Difference in C to difference in F
-      return val * 9/5 + 32;
-    }
-    return val;
-  };
+  const isDiffMode = Boolean(showDifference && compareData);
+  const convertUtciAbs = (val: number) =>
+    unitSystem === 'imperial' ? (val * 9) / 5 + 32 : val;
+  const convertUtciDelta = (val: number) =>
+    unitSystem === 'imperial' ? (val * 9) / 5 : val;
+  const convertUtci = (val: number) =>
+    isDiffMode ? convertUtciDelta(val) : convertUtciAbs(val);
   const utciUnit = unitSystem === 'imperial' ? UNIT_F : UNIT_C;
   const utciLegendTitle =
-    showDifference && compareData
-      ? `\u0394 UTCI (${utciUnit})`
+    isDiffMode
+      ? colorMode === 'comfortTime'
+        ? '\u0394 Comfort time (%)'
+        : `\u0394 UTCI (${utciUnit})`
       : showExposureMap
         ? 'Best exposure map'
         : optimizeMode
@@ -830,22 +877,16 @@ export function UtciExplorer({
               : 'Time in comfort zone';
 
   const { utciMin, utciMax } = useMemo(() => {
-    if (showDifference && compareData) {
-      // Calculate max absolute difference for UTCI
-      let maxDiff = 10; // Default
+    if (isDiffMode) {
+      let maxDiff = 10;
       try {
-        const compareByHour = indexEpwByEquivalentHour(compareData);
-        const utciOf = (row: EPWDataRow) =>
-          optimizeMode
-            ? pickOptimizedUtciExposure(row, utciEnv)?.utci
-            : computeUtciForEpwRow(row, { ...utciEnv, includeSun, includeWind })?.utci;
+        const cmpByHour = indexEpwByEquivalentHour(compareUtciData);
         const diffs: number[] = [];
-        for (const row of data) {
-          const compareRow = compareByHour.get(epwEquivalentHourKey(row));
-          const primary = utciOf(row);
-          const compare = compareRow ? utciOf(compareRow) : undefined;
-          if (primary == null || compare == null) continue;
-          diffs.push(compare - primary);
+        for (const row of utciData) {
+          if (!Number.isFinite(row.utci)) continue;
+          const cmpRow = cmpByHour.get(epwEquivalentHourKey(row));
+          if (!cmpRow || !Number.isFinite(cmpRow.utci)) continue;
+          diffs.push(cmpRow.utci - row.utci);
         }
         const bound = symmetricDiffBound(diffs);
         maxDiff = bound > 0 ? bound : 1;
@@ -858,11 +899,11 @@ export function UtciExplorer({
     }
     const extent = utciGradientExtentC(utciData.map(d => d.utci));
     return { utciMin: extent.minC, utciMax: extent.maxC };
-  }, [data, compareData, showDifference, includeSun, includeWind, optimizeMode, utciEnv, utciData]);
+  }, [isDiffMode, utciData, compareUtciData]);
 
   useEffect(() => {
     if (!svgRef.current || dimensions.width === 0) return;
-    const compareByHour = compareData ? indexEpwByEquivalentHour(compareData) : null;
+    const compareUtciByHour = isDiffMode ? indexEpwByEquivalentHour(compareUtciData) : null;
 
     const renderUtci = (svgEl: any, currentData: any[], title: string | null, isCompare: boolean) => {
     if (!currentData || !currentData.length) return;
@@ -909,10 +950,13 @@ export function UtciExplorer({
     const gradientDef = gradients.find(g => g.id === gradientId) || gradients[0];
     
     let colorScale: any;
-    if (showDifference && compareData) {
-      colorScale = (v: number) => differenceDivergingColor(v, utciMin, utciMax);
+    if (isDiffMode) {
+      colorScale =
+        colorMode === 'comfortTime'
+          ? (v: number) => differenceDivergingColor(v, -1, 1)
+          : (v: number) => differenceDivergingColor(v, utciMin, utciMax);
     } else if (colorMode === 'categories') {
-      colorScale = utciCategoryScale;
+      colorScale = (v: number) => UTCI_COLORS[getUtciCategoryForValue(v)] || emptyUtciFill;
     } else if (colorMode === 'comfortTime') {
       const comfortLow = theme === 'dark' ? '#1f2937' : '#ffffff';
       const comfortHigh = OUTDOOR_COMFORT_GREEN_HEX;
@@ -946,37 +990,51 @@ export function UtciExplorer({
         ? rowMatchesUtciComfortPeriod(row, focusPeriod, filter, siteLatitude)
         : rowPassesGlobalFilters(row, filter);
 
+    const statLabel = heatmapStatisticLabel(heatmapCellStatistic);
+    const meanFinite = (nums: number[]) => {
+      const valid = nums.filter(x => Number.isFinite(x));
+      return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : NaN;
+    };
+    const signedStr = (n: number, digits = 1) =>
+      `${n > 0 ? '+' : n < 0 ? '\u2212' : ''}${Math.abs(n).toFixed(digits)}`;
+
     const aggregateUtciCellRows = (selectedRows: UtciDataRow[]) => {
       let avgUtciVal: number;
       let comfortRatio: number;
       if (selectedRows.length === 0) {
         avgUtciVal = NaN;
-        comfortRatio = 0;
-      } else if (showDifference && compareData) {
-        const primaryStat = aggregateCellStatistic(
-          selectedRows.map(d => d.utci),
-          heatmapCellStatistic
-        );
-        const compareValues = selectedRows
-          .map(v => {
-            const cD = compareByHour?.get(epwEquivalentHourKey(v));
-            if (!cD) return null;
-            if (optimizeMode) return pickOptimizedUtciExposure(cD, utciEnv)?.utci ?? null;
-            return computeUtciForEpwRow(cD, { ...utciEnv, includeSun, includeWind })?.utci ?? null;
-          })
-          .filter((v): v is number => v != null);
-        const compareStat = aggregateCellStatistic(compareValues, heatmapCellStatistic);
-        avgUtciVal = compareStat - primaryStat;
-        comfortRatio = 0;
+        comfortRatio = NaN;
+      } else if (isDiffMode) {
+        const primUtci: number[] = [];
+        const cmpUtci: number[] = [];
+        const primComfort: number[] = [];
+        const cmpComfort: number[] = [];
+        for (const r of selectedRows) {
+          if (!Number.isFinite(r.utci)) continue;
+          const cD = compareUtciByHour?.get(epwEquivalentHourKey(r));
+          if (!cD || !Number.isFinite(cD.utci)) continue;
+          primUtci.push(r.utci);
+          cmpUtci.push(cD.utci);
+          primComfort.push(r.isComfortable);
+          cmpComfort.push(cD.isComfortable);
+        }
+        const primaryStat = aggregateCellStatistic(primUtci, heatmapCellStatistic);
+        const compareStat = aggregateCellStatistic(cmpUtci, heatmapCellStatistic);
+        avgUtciVal =
+          Number.isFinite(primaryStat) && Number.isFinite(compareStat)
+            ? compareStat - primaryStat
+            : NaN;
+        const pComfort = meanFinite(primComfort);
+        const cComfort = meanFinite(cmpComfort);
+        comfortRatio =
+          Number.isFinite(pComfort) && Number.isFinite(cComfort) ? cComfort - pComfort : NaN;
       } else {
         avgUtciVal = aggregateCellStatistic(
           selectedRows.map(d => d.utci),
           heatmapCellStatistic
         );
-        comfortRatio = aggregateCellStatistic(
-          selectedRows.map(d => d.isComfortable),
-          heatmapCellStatistic
-        );
+        // Comfort time is always the fraction of valid hours in comfort (never binary min/max 0%/100%).
+        comfortRatio = meanFinite(selectedRows.map(d => d.isComfortable));
       }
       return { avgUtciVal, comfortRatio };
     };
@@ -1034,24 +1092,32 @@ export function UtciExplorer({
         y: opts.hour,
         month: opts.month,
         utci: avgUtciVal,
-        utciCategory: Number.isFinite(avgUtciVal)
+        utciCategory: !isDiffMode && Number.isFinite(avgUtciVal)
           ? getUtciCategoryForValue(avgUtciVal)
-          : 'no thermal stress',
+          : '',
         isComfortable: comfortRatio,
         dominantScenarioId: dominantId,
         label: opts.label,
         cellRows: opts.selectedRows,
         cellTitle: opts.cellTitle,
         sunYear: mid?.year ?? 2000,
-        sunMonth: opts.month,
+        sunMonth: aggregation === 'month' ? opts.month : (mid?.month ?? opts.month),
         sunDay: aggregation === 'month' ? 15 : (mid?.day ?? 15),
         sunHour: opts.hour,
         solarStandardClock: mid?.solarStandardClock,
         tooltip: !Number.isFinite(avgUtciVal)
-          ? `${opts.tooltipPrefix}\nNo hours in dry-bulb band`
-          : colorMode === 'comfortTime'
-            ? `${opts.tooltipPrefix} Avg\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}${optimizeLine}`
-            : `${opts.tooltipPrefix} Avg\nUTCI: ${convertUtci(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}${optimizeLine}`,
+          ? `${opts.tooltipPrefix}\n${
+              opts.selectedRows.length === 0 && filter.temperatureMode !== 'off'
+                ? 'No hours in dry-bulb band'
+                : 'UTCI could not be calculated (outside the model range)'
+            }`
+          : isDiffMode
+            ? colorMode === 'comfortTime'
+              ? `${opts.tooltipPrefix} Diff\n\u0394 Comfort Time: ${signedStr(comfortRatio * 100, 1)} pts\n\u0394 UTCI (${statLabel}): ${signedStr(convertUtciDelta(avgUtciVal), 1)}${utciUnit}`
+              : `${opts.tooltipPrefix} Diff (${statLabel})\n\u0394 UTCI: ${signedStr(convertUtciDelta(avgUtciVal), 1)}${utciUnit}`
+            : colorMode === 'comfortTime'
+              ? `${opts.tooltipPrefix} ${statLabel}\nComfort Time: ${(comfortRatio * 100).toFixed(1)}%\nUTCI: ${convertUtciAbs(avgUtciVal).toFixed(1)}${utciUnit}${optimizeLine}`
+              : `${opts.tooltipPrefix} ${statLabel}\nUTCI: ${convertUtciAbs(avgUtciVal).toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(avgUtciVal)}${optimizeLine}`,
       });
     };
 
@@ -1166,13 +1232,27 @@ export function UtciExplorer({
       // day or hour — keep all globally filtered hours; dim those outside the focus season
       heatmapData = currentData.map(d => {
         const pass = rowPassesGlobalFilters(d, filter);
-        const utciVal = pass ? d.utci : NaN;
-        const dominantId = pass && optimizeMode ? d.bestScenarioId : null;
+        const cmpRow = isDiffMode ? compareUtciByHour?.get(epwEquivalentHourKey(d)) : undefined;
+        const utciVal = !pass
+          ? NaN
+          : isDiffMode
+            ? Number.isFinite(d.utci) && cmpRow && Number.isFinite(cmpRow.utci)
+              ? cmpRow.utci - d.utci
+              : NaN
+            : d.utci;
+        const comfortVal = !pass
+          ? NaN
+          : isDiffMode
+            ? Number.isFinite(d.isComfortable) && cmpRow && Number.isFinite(cmpRow.isComfortable)
+              ? cmpRow.isComfortable - d.isComfortable
+              : NaN
+            : d.isComfortable;
+        const dominantId = pass && optimizeMode && !isDiffMode ? d.bestScenarioId : null;
         const dominant = utciScenarioById(dominantId);
         const optimizeLine =
-          optimizeMode && dominant
+          optimizeMode && !isDiffMode && dominant
             ? `\nBest exposure: ${dominant.shortLabel} (${dominant.label})`
-            : optimizeMode
+            : optimizeMode && !isDiffMode
               ? '\nBest exposure: —'
               : '';
         return {
@@ -1181,8 +1261,8 @@ export function UtciExplorer({
           y: d.hour,
           month: d.month,
           utci: utciVal,
-          utciCategory: pass ? d.utciCategory : 'no thermal stress',
-          isComfortable: pass ? d.isComfortable : 0,
+          utciCategory: pass && !isDiffMode ? d.utciCategory : '',
+          isComfortable: comfortVal,
           dominantScenarioId: dominantId,
           label: formatEpwStationDate(d),
           cellRows: pass ? [d] : [],
@@ -1193,12 +1273,16 @@ export function UtciExplorer({
           sunHour: d.hour,
           solarStandardClock: d.solarStandardClock,
           tooltip: !pass
-            ? `${formatEpwStationDateTime(d)}\nOutside dry-bulb band`
-            : !Number.isFinite(d.utci)
+            ? `${formatEpwStationDateTime(d)}\n${filter.temperatureMode !== 'off' ? 'Outside dry-bulb band' : 'Filtered out'}`
+            : !Number.isFinite(utciVal)
               ? `${formatEpwStationDateTime(d)}\nUTCI could not be calculated (outside the model range)`
-            : colorMode === 'comfortTime'
-              ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}${optimizeLine}`
-              : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtci(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}${optimizeLine}`,
+              : isDiffMode
+                ? colorMode === 'comfortTime'
+                  ? `${formatEpwStationDateTime(d)} Diff\n\u0394 Comfort: ${signedStr(comfortVal * 100, 0)} pts\n\u0394 UTCI: ${signedStr(convertUtciDelta(utciVal), 1)}${utciUnit}`
+                  : `${formatEpwStationDateTime(d)} Diff\n\u0394 UTCI: ${signedStr(convertUtciDelta(utciVal), 1)}${utciUnit}`
+                : colorMode === 'comfortTime'
+                  ? `${formatEpwStationDateTime(d)}\nComfortable: ${d.isComfortable ? 'Yes' : 'No'}\nUTCI: ${convertUtciAbs(d.utci).toFixed(1)}${utciUnit}${optimizeLine}`
+                  : `${formatEpwStationDateTime(d)}\nUTCI: ${convertUtciAbs(d.utci).toFixed(1)}${utciUnit}\n${d.utciCategory}${optimizeLine}`,
         };
       });
     }
@@ -1215,7 +1299,10 @@ export function UtciExplorer({
         return d.dominantScenarioId ? exposureCellFill : emptyUtciFill;
       }
       if (!Number.isFinite(d.utci)) return emptyUtciFill;
-      if (colorMode === 'categories') return UTCI_COLORS[d.utciCategory] || '#cccccc';
+      if (isDiffMode) {
+        return colorScale(colorMode === 'comfortTime' ? d.isComfortable : d.utci);
+      }
+      if (colorMode === 'categories') return UTCI_COLORS[d.utciCategory] || emptyUtciFill;
       return colorScale(colorMode === 'comfortTime' ? d.isComfortable : d.utci);
     };
 
@@ -1343,9 +1430,17 @@ export function UtciExplorer({
           )
             return "";
           if (!Number.isFinite(d.utci)) return "";
+          if (isDiffMode) {
+            if (colorMode === 'comfortTime') {
+              const pts = Math.round(d.isComfortable * 100);
+              return `${pts > 0 ? '+' : pts < 0 ? '\u2212' : ''}${Math.abs(pts)}%`;
+            }
+            const dv = Math.round(convertUtciDelta(d.utci));
+            return `${dv > 0 ? '+' : dv < 0 ? '\u2212' : ''}${Math.abs(dv)}`;
+          }
           return colorMode === 'comfortTime'
             ? `${Math.round(d.isComfortable * 100)}%`
-            : `${Math.round(convertUtci(d.utci))}`;
+            : `${Math.round(convertUtciAbs(d.utci))}`;
         });
       fitHeatmapCellLabels(
         cellLabels,
@@ -1422,23 +1517,82 @@ export function UtciExplorer({
       return rowMatchesUtciComfortPeriod(d, focusPeriod, filter, siteLatitude);
     };
 
-    // Aggregate data
-    let aggregatedData: { x0: number, x1: number, valueAll: number, valueSelected: number | null, comfortRatioAll: number, comfortRatioSelected: number | null, minSelected?: number, maxSelected?: number, month: number }[] = [];
-    
+    // Aggregate data (always in absolute display units for the upper chart: bars in single mode, baseline vs comparison lines in diff mode)
+    const convertFiniteAbs = (v: number | undefined): number =>
+      typeof v === 'number' && Number.isFinite(v) ? convertUtciAbs(v) : NaN;
+    const summarizeBarBin = (values: UtciDataRow[], selectedValues: UtciDataRow[]) => {
+      const validAll = values.map(d => d.utci).filter(Number.isFinite);
+      const validSel = selectedValues.map(d => d.utci).filter(Number.isFinite);
+      const validComfAll = values.map(d => d.isComfortable).filter(Number.isFinite);
+      const validComfSel = selectedValues.map(d => d.isComfortable).filter(Number.isFinite);
+
+      let cmpValSel: number | null = null;
+      let cmpMinSel: number | undefined;
+      let cmpMaxSel: number | undefined;
+      let cmpComfSel: number | null = null;
+      if (isDiffMode && selectedValues.length > 0) {
+        const cmpRows = selectedValues
+          .map(v => compareUtciByHour?.get(epwEquivalentHourKey(v)))
+          .filter((r): r is UtciDataRow => r != null);
+        const cmpUtcis = cmpRows.map(r => r.utci).filter(Number.isFinite);
+        const cmpComfs = cmpRows.map(r => r.isComfortable).filter(Number.isFinite);
+        cmpValSel = cmpUtcis.length ? convertFiniteAbs(d3.mean(cmpUtcis)) : null;
+        cmpMinSel = cmpUtcis.length ? convertFiniteAbs(d3.min(cmpUtcis)) : undefined;
+        cmpMaxSel = cmpUtcis.length ? convertFiniteAbs(d3.max(cmpUtcis)) : undefined;
+        cmpComfSel = cmpComfs.length ? (d3.mean(cmpComfs) ?? null) : null;
+      }
+
+      return {
+        valueAll: validAll.length ? convertFiniteAbs(d3.mean(validAll)) : NaN,
+        valueSelected: validSel.length ? convertFiniteAbs(d3.mean(validSel)) : null,
+        comfortRatioAll: validComfAll.length ? (d3.mean(validComfAll) ?? NaN) : NaN,
+        comfortRatioSelected: validComfSel.length ? (d3.mean(validComfSel) ?? null) : null,
+        minSelected: validSel.length ? convertFiniteAbs(d3.min(validSel)) : undefined,
+        maxSelected: validSel.length ? convertFiniteAbs(d3.max(validSel)) : undefined,
+        compareValueSelected: cmpValSel,
+        compareMinSelected: cmpMinSel,
+        compareMaxSelected: cmpMaxSel,
+        compareComfortRatioSelected: cmpComfSel,
+      };
+    };
+
+    let aggregatedData: {
+      x0: number;
+      x1: number;
+      valueAll: number;
+      valueSelected: number | null;
+      comfortRatioAll: number;
+      comfortRatioSelected: number | null;
+      minSelected?: number;
+      maxSelected?: number;
+      compareValueSelected?: number | null;
+      compareMinSelected?: number;
+      compareMaxSelected?: number;
+      compareComfortRatioSelected?: number | null;
+      month: number;
+    }[] = [];
+
     if (aggregation === 'hour') {
       aggregatedData = currentData.map(d => {
         const selected = isSelected(d);
-        const val = convertUtci(d.utci);
+        const val = convertFiniteAbs(d.utci);
+        const cmpRow = isDiffMode ? compareUtciByHour?.get(epwEquivalentHourKey(d)) : undefined;
+        const cmpVal = cmpRow ? convertFiniteAbs(cmpRow.utci) : NaN;
         return {
           x0: d.dayOfYear + d.hour / 24,
           x1: d.dayOfYear + (d.hour + 1) / 24,
           valueAll: val,
-          valueSelected: selected ? val : null,
+          valueSelected: selected && Number.isFinite(val) ? val : null,
           comfortRatioAll: d.isComfortable,
-          comfortRatioSelected: selected ? d.isComfortable : null,
-          minSelected: selected ? val : undefined,
-          maxSelected: selected ? val : undefined,
-          month: d.month
+          comfortRatioSelected: selected && Number.isFinite(d.isComfortable) ? d.isComfortable : null,
+          minSelected: selected && Number.isFinite(val) ? val : undefined,
+          maxSelected: selected && Number.isFinite(val) ? val : undefined,
+          compareValueSelected: selected && Number.isFinite(cmpVal) ? cmpVal : null,
+          compareMinSelected: selected && Number.isFinite(cmpVal) ? cmpVal : undefined,
+          compareMaxSelected: selected && Number.isFinite(cmpVal) ? cmpVal : undefined,
+          compareComfortRatioSelected:
+            selected && cmpRow && Number.isFinite(cmpRow.isComfortable) ? cmpRow.isComfortable : null,
+          month: d.month,
         };
       });
     } else if (aggregation === 'day') {
@@ -1448,13 +1602,8 @@ export function UtciExplorer({
         return {
           x0: day,
           x1: day + 1,
-          valueAll: convertUtci(d3.mean(values, d => d.utci) || 0),
-          valueSelected: selectedValues.length > 0 ? convertUtci(d3.mean(selectedValues, d => d.utci) || 0) : null,
-          comfortRatioAll: d3.mean(values, d => d.isComfortable) || 0,
-          comfortRatioSelected: selectedValues.length > 0 ? (d3.mean(selectedValues, d => d.isComfortable) || 0) : null,
-          minSelected: selectedValues.length > 0 ? convertUtci(d3.min(selectedValues, d => d.utci) || 0) : undefined,
-          maxSelected: selectedValues.length > 0 ? convertUtci(d3.max(selectedValues, d => d.utci) || 0) : undefined,
-          month: values[0].month
+          ...summarizeBarBin(values, selectedValues),
+          month: values[0].month,
         };
       });
     } else if (aggregation === 'week') {
@@ -1464,16 +1613,11 @@ export function UtciExplorer({
         return {
           x0: week * 7 + 1,
           x1: Math.min((week + 1) * 7 + 1, 366),
-          valueAll: convertUtci(d3.mean(values, d => d.utci) || 0),
-          valueSelected: selectedValues.length > 0 ? convertUtci(d3.mean(selectedValues, d => d.utci) || 0) : null,
-          comfortRatioAll: d3.mean(values, d => d.isComfortable) || 0,
-          comfortRatioSelected: selectedValues.length > 0 ? (d3.mean(selectedValues, d => d.isComfortable) || 0) : null,
-          minSelected: selectedValues.length > 0 ? convertUtci(d3.min(selectedValues, d => d.utci) || 0) : undefined,
-          maxSelected: selectedValues.length > 0 ? convertUtci(d3.max(selectedValues, d => d.utci) || 0) : undefined,
-          month: values[0].month
+          ...summarizeBarBin(values, selectedValues),
+          month: values[0].month,
         };
       });
-    } else { // month
+    } else {
       const months = d3.group(currentData, d => d.month);
       aggregatedData = Array.from(months, ([month, values]) => {
         const startDay = values[0].dayOfYear;
@@ -1482,20 +1626,38 @@ export function UtciExplorer({
         return {
           x0: startDay,
           x1: endDay,
-          valueAll: convertUtci(d3.mean(values, d => d.utci) || 0),
-          valueSelected: selectedValues.length > 0 ? convertUtci(d3.mean(selectedValues, d => d.utci) || 0) : null,
-          comfortRatioAll: d3.mean(values, d => d.isComfortable) || 0,
-          comfortRatioSelected: selectedValues.length > 0 ? (d3.mean(selectedValues, d => d.isComfortable) || 0) : null,
-          minSelected: selectedValues.length > 0 ? convertUtci(d3.min(selectedValues, d => d.utci) || 0) : null,
-          maxSelected: selectedValues.length > 0 ? convertUtci(d3.max(selectedValues, d => d.utci) || 0) : null,
-          month: month
+          ...summarizeBarBin(values, selectedValues),
+          month,
         };
       });
     }
 
-    // Y Scale for Bar Chart
-    const yMin = colorMode === 'comfortTime' ? 0 : (d3.min(aggregatedData, d => Math.min(d.valueAll, d.minSelected ?? d.valueAll)) || 0);
-    const yMax = colorMode === 'comfortTime' ? 1 : (d3.max(aggregatedData, d => Math.max(d.valueAll, d.maxSelected ?? d.valueAll)) || convertUtci(40));
+    // Y Scale for Bar Chart (always absolute °C/°F or 0–1 comfort ratio)
+    let yMin = 0;
+    let yMax = 1;
+    if (colorMode !== 'comfortTime') {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const d of aggregatedData) {
+        const cands = [
+          d.valueAll,
+          d.valueSelected,
+          d.minSelected,
+          d.maxSelected,
+          d.compareValueSelected,
+          d.compareMinSelected,
+          d.compareMaxSelected,
+        ];
+        for (const v of cands) {
+          if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+      }
+      yMin = Number.isFinite(lo) ? lo : convertUtciAbs(-10);
+      yMax = Number.isFinite(hi) ? hi : convertUtciAbs(40);
+      if (yMin === yMax) yMax = yMin + 1;
+    }
 
     const yScaleBar = d3.scaleLinear()
       .domain([yMin, yMax])
@@ -1515,109 +1677,218 @@ export function UtciExplorer({
       .attr("stroke", explorerBarGridStroke(theme))
       .attr("stroke-width", 1);
 
-    const getFillColor = (val: number, comfortRatio: number) => {
-      const metricValue = unitSystem === 'imperial' ? (val - 32) * 5/9 : val;
+    const getFillColor = (valDisplay: number, comfortRatio: number) => {
+      const metricValue = unitSystem === 'imperial' ? ((valDisplay - 32) * 5) / 9 : valDisplay;
       if (colorMode === 'categories') {
-        return utciCategoryScale(metricValue);
-      } else {
-        return colorScale(colorMode === 'comfortTime' ? comfortRatio : metricValue);
+        return UTCI_COLORS[getUtciCategoryForValue(metricValue)] || emptyUtciFill;
       }
+      return colorScale(colorMode === 'comfortTime' ? comfortRatio : metricValue);
     };
 
-    const chartBarFill =
-      barChartFillMode === 'gradient' && !(showDifference && compareData)
-        ? colorMode === 'comfortTime'
-          ? createExplorerChartValueGradient(svgDefs, r => getFillColor(0, r), 0, 1, v => yScaleBar(v), {
-              id: barGradientSvgId,
-            })
-          : createExplorerChartValueGradient(
-              svgDefs,
-              v => getFillColor(v, 0),
-              convertUtci(utciMin),
-              convertUtci(utciMax),
-              v => yScaleBar(v),
-              { id: barGradientSvgId }
-            )
-        : null;
+    if (isDiffMode) {
+      const pairData = aggregatedData.filter(d =>
+        colorMode === 'comfortTime'
+          ? typeof d.comfortRatioSelected === 'number' &&
+            Number.isFinite(d.comfortRatioSelected) &&
+            typeof d.compareComfortRatioSelected === 'number' &&
+            Number.isFinite(d.compareComfortRatioSelected)
+          : typeof d.valueSelected === 'number' &&
+            Number.isFinite(d.valueSelected) &&
+            typeof d.compareValueSelected === 'number' &&
+            Number.isFinite(d.compareValueSelected)
+      );
+      const yPrim = (d: (typeof pairData)[0]) =>
+        colorMode === 'comfortTime'
+          ? d.comfortRatioSelected!
+          : explorerBarStatisticY(heatmapCellStatistic, {
+              valueSelected: d.valueSelected!,
+              minSelected: d.minSelected,
+              maxSelected: d.maxSelected,
+            });
+      const yCmp = (d: (typeof pairData)[0]) =>
+        colorMode === 'comfortTime'
+          ? d.compareComfortRatioSelected!
+          : explorerBarStatisticY(heatmapCellStatistic, {
+              valueSelected: d.compareValueSelected!,
+              minSelected: d.compareMinSelected,
+              maxSelected: d.compareMaxSelected,
+            });
 
-    // Draw foreground elements (Selected Data)
-    const fgGroups = barChartG.selectAll(".fg-group")
-      .data(aggregatedData.filter(d => d.valueSelected !== null))
-      .join("g")
-      .attr("class", "fg-group");
+      const linePrimary = d3
+        .line<(typeof pairData)[0]>()
+        .defined(d => Number.isFinite(yPrim(d)) && Number.isFinite(yCmp(d)))
+        .x(d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
+        .y(d => yScaleBar(yPrim(d)))
+        .curve(d3.curveMonotoneX);
 
-    fgGroups.each(function(d) {
-      const group = d3.select(this);
-      const barW = Math.max(1, xScale(d.x1) - xScale(d.x0) - (aggregation === 'hour' ? 0 : 4));
-      const xPos = xScale(d.x0);
+      const lineCompare = d3
+        .line<(typeof pairData)[0]>()
+        .defined(d => Number.isFinite(yPrim(d)) && Number.isFinite(yCmp(d)))
+        .x(d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
+        .y(d => yScaleBar(yCmp(d)))
+        .curve(d3.curveMonotoneX);
 
-      if (colorMode === 'comfortTime') {
-        const yHi = yScaleBar(d.comfortRatioSelected!);
-        const yLo = yScaleBar(0);
-        const topY = Math.min(yHi, yLo);
-        const barH = Math.max(1, Math.abs(yLo - yHi));
-        const pillR = Math.min(barW / 2, barH / 2);
-        const ratio = d.comfortRatioSelected ?? 0;
-        const comfortFill =
-          chartBarFill ??
-          getFillColor(
-            0,
-            explorerBarStatisticY(heatmapCellStatistic, {
-              valueSelected: ratio,
-              minSelected: 0,
-              maxSelected: ratio,
-            })
-          );
-        const baselinePx = yScaleBar.range()[0];
-        group.append("path")
-          .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
-          .style("fill", comfortFill);
-      } else {
-        // Bar from min to max
-        const val = d.valueSelected!;
-        const minVal = d.minSelected !== undefined && d.minSelected !== null ? d.minSelected : val;
-        const maxVal = d.maxSelected !== undefined && d.maxSelected !== null ? d.maxSelected : val;
-        const yMinPx = yScaleBar(minVal);
-        const yMaxPx = yScaleBar(maxVal);
-        const topY = Math.min(yMinPx, yMaxPx);
-        const barH = Math.max(1, Math.abs(yMinPx - yMaxPx));
-        const pillR = Math.min(barW / 2, barH / 2);
+      const areaDiff = d3
+        .area<(typeof pairData)[0]>()
+        .defined(d => Number.isFinite(yPrim(d)) && Number.isFinite(yCmp(d)))
+        .x(d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
+        .y0(d => yScaleBar(yCmp(d)))
+        .y1(d => yScaleBar(yPrim(d)))
+        .curve(d3.curveMonotoneX);
 
-        const barFillVal = explorerBarStatisticY(heatmapCellStatistic, {
-          valueSelected: val,
-          minSelected: minVal,
-          maxSelected: maxVal,
-        });
-        const baselinePx = yScaleBar.range()[0];
-        group.append("path")
-          .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
-          .style("fill", chartBarFill ?? getFillColor(barFillVal, d.comfortRatioSelected!))
-          .style("opacity", 0.6);
+      barChartG.append("path")
+        .datum(pairData)
+        .attr("fill", theme === 'dark' ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.05)")
+        .attr("d", areaDiff);
 
-        // Average Indicator Circle
-        group.append("circle")
-          .attr("cx", xPos + barW / 2)
-          .attr("cy", yScaleBar(val))
-          .attr("r", Math.min(barW / 2, 4))
-          .style("fill", getFillColor(val, d.comfortRatioSelected!))
-          .style("stroke", "#000000")
-          .style("stroke-width", "1px");
-      }
-    });
+      const { baseline: lineBaseline, comparison: lineComparison } = compareExplorerLineColors(theme);
 
-    fgGroups.append("title")
-      .text(d => {
-        const metricValue = unitSystem === 'imperial' ? (d.valueSelected! - 32) * 5/9 : d.valueSelected!;
+      barChartG.append("path")
+        .datum(pairData)
+        .attr("fill", "none")
+        .attr("stroke", lineBaseline)
+        .attr("stroke-width", 2.25)
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round")
+        .attr("d", linePrimary);
+
+      barChartG.append("path")
+        .datum(pairData)
+        .attr("fill", "none")
+        .attr("stroke", lineComparison)
+        .attr("stroke-width", 2.25)
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round")
+        .attr("d", lineCompare);
+
+      barChartG.selectAll(".dot-primary")
+        .data(pairData)
+        .join("circle")
+        .attr("class", "dot-primary")
+        .attr("cx", d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
+        .attr("cy", d => yScaleBar(yPrim(d)))
+        .attr("r", 3)
+        .attr("fill", lineBaseline)
+        .append("title")
+        .text(d =>
+          colorMode === 'comfortTime'
+            ? `Baseline comfort time: ${(yPrim(d) * 100).toFixed(1)}%`
+            : `Baseline (${statLabel}): ${yPrim(d).toFixed(1)}${utciUnit}`
+        );
+
+      barChartG.selectAll(".dot-compare")
+        .data(pairData)
+        .join("circle")
+        .attr("class", "dot-compare")
+        .attr("cx", d => xScale(d.x0) + (xScale(d.x1) - xScale(d.x0)) / 2)
+        .attr("cy", d => yScaleBar(yCmp(d)))
+        .attr("r", 3)
+        .attr("fill", lineComparison)
+        .append("title")
+        .text(d =>
+          colorMode === 'comfortTime'
+            ? `Comparison comfort time: ${(yCmp(d) * 100).toFixed(1)}%`
+            : `Comparison (${statLabel}): ${yCmp(d).toFixed(1)}${utciUnit}`
+        );
+    } else {
+      const chartBarFill =
+        barChartFillMode === 'gradient'
+          ? colorMode === 'comfortTime'
+            ? createExplorerChartValueGradient(svgDefs, r => getFillColor(0, r), 0, 1, v => yScaleBar(v), {
+                id: barGradientSvgId,
+              })
+            : createExplorerChartValueGradient(
+                svgDefs,
+                v => getFillColor(v, 0),
+                convertUtciAbs(utciMin),
+                convertUtciAbs(utciMax),
+                v => yScaleBar(v),
+                { id: barGradientSvgId }
+              )
+          : null;
+
+      // Draw foreground elements (Selected Data)
+      const fgGroups = barChartG.selectAll(".fg-group")
+        .data(
+          aggregatedData.filter(d =>
+            colorMode === 'comfortTime'
+              ? typeof d.comfortRatioSelected === 'number' && Number.isFinite(d.comfortRatioSelected)
+              : typeof d.valueSelected === 'number' && Number.isFinite(d.valueSelected)
+          )
+        )
+        .join("g")
+        .attr("class", "fg-group");
+
+      fgGroups.each(function(d) {
+        const group = d3.select(this);
+        const barW = Math.max(1, xScale(d.x1) - xScale(d.x0) - (aggregation === 'hour' ? 0 : 4));
+        const xPos = xScale(d.x0);
+
         if (colorMode === 'comfortTime') {
-          return `Selected Hours Comfort Time: ${(d.comfortRatioSelected! * 100).toFixed(1)}%`;
+          const ratio = d.comfortRatioSelected ?? 0;
+          const yHi = yScaleBar(ratio);
+          const yLo = yScaleBar(0);
+          const topY = Math.min(yHi, yLo);
+          const barH = Math.max(1, Math.abs(yLo - yHi));
+          const pillR = Math.min(barW / 2, barH / 2);
+          const comfortFill = chartBarFill ?? getFillColor(0, ratio);
+          const baselinePx = yScaleBar.range()[0];
+          group.append("path")
+            .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
+            .style("fill", comfortFill);
         } else {
-          return `Selected Hours Avg UTCI: ${d.valueSelected!.toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(metricValue)}`;
+          // Bar from min to max
+          const val = d.valueSelected!;
+          const minVal = typeof d.minSelected === 'number' && Number.isFinite(d.minSelected) ? d.minSelected : val;
+          const maxVal = typeof d.maxSelected === 'number' && Number.isFinite(d.maxSelected) ? d.maxSelected : val;
+          const yMinPx = yScaleBar(minVal);
+          const yMaxPx = yScaleBar(maxVal);
+          const topY = Math.min(yMinPx, yMaxPx);
+          const barH = Math.max(1, Math.abs(yMinPx - yMaxPx));
+          const pillR = Math.min(barW / 2, barH / 2);
+
+          const barFillVal = explorerBarStatisticY(heatmapCellStatistic, {
+            valueSelected: val,
+            minSelected: minVal,
+            maxSelected: maxVal,
+          });
+          const baselinePx = yScaleBar.range()[0];
+          group.append("path")
+            .attr("d", explorerBarPath(xPos, topY, barW, barH, pillR, explorerBarSitsOnBaseline(topY + barH, baselinePx)))
+            .style("fill", chartBarFill ?? getFillColor(barFillVal, d.comfortRatioSelected ?? 0))
+            .style("opacity", 0.6);
+
+          // Indicator circle tracks active Low/Ave/High statistic
+          if (aggregation !== 'hour') {
+            group.append("circle")
+              .attr("cx", xPos + barW / 2)
+              .attr("cy", yScaleBar(barFillVal))
+              .attr("r", Math.min(barW / 2, 4))
+              .style("fill", getFillColor(barFillVal, d.comfortRatioSelected ?? 0))
+              .style("stroke", "#000000")
+              .style("stroke-width", "1px");
+          }
         }
       });
 
+      fgGroups.append("title")
+        .text(d => {
+          if (colorMode === 'comfortTime') {
+            return `Selected Hours Comfort Time: ${((d.comfortRatioSelected ?? 0) * 100).toFixed(1)}%`;
+          }
+          const shown = explorerBarStatisticY(heatmapCellStatistic, {
+            valueSelected: d.valueSelected!,
+            minSelected: d.minSelected,
+            maxSelected: d.maxSelected,
+          });
+          const metricValue = unitSystem === 'imperial' ? ((shown - 32) * 5) / 9 : shown;
+          return `Selected Hours ${statLabel} UTCI: ${shown.toFixed(1)}${utciUnit}\n${getUtciCategoryForValue(metricValue)}`;
+        });
+    }
+
     // Y Axis for Bar Chart
     const yAxisBar = d3.axisLeft(yScaleBar).ticks(5)
-      .tickFormat(d => colorMode === 'comfortTime' ? `${(d as number) * 100}%` : `${d}${utciUnit}`);
+      .tickFormat(d => colorMode === 'comfortTime' ? `${Math.round((d as number) * 100)}%` : `${d}${utciUnit}`);
       
     barChartG.append("g")
       .call(yAxisBar)
@@ -1625,16 +1896,20 @@ export function UtciExplorer({
       .call(g => g.selectAll(".tick line").remove())
       .call(g => g.selectAll(".tick text").style("fill", axisInk).style("font-weight", "500").style("font-size", `${type.axisPx}px`));
 
-    // Zero line for UTCI values
+    // Freezing reference line (0 °C / 32 °F), drawn only when inside the visible Y-axis domain
     if (colorMode !== 'comfortTime') {
-      barChartG.append("line")
-        .attr("x1", 0)
-        .attr("x2", innerWidth)
-        .attr("y1", yScaleBar(0))
-        .attr("y2", yScaleBar(0))
-        .attr("stroke", theme === 'dark' ? '#6b7280' : '#4b5563')
-        .attr("stroke-width", '2px')
-        .attr("stroke-opacity", 0.5);
+      const freezingVal = unitSystem === 'imperial' ? 32 : 0;
+      const [domMin, domMax] = yScaleBar.domain();
+      if (freezingVal >= domMin && freezingVal <= domMax) {
+        barChartG.append("line")
+          .attr("x1", 0)
+          .attr("x2", innerWidth)
+          .attr("y1", yScaleBar(freezingVal))
+          .attr("y2", yScaleBar(freezingVal))
+          .attr("stroke", theme === 'dark' ? '#6b7280' : '#4b5563')
+          .attr("stroke-width", '1.5px')
+          .attr("stroke-opacity", 0.45);
+      }
     }
 
     const monthCenters = explorerMonthLabelCenterDays();
@@ -1722,49 +1997,47 @@ export function UtciExplorer({
         : rowPassesGlobalFilters(d, filter)
     );
 
-    if (showDifference && compareData) {
-      const compareByHour = indexEpwByEquivalentHour(compareData);
-      const utciOf = (row: EPWDataRow) =>
-        optimizeMode
-          ? pickOptimizedUtciExposure(row, utciEnv)?.utci
-          : computeUtciForEpwRow(row, { ...utciEnv, includeSun, includeWind })?.utci;
-      const diffs = filteredData.map(d => {
-        const cD = compareByHour.get(epwEquivalentHourKey(d));
-        if (!cD) return null;
-        const primary = utciOf(d);
-        const compare = utciOf(cD);
-        if (primary == null || compare == null) return null;
-        return compare - primary;
-      }).filter(v => v !== null) as number[];
+    if (isDiffMode) {
+      const cmpByHour = indexEpwByEquivalentHour(compareUtciData);
+      const diffs: number[] = [];
+      for (const d of filteredData) {
+        if (!Number.isFinite(d.utci)) continue;
+        const cD = cmpByHour.get(epwEquivalentHourKey(d));
+        if (!cD || !Number.isFinite(cD.utci)) continue;
+        diffs.push(cD.utci - d.utci);
+      }
 
       return {
-        avg: convertUtci(d3.mean(diffs) || 0),
-        min: convertUtci(d3.min(diffs) || 0),
-        max: convertUtci(d3.max(diffs) || 0),
+        avg: diffs.length ? convertUtciDelta(d3.mean(diffs)!) : NaN,
+        min: diffs.length ? convertUtciDelta(d3.min(diffs)!) : NaN,
+        max: diffs.length ? convertUtciDelta(d3.max(diffs)!) : NaN,
         count: diffs.length,
         comfortRatio: 0, // Not applicable for diff
         categoryPercentages: [] // Not applicable for diff
       };
     }
 
-    const categoryCounts = d3.rollup(filteredData, v => v.length, d => d.utciCategory);
-    const categoryPercentages = Array.from(categoryCounts).map(([category, count]) => ({
-      category,
-      percentage: (count / filteredData.length) * 100,
-      color: UTCI_COLORS[category] || '#cccccc'
-    })).sort((a, b) => {
-      // Sort by stress level (cold to hot)
-      const order = Object.keys(UTCI_COLORS);
-      return order.indexOf(a.category) - order.indexOf(b.category);
-    });
+    const validFiltered = filteredData.filter(d => Number.isFinite(d.utci) && d.utciCategory !== '');
+    const categoryCounts = d3.rollup(validFiltered, v => v.length, d => d.utciCategory);
+    const categoryPercentages = validFiltered.length
+      ? Array.from(categoryCounts)
+          .map(([category, count]) => ({
+            category,
+            percentage: (count / validFiltered.length) * 100,
+            color: UTCI_COLORS[category] || '#cccccc'
+          }))
+          .sort((a, b) => {
+            const order = Object.keys(UTCI_COLORS);
+            return order.indexOf(a.category) - order.indexOf(b.category);
+          })
+      : [];
 
     return {
-      avg: convertUtci(d3.mean(filteredData, d => d.utci) || 0),
-      min: convertUtci(d3.min(filteredData, d => d.utci) || 0),
-      max: convertUtci(d3.max(filteredData, d => d.utci) || 0),
-      total: convertUtci(d3.sum(filteredData, d => d.utci) || 0),
-      count: filteredData.length,
-      comfortRatio: d3.mean(filteredData, d => d.isComfortable) || 0,
+      avg: validFiltered.length ? convertUtciAbs(d3.mean(validFiltered, d => d.utci)!) : NaN,
+      min: validFiltered.length ? convertUtciAbs(d3.min(validFiltered, d => d.utci)!) : NaN,
+      max: validFiltered.length ? convertUtciAbs(d3.max(validFiltered, d => d.utci)!) : NaN,
+      count: validFiltered.length,
+      comfortRatio: validFiltered.length ? (d3.mean(validFiltered, d => d.isComfortable) ?? 0) : NaN,
       categoryPercentages
     };
   })();
@@ -1805,7 +2078,7 @@ export function UtciExplorer({
           ) : comparePane === 'secondary' ? (
             <>
               <div
-                className={comparePaneLabelClass(theme, 'baseline')}
+                className={comparePaneLabelClass(theme, 'comparison')}
               >
                 Comparison · {paneCity ?? '\u2014'}
               </div>
@@ -1938,15 +2211,23 @@ export function UtciExplorer({
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Average UTCI</div>
-            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.avg.toFixed(1)} {utciUnit}</div>
+            <div className={`text-lg font-semibold leading-tight tabular-nums ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.avg) ? `${stats.avg.toFixed(1)} ${utciUnit}` : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Comfort ratio</div>
-            <div className="text-base font-medium" style={{ color: OUTDOOR_COMFORT_GREEN_HEX }}>{(stats.comfortRatio * 100).toFixed(1)}%</div>
+            <div className="text-base font-medium" style={{ color: OUTDOOR_COMFORT_GREEN_HEX }}>
+              {Number.isFinite(stats.comfortRatio) ? `${(stats.comfortRatio * 100).toFixed(1)}%` : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Min / Max</div>
-            <div className={`text-xs font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{stats.min.toFixed(1)} / {stats.max.toFixed(1)} {utciUnit}</div>
+            <div className={`text-xs font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+              {Number.isFinite(stats.min) && Number.isFinite(stats.max)
+                ? `${stats.min.toFixed(1)} / ${stats.max.toFixed(1)} ${utciUnit}`
+                : '—'}
+            </div>
           </div>
           <div className={`rounded-xl px-3 py-2.5 ${theme === 'dark' ? 'bg-gray-700/50' : 'bg-gray-50'}`}>
             <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Samples</div>
@@ -1957,20 +2238,30 @@ export function UtciExplorer({
         <div className="space-y-2">
           <h4 className={`text-xs font-semibold uppercase tracking-wider ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Stress category breakdown</h4>
           <div className="space-y-1.5">
-            {stats.categoryPercentages.map(cat => (
-              <div key={cat.category} className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className={`capitalize ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>{cat.category}</span>
-                  <span className={`font-medium ${theme === 'dark' ? 'text-gray-200' : 'text-gray-900'}`}>{cat.percentage.toFixed(1)}%</span>
+            {stats.categoryPercentages.map(cat => {
+              const rangeLabel = formatUtciCategoryRange(cat.category, unitSystem);
+              return (
+                <div key={cat.category} className="space-y-1">
+                  <div className="flex items-baseline justify-between gap-2 text-xs">
+                    <span className="min-w-0">
+                      <span className={`capitalize ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>{cat.category}</span>
+                      {rangeLabel ? (
+                        <span className={`ml-1.5 tabular-nums ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                          ({rangeLabel})
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className={`shrink-0 font-medium tabular-nums ${theme === 'dark' ? 'text-gray-200' : 'text-gray-900'}`}>{cat.percentage.toFixed(1)}%</span>
+                  </div>
+                  <div className={`h-1.5 w-full rounded-full ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                    <div
+                      className="h-full rounded-full"
+                      style={{ backgroundColor: UTCI_COLORS[cat.category], width: `${cat.percentage}%` }}
+                    />
+                  </div>
                 </div>
-                <div className={`h-1.5 w-full rounded-full ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                  <div
-                    className="h-full rounded-full"
-                    style={{ backgroundColor: UTCI_COLORS[cat.category], width: `${cat.percentage}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </CardModal>

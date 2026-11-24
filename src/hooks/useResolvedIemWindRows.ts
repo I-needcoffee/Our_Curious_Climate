@@ -52,37 +52,58 @@ export function useResolvedIemWindRows(
   const [st, setSt] = useState<ResolvedIemWindState>(() => initial(epwRows));
 
   useEffect(() => {
-    if (skip) {
-      setSt(initial(epwRows));
-      return;
-    }
-
-    if (iem.source === 'epw') {
-      setSt(initial(epwRows));
+    if (skip || iem.source === 'epw') {
+      setSt(prev =>
+        prev.rows === epwRows &&
+        !prev.loadingIem &&
+        prev.iemFallbackNote === null &&
+        !prev.iemActive &&
+        prev.iemStationLine === null
+          ? prev
+          : initial(epwRows)
+      );
       return;
     }
 
     if (!metadata) {
-      setSt({
-        rows: epwRows,
-        loadingIem: false,
-        iemFallbackNote:
-          'This chart has no EPW location metadata, so an Iowa Environmental Mesonet station match cannot be run. Using wind from the weather file.',
-        iemActive: false,
-        iemStationLine: null,
-      });
+      const note =
+        'This chart has no EPW location metadata, so an Iowa Environmental Mesonet station match cannot be run. Using wind from the weather file.';
+      setSt(prev =>
+        prev.rows === epwRows &&
+        !prev.loadingIem &&
+        prev.iemFallbackNote === note &&
+        !prev.iemActive &&
+        prev.iemStationLine === null
+          ? prev
+          : {
+              rows: epwRows,
+              loadingIem: false,
+              iemFallbackNote: note,
+              iemActive: false,
+              iemStationLine: null,
+            }
+      );
       return;
     }
 
     const years = inclusiveYears(iem.iemYearStart, iem.iemYearEnd);
     if (years.length === 0) {
-      setSt({
-        rows: epwRows,
-        loadingIem: false,
-        iemFallbackNote: 'Choose at least one valid IEM year.',
-        iemActive: false,
-        iemStationLine: null,
-      });
+      const note = 'Choose at least one valid IEM year.';
+      setSt(prev =>
+        prev.rows === epwRows &&
+        !prev.loadingIem &&
+        prev.iemFallbackNote === note &&
+        !prev.iemActive &&
+        prev.iemStationLine === null
+          ? prev
+          : {
+              rows: epwRows,
+              loadingIem: false,
+              iemFallbackNote: note,
+              iemActive: false,
+              iemStationLine: null,
+            }
+      );
       return;
     }
 

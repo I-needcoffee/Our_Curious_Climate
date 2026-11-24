@@ -442,6 +442,11 @@ export function ComparisonModeLayout({
   };
 
   const iemGlobal = useWindIemGlobalPrefs();
+  const sameWindLocation =
+    Number.isFinite(baseline.metadata.lat) &&
+    Number.isFinite(compare.metadata.lat) &&
+    Math.abs(baseline.metadata.lat - compare.metadata.lat) < 0.05 &&
+    Math.abs(baseline.metadata.lng - compare.metadata.lng) < 0.05;
   const compareWindIem: CompareWindIemSharedControls = useMemo(
     () => ({
       source: iemGlobal.source,
@@ -461,6 +466,12 @@ export function ComparisonModeLayout({
       iemGlobal.setIemYearRange,
       iemGlobal.setIemStation,
     ]
+  );
+  // For different cities, clear `iemStation` on the secondary pane so it auto-resolves
+  // its own nearest IEM station instead of plotting baseline's station twice.
+  const compareWindIemSecondary: CompareWindIemSharedControls = useMemo(
+    () => (sameWindLocation ? compareWindIem : { ...compareWindIem, iemStation: null }),
+    [sameWindLocation, compareWindIem]
   );
 
   const [windAgg, setWindAgg] = useState<CompareWindSharedControls['aggregation']>('month');
@@ -484,6 +495,10 @@ export function ComparisonModeLayout({
     setShowSettings: setWindSettings,
     iem: compareWindIem,
   };
+  const windSharedSecondary: CompareWindSharedControls = {
+    ...windShared,
+    iem: compareWindIemSecondary,
+  };
 
   const [roseVar, setRoseVar] = useState(
     () => baseline.variables.find(v => v.id === 'windSpeed')?.id || baseline.variables[0]?.id || ''
@@ -502,6 +517,10 @@ export function ComparisonModeLayout({
     showSettings: roseSettings,
     setShowSettings: setRoseSettings,
     iem: compareWindIem,
+  };
+  const windRoseSharedSecondary: CompareWindRoseSharedControls = {
+    ...windRoseShared,
+    iem: compareWindIemSecondary,
   };
 
   const [sunAgg, setSunAgg] = useState<CompareSunpathSharedControls['aggregation']>('week');
@@ -574,10 +593,29 @@ export function ComparisonModeLayout({
     return Array.from({ length: bands }, (_, i) => fill(cMin + ((cMax - cMin) * (i + 0.5)) / bands));
   }, [gradients, roseGrad, rosePairLegend]);
 
-  const utciExtentC = useMemo(
-    () => utciGradientExtentFromRows(baseline.data),
-    [baseline.data]
-  );
+  const utciExtentC = useMemo(() => {
+    const baseSite =
+      Number.isFinite(baseline.metadata.lat) &&
+      Number.isFinite(baseline.metadata.lng) &&
+      Number.isFinite(baseline.metadata.timeZone)
+        ? { lat: baseline.metadata.lat, lng: baseline.metadata.lng, timeZone: baseline.metadata.timeZone }
+        : null;
+    const cmpSite =
+      Number.isFinite(compare.metadata.lat) &&
+      Number.isFinite(compare.metadata.lng) &&
+      Number.isFinite(compare.metadata.timeZone)
+        ? { lat: compare.metadata.lat, lng: compare.metadata.lng, timeZone: compare.metadata.timeZone }
+        : null;
+    const shared = {
+      includeSun: utciSun,
+      includeWind: utciWind,
+      radiantMode: utciRadiantMode,
+      ground: utciGround,
+    };
+    const bExt = utciGradientExtentFromRows(baseline.data, { ...shared, site: baseSite });
+    const cExt = utciGradientExtentFromRows(compare.data, { ...shared, site: cmpSite });
+    return { minC: Math.min(bExt.minC, cExt.minC), maxC: Math.max(bExt.maxC, cExt.maxC) };
+  }, [baseline.data, baseline.metadata, compare.data, compare.metadata, utciSun, utciWind, utciRadiantMode, utciGround]);
   const utciPairUnit = unitSystem === 'imperial' ? UNIT_F : UNIT_C;
   const utciPairGradMin = convertValue(utciExtentC.minC, UNIT_C, unitSystem);
   const utciPairGradMax = convertValue(utciExtentC.maxC, UNIT_C, unitSystem);
@@ -1024,7 +1062,7 @@ export function ComparisonModeLayout({
                   pairSuppressHeader: true,
                   pairModalHost: false,
                   pairSuppressFooterLegend: true,
-                  windShared,
+                  windShared: windSharedSecondary,
                 })}
               </div>
             </div>
@@ -1132,7 +1170,7 @@ export function ComparisonModeLayout({
                   pairSuppressHeader: true,
                   pairModalHost: false,
                   pairSuppressFooterLegend: true,
-                  windRoseShared,
+                  windRoseShared: windRoseSharedSecondary,
                 })}
               </div>
             </div>

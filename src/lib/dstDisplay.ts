@@ -36,12 +36,13 @@ function addOneHourSt(
   return { y: ny, m: nm, d: nd, h: nh };
 }
 
-/** 2nd Sunday in March, 1st Sunday in November (US/Canada 2007+), at 2:00 local *standard* time, as epoch ms. */
+/** 2nd Sunday in March (2:00 AM ST), 1st Sunday in November (1:00 AM ST = 2:00 AM DST), as epoch ms. */
 function dstTransitionUtc(
   year: number,
   month0: number,
   whichSunday: 1 | 2,
-  timeZoneStdHours: number
+  timeZoneStdHours: number,
+  localStdHour: number
 ): number {
   let firstSun = 0;
   for (let day = 1; day <= 7; day++) {
@@ -52,13 +53,15 @@ function dstTransitionUtc(
   }
   if (!firstSun) return NaN;
   const day = whichSunday === 1 ? firstSun : firstSun + 7;
-  return Date.UTC(year, month0, day, 2 - timeZoneStdHours, 0, 0, 0);
+  const tzMs = Number.isFinite(timeZoneStdHours) ? Math.round(timeZoneStdHours * 3_600_000) : 0;
+  return Date.UTC(year, month0, day, localStdHour, 0, 0, 0) - tzMs;
 }
 
 /** Whether `utcMs` (EPW `row.date` instant) is inside US/Canada-style DST, using the file’s offset as standard time. */
 export function isInNaStyleDst(utcMs: number, year: number, timeZoneStdHours: number): boolean {
-  const start = dstTransitionUtc(year, 2, 2, timeZoneStdHours);
-  const end = dstTransitionUtc(year, 9, 1, timeZoneStdHours);
+  // month0: 2 = March (2nd Sunday, 2:00 AM ST), 10 = November (1st Sunday, 1:00 AM ST = 2:00 AM DST)
+  const start = dstTransitionUtc(year, 2, 2, timeZoneStdHours, 2);
+  const end = dstTransitionUtc(year, 10, 1, timeZoneStdHours, 1);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
   return utcMs >= start && utcMs < end;
 }
@@ -82,7 +85,7 @@ export function epwHeaderDaylightSavingSummary(m: EPWMetadata): string {
   }
 }
 
-function adjustRow(row: EPWDataRow, m: EPWMetadata, apply: boolean): EPWDataRow {
+function adjustRow(row: EPWDataRow, m: EPWMetadata, apply: boolean, canonicalYear: number): EPWDataRow {
   if (!apply) return row;
   const tz = m.timeZone;
   const utc0 = row.date.getTime();
@@ -98,7 +101,9 @@ function adjustRow(row: EPWDataRow, m: EPWMetadata, apply: boolean): EPWDataRow 
   };
   const o = addOneHourSt(row.year, row.month, row.day, row.hour);
   const oneDay = 1000 * 60 * 60 * 24;
-  const dayOfYear = Math.floor((Date.UTC(o.y, o.m - 1, o.d) - Date.UTC(o.y, 0, 0)) / oneDay);
+  const dayOfYear = Math.floor(
+    (Date.UTC(canonicalYear, o.m - 1, o.d) - Date.UTC(canonicalYear, 0, 0)) / oneDay
+  );
 
   const next: EPWDataRow = {
     ...row,
@@ -114,13 +119,20 @@ function adjustRow(row: EPWDataRow, m: EPWMetadata, apply: boolean): EPWDataRow 
 }
 
 /**
- * When the user turns DST on, apply US-style summer +1h **display** fields for every file.
- * Non–North-American sites still use the same rule as an approximation when you enable the toggle.
+ * When the user turns DST on, apply US-style summer +1h **display** fields (2nd Sun Mar → 1st Sun Nov)
+ * for every loaded file, keeping the underlying measurement instant (`date`) and `solarStandardClock`
+ * intact so solar geometry stays aligned with the shifted civil-clock rows.
+ *
+ * Note: Most EnergyPlus/TMYx EPW headers carry `HOLIDAYS/DAYLIGHT SAVINGS,No,0,0,0` even for cities
+ * that observe DST (because TMY timestamps are stored on standard time), so we must not suppress
+ * the user's explicit DST display toggle based on `metadata.daylightSavings === 'no'`.
  */
 export function withDstDisplayRespectingToggle(f: ParsedEPW, userWantsDst: boolean): ParsedEPW {
   if (!userWantsDst) return f;
+  const hasFeb29 = f.data.some(r => r.month === 2 && r.day === 29);
+  const canonicalYear = hasFeb29 ? 2000 : 2001;
   return {
     ...f,
-    data: f.data.map(r => adjustRow(r, f.metadata, true)),
+    data: f.data.map(r => adjustRow(r, f.metadata, true, canonicalYear)),
   };
 }

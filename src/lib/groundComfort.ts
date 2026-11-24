@@ -274,11 +274,16 @@ function skyLongwaveWm2(row: EPWDataRow, taC: number, rhPct: number): number {
 
   const es = 0.6108 * Math.exp((17.27 * taC) / (taC + 237.3));
   const eHpa = Math.max(0.1, (rhPct / 100) * es * 10);
-  const emisSky = clamp(0.82 - 0.25 * 10 ** (-0.094 * eHpa), 0.4, 0.95);
-  return 0.97 * SIGMA * (taC + 273.15) ** 4 * emisSky;
+  // Ångström exponent expects vapor pressure in mmHg (1 hPa ≈ 0.75 mmHg).
+  // Return raw downwelling sky irradiance (W/m²) without body emissivity so callers
+  // multiplying by ground emissivity do not double-apply emissivity.
+  const emisSky = clamp(0.82 - 0.25 * 10 ** (-0.094 * 0.75 * eHpa), 0.4, 0.95);
+  return SIGMA * (taC + 273.15) ** 4 * emisSky;
 }
 
 function hourKey(row: EPWDataRow): string {
+  const c = row.solarStandardClock;
+  if (c) return `${c.month}-${c.day}-${c.hour}`;
   return `${row.month}-${row.day}-${row.hour}`;
 }
 
@@ -340,11 +345,19 @@ export function buildSurfaceTemperatureLookup(
 ): Map<string, number> {
   const map = new Map<string, number>();
   const ordered = rows.filter(row => Number.isFinite(row.dryBulbTemperature as number));
-  ordered.sort(
-    (a, b) =>
-      ((a.dayOfYear as number) - (b.dayOfYear as number)) ||
-      ((a.hour as number) - (b.hour as number))
-  );
+  ordered.sort((a, b) => {
+    const ca = a.solarStandardClock;
+    const cb = b.solarStandardClock;
+    const ma = ca?.month ?? (a.month as number);
+    const mb = cb?.month ?? (b.month as number);
+    if (ma !== mb) return ma - mb;
+    const da = ca?.day ?? (a.day as number);
+    const db = cb?.day ?? (b.day as number);
+    if (da !== db) return da - db;
+    const ha = ca?.hour ?? (a.hour as number);
+    const hb = cb?.hour ?? (b.hour as number);
+    return ha - hb;
+  });
   const ground = realizeGround(input);
   const heatCapacity = ground.heatCapacity ?? 0;
   const deepConductance = ground.deepConductance ?? 0;
@@ -529,8 +542,12 @@ export function groundMeanRadiantTemperatureC(opts: {
     altitude = sunAltitudeDeg(opts.site.lat, opts.site.lng, when);
   }
 
-  const diffuse = Number.isFinite(dhr) ? Math.max(0, dhr) : Math.max(0, ghr);
   const beamNormal = Number.isFinite(dni) ? Math.max(0, dni) : 0;
+  const sinAlt = altitude > 0 ? Math.sin((altitude * Math.PI) / 180) : 0;
+  // When DHR is missing, derive diffuse from GHR minus beam horizontal rather than using raw GHR (avoids double-counting beam).
+  const diffuse = Number.isFinite(dhr)
+    ? Math.max(0, dhr)
+    : Math.max(0, Math.max(0, ghr) - beamNormal * sinAlt);
   const reflectance = clamp(opts.ground.solarReflectance, 0, 1);
   const horizIr = skyLongwaveWm2(row, ta, rh);
   const sunlit = opts.personInSun;
@@ -538,7 +555,7 @@ export function groundMeanRadiantTemperatureC(opts: {
   const surfaceTemp = Number.isFinite(opts.surfaceTempC as number) ? (opts.surfaceTempC as number) : ta;
   let shortMrtDelta = 0;
   if (altitude >= 2) {
-    const globHoriz = diffuse + beamNormal * Math.sin((altitude * Math.PI) / 180);
+    const globHoriz = diffuse + beamNormal * sinAlt;
     const dirSolar = sunlit ? projectionFactorStanding(altitude) * beamNormal : 0;
     const diffSolar = 0.5 * FRACT_EFF_STANDING * diffuse;
     const refSolar = sunlit ? 0.5 * FRACT_EFF_STANDING * globHoriz * reflectance : 0;
@@ -582,33 +599,38 @@ export function stationMeanRadiantTemperatureC(opts: {
 
   const kglob = Math.max(0, ghr);
   const absorb = 0.7;
+  let sunlitRprim = 0;
+  if (altitude > 0 && kglob > 0) {
+    let raw = 0;
+    if (altitude <= 12) {
+      raw = 0.0014 * kglob * kglob + 0.476 * kglob - 3.8;
+    } else {
+      const kt = -0.0015 * altitude ** 3 + 0.1796 * altitude ** 2 + 9.6375 * altitude - 11.9;
+      const ratio = kt > 1 ? kglob / kt : 0;
+      if (ratio <= 0.8) raw = 0.2467 * kglob ** 0.9763;
+      else if (ratio <= 1.05) raw = 3.6922 * kglob ** 0.5842;
+      else if (ratio <= 1.2) raw = 43.426 * kglob ** 0.2326;
+      else raw = 8.9281 * kglob ** 0.4861;
+    }
+    sunlitRprim = Math.max(0, raw * absorb);
+  }
+
   let rprim = 0;
   if (opts.personInSun) {
-    if (altitude > 0 && kglob > 0) {
-      let raw = 0;
-      if (altitude <= 12) {
-        raw = 0.0014 * kglob * kglob + 0.476 * kglob - 3.8;
-      } else {
-        const kt = -0.0015 * altitude ** 3 + 0.1796 * altitude ** 2 + 9.6375 * altitude - 11.9;
-        const ratio = kt > 1 ? kglob / kt : 0;
-        if (ratio <= 0.8) raw = 0.2467 * kglob ** 0.9763;
-        else if (ratio <= 1.05) raw = 3.6922 * kglob ** 0.5842;
-        else if (ratio <= 1.2) raw = 43.426 * kglob ** 0.2326;
-        else raw = 8.9281 * kglob ** 0.4861;
-      }
-      rprim = Math.max(0, raw * absorb);
-    }
-  } else if (altitude > 0) {
+    rprim = sunlitRprim;
+  } else if (altitude > 0 && kglob > 0) {
+    // MENEX shaded-site SolAlt formula, bounded by actual sunlit SolGlob absorbed radiation
+    // so heavy overcast shade can never absorb more solar radiation than full sun.
     const raw = altitude <= 4 ? (1.642 + 0.254 * altitude) ** 2 : 0.9506 * altitude ** 1.039;
-    rprim = Math.max(0, raw * absorb);
+    rprim = Math.min(sunlitRprim, Math.max(0, raw * absorb));
   }
 
   const cover = row.totalSkyCover as number;
   const cloudPct = Number.isFinite(cover) && cover >= 0 && cover <= 10 ? cover * 10 : null;
   let tg = ta;
-  // Cloud cover is required for the published ground-temperature rule. A missing
-  // value stays at the air temperature rather than assuming a clear sky.
-  if (opts.personInSun && cloudPct != null && cloudPct < 80) {
+  // Apply daytime solar ground heating only when sun is up and irradiance is positive so
+  // toggling Sun vs Shade never alters nighttime ground temperatures.
+  if (opts.personInSun && altitude > 0 && kglob > 0 && cloudPct != null && cloudPct < 80) {
     if (ta > 0) tg = 1.25 * ta;
     else if (ta < 0) tg = 0.9 * ta;
   }
@@ -642,7 +664,7 @@ function solarAltitudeDegForRow(row: EPWDataRow, site: GroundSite | null): numbe
 }
 
 export const GROUND_METHOD_SUMMARY = [
-  'Station uses the procedure the UTCI authors published for ordinary weather-station files (Błażejczyk, BioKlima). It takes the file’s total sunlight, the height of the sun, cloud cover, air temperature, and humidity. Sunlight reflected from the ground is already inside that sunlight equation, so there is no reflectance setting and no material choice. When cloud cover is under 80% and the air is above freezing, the ground is estimated at 1.25 times the air temperature in degrees Celsius. At or above 80% cloud cover, or when the file has no cloud cover, the ground equals the air temperature. That cloud rule is also used at night.',
+  'Station uses the procedure the UTCI authors published for ordinary weather-station files (Błażejczyk, BioKlima). It takes the file’s total sunlight, the height of the sun, cloud cover, air temperature, and humidity. Sunlight reflected from the ground is already inside that sunlight equation, so there is no reflectance setting and no material choice. During sunlit daytime hours when cloud cover is under 80% and the air is above freezing, the ground is estimated at 1.25 times the air temperature in degrees Celsius. At night, at or above 80% cloud cover, or when the file has no cloud cover, the ground equals the air temperature.',
   'Reflectance uses ASHRAE-55. The only ground property in that method is solar reflectance: how much sunlight bounces off the ground onto a person. A darker ground bounces less sun, so this step alone can make a dark surface look more comfortable. ASHRAE-55 does not calculate how hot the surface gets. The ground temperature equals the air temperature unless the surface-temperature estimate is on.',
   'Shade on Station uses the same authors’ shaded-site equation, which depends on sun height, and holds the ground at the air temperature. Shade on Reflectance turns off direct sun and ground-reflected sun and leaves diffuse light from the sky.',
   'The surface-temperature estimate is separate from both the station procedure and ASHRAE-55. The layer stores heat, conducts some of it downward toward air temperature, and can evaporate. Irrigation at 100% applies Priestley–Taylor evaporation for a well-watered surface. Values between 0% and 100% are a straight mix, not a measured watering rate. Layer thickness, heat capacity, and conductivity are modeling choices. The underside of the layer is held at the air temperature, so evening warmth is weaker than a pavement whose base has also heated.',
